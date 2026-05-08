@@ -163,7 +163,7 @@ Eight queries in `lib/queries.ts`. All take `userId` as the first parameter; nev
 |---|---|---|---|---|
 | `/api/auth/[...nextauth]` | GET, POST | self-managed | Auth.js itself | Auth.js's own callback handler. Don't add anything here. |
 | `/api/healthz` | GET | none | Docker `HEALTHCHECK` | Returns 200 + a tiny JSON body when the app is alive and DB-reachable. Public-facing healthcheck would be lower-trust; this one runs `SELECT 1`. |
-| `/api/metrics` | GET | Bearer token | Prometheus scraper | Prometheus exposition format. Returns 503 if `METRICS_TOKEN` env is unset (fail-closed). Caddy 404s it from the public internet — scrape over the internal Docker network. |
+| `/api/metrics` | GET | Bearer token | Prometheus scraper | Prometheus exposition format. Returns 503 if `METRICS_TOKEN` env is unset (fail-closed). The reference Caddy snippet 404s it at the public edge — scrape over the internal Docker network or from a same-host scraper. |
 | `/api/log/client-error` | POST | none | Browser error boundaries | Sink for client-side crashes (route + global error.tsx). Rate-limited per IP. Logs at error level via Pino. |
 
 There is **no `POST /api/sets`, no `GET /api/exercises`**, etc. Mutations are server actions; reads are server-component queries. If you find yourself wanting an application-data HTTP route, ask why first — almost always the answer is a server action.

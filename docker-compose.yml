@@ -1,8 +1,9 @@
-# Production stack: Postgres + Next.js app + Caddy reverse proxy.
+# Stack: Postgres + Next.js app + nightly backup. The app publishes port 3000
+# to the host; put your own reverse proxy (Caddy, nginx, Traefik, …) in front
+# for TLS. See docs/caddy-snippet.example for a Caddy config you can paste
+# into an existing site.
 #
-# All secrets live in .env (sibling to this file). Caddy handles HTTPS
-# automatically via Let's Encrypt — set DOMAIN to a real domain pointed at
-# this host and ports 80/443 must be reachable from the public internet.
+# All secrets live in .env (sibling to this file).
 #
 # Log rotation: every service uses the json-file driver with size + count
 # caps. Each service tops out at ~50MB on disk (5 × 10MB rotated, gzipped).
@@ -45,13 +46,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      # Published to all interfaces so a reverse proxy on the host (or another
+      # device on your LAN) can reach the app. If your reverse proxy lives on
+      # the same host and you don't need LAN access, narrow this to
+      # '127.0.0.1:3000:3000'.
+      - '3000:3000'
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-workout}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-workout}
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_URL: ${AUTH_URL}
-      # We're always behind Caddy in this deployment, so trusting forwarded
-      # host headers is correct. If you ever expose the app container directly,
-      # remove this.
+      # The app sits behind a reverse proxy in real deployments — trusting
+      # forwarded host headers is correct there. It's also harmless when you
+      # hit the app directly on localhost (no forwarded headers to read).
       AUTH_TRUST_HOST: 'true'
       AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID}
       AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET}
@@ -71,29 +78,6 @@ services:
       # First-boot grace: migrations run during entrypoint, then the server
       # has to compile. 30s is comfortable on a small VM.
       start_period: 30s
-    networks:
-      - internal
-    logging: *default-logging
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-      - '443:443/udp' # HTTP/3
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    environment:
-      DOMAIN: ${DOMAIN}
-    depends_on:
-      # Wait for the app to actually be healthy before letting traffic in,
-      # not just for the container to exist. Avoids the "deploy → 502 for 30s"
-      # window that confuses uptime monitors.
-      app:
-        condition: service_healthy
     networks:
       - internal
     logging: *default-logging
@@ -132,5 +116,3 @@ networks:
 
 volumes:
   postgres-data:
-  caddy-data:
-  caddy-config:

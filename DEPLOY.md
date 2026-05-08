@@ -5,10 +5,12 @@ End-to-end deployment of the workout tracker. Primary target: an Ubuntu LXC on P
 ## What you'll end up with
 
 - Single Ubuntu container running Docker
-- Three containers managed by Docker Compose: Postgres, the Next.js app, Caddy
-- HTTPS via Let's Encrypt, automatically renewed
+- Three containers managed by Docker Compose: Postgres, the Next.js app, a backup helper
+- HTTPS handled by your own reverse proxy (Caddy / nginx / Traefik) sitting in front of port 3000
 - Auto-applied database migrations on every deploy
 - Reachable at `https://your-domain.com`
+
+This stack assumes you already run a reverse proxy on the host (or another box) that terminates TLS and forwards to the app. If you don't, the app still runs — just on plain HTTP at port 3000 — but you don't want that on the public internet.
 
 ## Prerequisites
 
@@ -60,13 +62,18 @@ mkdir -p /opt/workout && cd /opt/workout
 # Or copy the project files in via scp/rsync from your dev machine.
 ```
 
-After this step `/opt/workout` should contain the project files (Dockerfile, docker-compose.yml, Caddyfile, the source tree, etc).
+After this step `/opt/workout` should contain the project files (Dockerfile, docker-compose.yml, the source tree, etc).
 
-## Part 4 — DNS + port forwarding
+## Part 4 — DNS + port forwarding + reverse proxy
 
 1. In your DNS provider, create an `A` record pointing `workout.example.com` (or whatever domain you picked) to your home's public IP.
-2. On your router, forward ports `80` and `443` to the LXC's IP. Both TCP. (Port 443 also benefits from UDP forwarding for HTTP/3, but it's optional.)
+2. On your router, forward ports `80` and `443` to whichever host runs your reverse proxy. Both TCP. (Port 443 also benefits from UDP forwarding for HTTP/3, but it's optional.)
 3. Wait a few minutes for DNS propagation. Verify with `dig workout.example.com` from anywhere — should resolve to your public IP.
+4. Add a vhost to your reverse proxy that forwards to the app. The app container publishes port 3000. If your reverse proxy is on the same host, that's `localhost:3000`; if it's on a different host, that's `<docker-host-ip>:3000`.
+
+[`docs/caddy-snippet.example`](./docs/caddy-snippet.example) has a paste-ready Caddy block — `reverse_proxy localhost:3000`, sensible security headers, cache directives for `/_next/static/*`, and a 404 on `/api/metrics` so the scrape endpoint isn't reachable from the internet. Adapt it to nginx/Traefik if that's what you run.
+
+> **Same-host hardening:** if your reverse proxy is on the same machine as Docker, narrow the published port in `docker-compose.yml` from `'3000:3000'` to `'127.0.0.1:3000:3000'`. The app then only accepts connections from the loopback interface — only your reverse proxy can reach it. The default (all interfaces) is fine for local validation in WSL or for a LAN-only deployment, but tighter is better on a host with a public IP.
 
 ## Part 5 — Get auth credentials
 
@@ -118,7 +125,6 @@ Compose-deployment only (used by `docker-compose.yml`):
 
 | Variable | Where to get it | Sensitive? |
 |---|---|---|
-| `DOMAIN` | Bare domain (no protocol), e.g. `workout.example.com`. Caddy uses this to obtain the TLS cert. | No |
 | `POSTGRES_PASSWORD` | `openssl rand -base64 24` (or use generate-secrets.sh) | **Yes** |
 | `POSTGRES_USER` | Defaults to `workout`. Override only if you have a reason. | No |
 | `POSTGRES_DB` | Defaults to `workout`. Override only if you have a reason. | No |
@@ -170,11 +176,11 @@ cd /opt/workout
 docker compose up -d --build
 ```
 
-First build takes a few minutes — Docker pulls Node, Postgres, Caddy, and builds the Next.js production bundle. After that:
+First build takes a few minutes — Docker pulls Node and Postgres and builds the Next.js production bundle. After that:
 
 - The `app` container's entrypoint runs `prisma migrate deploy` automatically — schema is created on first boot.
-- Caddy provisions a Let's Encrypt cert. You'll see this in the logs (`docker compose logs caddy`). Takes ~30 seconds the first time.
 - Postgres comes up with an empty `workout` database.
+- The app listens on port 3000. Your reverse proxy (Part 4) handles TLS and forwards to it.
 
 **Seed the built-in exercises (one-time):**
 
@@ -187,17 +193,18 @@ Use `exec` against the already-running app container, not `run` — the entrypoi
 ## Part 8 — Verify
 
 ```bash
-# All three containers should be up
+# All three containers should be up: db, app, backup
 docker compose ps
 
 # App logs — look for "Ready" / "Listening on..."
 docker compose logs -f app
 
-# Caddy logs — look for cert provisioning success
-docker compose logs caddy
+# From the host, app should answer healthz directly:
+curl -s http://localhost:3000/api/healthz
+# expect: {"status":"ok","durationMs":...}
 ```
 
-Then in a browser: `https://workout.example.com`. You should be redirected to `/signin`. Sign in with Google or send yourself a magic link.
+Then in a browser: `https://workout.example.com` (via your reverse proxy) or `http://localhost:3000` (direct). You should be redirected to `/signin`. Sign in with Google or send yourself a magic link.
 
 ## Day-to-day operations
 
@@ -327,7 +334,7 @@ ls /var/backups/workout/
 `pg_dump --format=plain --no-owner --no-privileges` — every table, index, sequence, and row, as plain SQL. Portable across Postgres environments (the `--no-owner` flag means restore works against a different DB role). You can `zcat backup.sql.gz | head` to read the first lines if you want to verify it looks sensible.
 
 What's NOT in a backup:
-- Caddy TLS certificates (in the `caddy-data` volume) — Caddy re-obtains them automatically on restore
+- Reverse proxy state (TLS certs etc.) — lives outside this stack now
 - App container state — there is none worth preserving
 - Uploaded files — there are no file uploads in this app
 
@@ -335,9 +342,9 @@ So the database backup is everything.
 
 ## Troubleshooting
 
-**"Caddy can't get a cert"** — DNS hasn't propagated, or ports 80/443 aren't reaching the LXC. Test from the public internet: `curl -I http://workout.example.com` should reach Caddy.
+**"502 / connection refused via reverse proxy"** — proxy can't reach the app. Check the app is listening on the host: `curl -s http://localhost:3000/api/healthz` from the docker host. If that works, your proxy's upstream address is wrong (cross-host? wrong port? bound to `127.0.0.1` but proxy is on a different host?).
 
-**"OAuthCallbackError: redirect_uri_mismatch"** — the URL in Google Cloud Console doesn't exactly match `${AUTH_URL}/api/auth/callback/google`. Common cause: trailing slash, or http vs https mismatch.
+**"OAuthCallbackError: redirect_uri_mismatch"** — the URL in Google Cloud Console doesn't exactly match `${AUTH_URL}/api/auth/callback/google`. Common causes: trailing slash, http vs https mismatch, or `AUTH_URL` set to the bare port (e.g. `http://localhost:3000`) while you're testing through the reverse proxy on `https://workout.example.com`.
 
 **"Magic links never arrive"** — Resend domain isn't fully verified, or `AUTH_EMAIL_FROM` is using a different domain than you verified. Check Resend's dashboard for the email's status.
 
@@ -373,11 +380,7 @@ Or all slow actions:
 docker compose logs app | jq -c 'select(.msg == "action.slow")'
 ```
 
-Caddy's access logs (also JSON, on stdout) live in the `caddy` container:
-
-```bash
-docker compose logs caddy | jq -c '. | {ts: .ts, status: .status, uri: .request.uri, dur_ms: (.duration * 1000 | floor)}'
-```
+Access logs come from your reverse proxy, not from this stack. The Caddy snippet at [`docs/caddy-snippet.example`](./docs/caddy-snippet.example) emits JSON access logs to stdout — pipe through `jq` the same way.
 
 **Log level:** Set `LOG_LEVEL` in `.env` to `debug` to also see every action's completion timing (including fast ones) and per-query timings. Default `info` is appropriate for prod.
 
@@ -391,7 +394,7 @@ echo "METRICS_TOKEN=$METRICS_TOKEN" >> .env
 docker compose up -d  # pick up the env change
 ```
 
-Caddy is configured to **404 the public-facing path**, so the endpoint is only reachable from inside the Docker network. To scrape it, run your scraper in the same compose network. Example: a Prometheus container in `docker-compose.yml`:
+The Caddy snippet 404s `/api/metrics` so it isn't reachable from the public internet — do the same in whatever reverse proxy you run. To scrape it, either run your scraper inside the same compose network (it can reach `app:3000/api/metrics` directly) or hit the host port (`http://localhost:3000/api/metrics`) from a same-host scraper. Example: a Prometheus container in `docker-compose.yml`:
 
 ```yaml
 prometheus:
@@ -460,7 +463,7 @@ sum by (action) (rate(workout_tracker_actions_total{status="error"}[5m]))
 
 This endpoint backs:
 - The Docker `HEALTHCHECK` on the app container (`docker compose ps` shows the status)
-- Caddy's `depends_on: app: condition: service_healthy` — so Caddy waits for the app to be ready before accepting traffic, avoiding the "502 for 30s after deploy" window
+- Whatever uptime monitoring or reverse-proxy active health check you wire up
 
 Hit it manually:
 

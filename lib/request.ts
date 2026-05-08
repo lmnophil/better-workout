@@ -1,7 +1,7 @@
 // Request helpers — extract client info from headers in server actions.
 //
-// Behind Caddy (or any reverse proxy with sane defaults), X-Forwarded-For
-// contains a comma-separated list of IPs, with the original client first.
+// Behind a reverse proxy with sane defaults, X-Forwarded-For contains a
+// comma-separated list of IPs, with the original client first.
 
 import { headers } from 'next/headers';
 
@@ -10,8 +10,8 @@ import { headers } from 'next/headers';
  * callers should treat "unknown" as a rate-limit key like any other.
  *
  * SECURITY NOTE: only trust X-Forwarded-For when running behind a reverse
- * proxy you control (the case here, behind Caddy). On a directly-exposed
- * server, this header is spoofable.
+ * proxy you control (the case here). On a directly-exposed server, this
+ * header is spoofable.
  */
 export async function getClientIp(): Promise<string> {
   const h = await headers();

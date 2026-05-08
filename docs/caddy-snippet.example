@@ -1,19 +1,23 @@
-# Caddy config for the workout tracker.
-# Auto-HTTPS via Let's Encrypt — just point DNS at this host and run.
+# Reference Caddy config for putting an existing Caddy in front of the
+# workout tracker. The app container publishes port 3000 on the host;
+# Caddy proxies to it.
+#
+# This file is documentation, not loaded by anything. Copy what you need
+# into your real Caddyfile, replace `workout.example.com` with your domain,
+# and `localhost:3000` with whatever the host:port is from Caddy's vantage
+# point (same host → localhost:3000; different host → that host's IP:3000).
 
-{$DOMAIN} {
+workout.example.com {
     encode gzip zstd
 
     # Block direct internet access to the metrics endpoint. The scraper
-    # (Prometheus, etc.) should reach the app on the internal Docker network
-    # at app:3000/api/metrics instead — that's how DEPLOY.md describes it.
-    # If you do want the endpoint reachable externally, swap "respond ... 404"
-    # for the proxy directive; the METRICS_TOKEN check still protects it.
+    # (Prometheus, etc.) should reach the app on the Docker network at
+    # app:3000/api/metrics from inside the compose project, not via Caddy.
     handle /api/metrics {
         respond "Not Found" 404
     }
 
-    # Service worker needs the right MIME type and shouldn't be cached longer than needed
+    # Service worker needs the right MIME type and shouldn't be cached
     @sw path /sw.js
     header @sw {
         Cache-Control "no-cache"
@@ -32,21 +36,15 @@
         X-Frame-Options "DENY"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        # Remove the default "Server: Caddy" header
         -Server
     }
 
-    reverse_proxy app:3000 {
-        # Caddy adds these by default for reverse_proxy, but being explicit
-        # keeps it discoverable. Used by the rate limiter to identify clients.
+    reverse_proxy localhost:3000 {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
 
-    # JSON-formatted access logs to stdout. Each request becomes a JSON line
-    # — Docker captures them, and they're easy to parse with jq or pipe into
-    # Loki / OpenSearch / etc.
     log {
         output stdout
         format json
@@ -54,8 +52,8 @@
     }
 
     # Skip access logs for static asset noise so real traffic isn't drowned
-    # out. App-level logs (server actions, errors) come from the app container,
-    # not Caddy.
+    # out. App-level logs (server actions, errors) come from the app
+    # container, not Caddy.
     @noisy path /_next/static/* /icons/* /favicon.ico /sw.js /manifest.webmanifest /api/healthz
     log_skip @noisy
 }

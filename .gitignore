@@ -39,6 +39,11 @@ prisma/migrations/dev.db*
 prisma/generated/
 prisma/seed.js
 
+# Local backup target. Production sets BACKUP_HOST_DIR to /var/backups/...;
+# local dev points it at ./backups so the workflow in .env.example
+# (`mkdir -p backups`) doesn't dump real DB contents into git history.
+backups/
+
 # Serwist / PWA
 public/sw.js
 public/sw.js.map

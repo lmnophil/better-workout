@@ -23,7 +23,7 @@ The app is deliberately neutral about *how* you train — no prescribed program,
 - YouTube demo links on exercises (manually populated; built-ins ship without, customs can include them)
 - PWA: installable, offline-friendly
 - Auth: Google OAuth + Resend magic-link emails, 1-year session lifetime
-- Self-hosted: single-command deploy via Docker Compose with Caddy auto-HTTPS
+- Self-hosted: Docker Compose stack (Postgres + app + nightly backup) you put behind your own reverse proxy
 
 ## Stack
 
@@ -33,7 +33,7 @@ The app is deliberately neutral about *how* you train — no prescribed program,
 - **Tailwind 3** + custom design tokens (warm dark theme)
 - **Serwist** for PWA / offline support
 - **Pino** structured logging, **prom-client** Prometheus metrics
-- **Docker Compose** + **Caddy** for deployment
+- **Docker Compose** for deployment (bring your own reverse proxy for TLS)
 
 ## System architecture
 
@@ -81,7 +81,7 @@ workout-tracker/
 ├── instrumentation.ts           Next.js startup hook (env validation)
 ├── docker-compose.yml           The deployment
 ├── Dockerfile                   Multi-stage build
-└── Caddyfile                    Reverse proxy + auto HTTPS
+└── docs/caddy-snippet.example   Reference Caddy config for an external reverse proxy
 ```
 
 ## Local development

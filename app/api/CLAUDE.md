@@ -56,11 +56,11 @@ If your route does require auth, call `auth()` and check `session?.user?.id`. Do
 
 Note that authenticated `/api/*` endpoints still need to be in the middleware matcher's *included* set (i.e. NOT in the exclusion list) so middleware redirects unauthenticated users. If you exclude them from middleware and try to enforce auth in the route handler, you've duplicated machinery.
 
-## Caddy: outside vs inside the network
+## Reverse proxy: outside vs inside the network
 
-Caddy is configured to **404 `/api/metrics`** at the public edge. Internal Docker network access still works because compose puts containers on the same network and the scraper hits `app:3000/api/metrics` directly, bypassing Caddy.
+The app publishes port 3000 on the docker host; an operator-supplied reverse proxy (Caddy / nginx / Traefik) sits in front and handles TLS. The reference Caddy config in `docs/caddy-snippet.example` **404s `/api/metrics`** at the public edge, so the scrape endpoint isn't reachable from the internet. A Prometheus container running inside the same compose network can still reach `app:3000/api/metrics` directly, bypassing the proxy.
 
-If you add another endpoint that should only be reachable from inside the Docker network, mirror that pattern in `Caddyfile`:
+If you add another endpoint that should only be reachable from inside the Docker network, mirror that pattern in `docs/caddy-snippet.example` (and remind operators running other reverse proxies to do the equivalent there):
 
 ```
 handle /api/your-internal-endpoint {
@@ -78,7 +78,7 @@ Default to leaving routes publicly reachable unless there's a clear reason not t
 
 ## Things you might want to do that would be wrong
 
-- **Wrapping these routes in `withLogging()`.** That's for server actions. Routes have their own observability story (Caddy access logs + per-route logger.error calls when something goes wrong). Don't double-instrument.
+- **Wrapping these routes in `withLogging()`.** That's for server actions. Routes have their own observability story (reverse-proxy access logs + per-route logger.error calls when something goes wrong). Don't double-instrument.
 - **Adding a "POST /api/sets" or similar.** Mutations should be server actions, not HTTP routes. Server actions get the entire `lib/actions.ts` machinery for free (auth check, Zod validation, ownership checks, metric instrumentation, error categorization).
 - **Putting business logic in routes.** Routes are thin: parse, validate, call a function in `lib/`, return. Anything more belongs in `lib/`.
 - **Forgetting to update the middleware matcher when adding a public endpoint.** Worth saying twice.

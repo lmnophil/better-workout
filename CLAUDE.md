@@ -37,7 +37,7 @@ If a feature request feels like it's pulling toward "tell the user what to do," 
 - **Tailwind 3** + custom design tokens. Warm dark theme, Fraunces / Bricolage Grotesque / JetBrains Mono via `next/font/google` (self-hosted at build time, no runtime CDN call).
 - **Pino** for structured JSON logging. **prom-client** for Prometheus metrics.
 - **Serwist** for PWA / offline support.
-- **Docker Compose** + **Caddy** for self-hosted deployment. Backup service runs alongside.
+- **Docker Compose** for self-hosted deployment: Postgres + app + a nightly `pg_dump` backup helper. The app publishes port 3000; TLS is the operator's reverse proxy (Caddy / nginx / Traefik on the host), not bundled. `docs/caddy-snippet.example` has a paste-ready Caddy block.
 
 Not used (deliberately):
 - No ORM other than Prisma. No raw SQL except `SELECT 1` in the healthcheck.
@@ -93,8 +93,8 @@ docs/                      Decisions log, roadmap
 instrumentation.ts         Next.js startup hook — calls validateEnv()
 middleware.ts              Edge middleware — auth gate + redirects
 auth.ts, auth.config.ts    Auth.js config (split for Edge compatibility)
-docker-compose.yml         The deployment
-Caddyfile                  Reverse proxy + auto HTTPS
+docker-compose.yml         The deployment (publishes app:3000 to host)
+docs/caddy-snippet.example Reference Caddy config for an external reverse proxy
 Dockerfile                 Multi-stage build
 DEPLOY.md                  Operator-facing deploy guide
 README.md                  User-facing project intro
