@@ -229,6 +229,112 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['balance'],
     prescription: '1min per side, 3 rounds',
   },
+
+  // ============ COMMON STRENGTH BARBELL ============
+  // Mainstream gym lifts. Added on top of the original program so the starter
+  // templates (Push / Pull / Upper / Lower / Full body) have real content to
+  // pull from. Prescriptions are middle-of-the-road defaults, not gospel.
+  {
+    name: 'Back squat',
+    module: 'Strength Barbell',
+    primaryMuscles: ['quads', 'glutes'],
+    secondaryMuscles: ['core', 'lower back'],
+    prescription: '3–5×5, brace, full depth',
+  },
+  {
+    name: 'Conventional deadlift',
+    module: 'Strength Barbell',
+    primaryMuscles: ['hamstrings', 'glutes', 'back'],
+    secondaryMuscles: ['lower back', 'core'],
+    prescription: '3×3–5, hips and shoulders rise together',
+  },
+  {
+    name: 'Bench press',
+    module: 'Strength Barbell',
+    primaryMuscles: ['chest'],
+    secondaryMuscles: ['shoulders', 'triceps'],
+    prescription: '3–5×5–8, scaps tucked, controlled descent',
+  },
+  {
+    name: 'Overhead press',
+    module: 'Strength Barbell',
+    primaryMuscles: ['shoulders'],
+    secondaryMuscles: ['triceps', 'core'],
+    prescription: '3–4×5–8, ribs down, glutes squeezed',
+  },
+  {
+    name: 'Barbell row',
+    module: 'Strength Barbell',
+    primaryMuscles: ['back'],
+    secondaryMuscles: ['biceps', 'rear delts'],
+    prescription: '3–4×6–10, torso ~45°, pull to lower ribs',
+  },
+
+  // ============ COMMON STRENGTH ACCESSORY ============
+  {
+    name: 'Pull-ups',
+    module: 'Strength Accessory',
+    primaryMuscles: ['back'],
+    secondaryMuscles: ['biceps'],
+    prescription: '3–4×AMRAP or weighted 5–8',
+  },
+  {
+    name: 'Lat pulldown',
+    module: 'Strength Accessory',
+    primaryMuscles: ['back'],
+    secondaryMuscles: ['biceps'],
+    prescription: '3–4×8–12, full stretch at top',
+  },
+  {
+    name: 'Incline dumbbell press',
+    module: 'Strength Accessory',
+    primaryMuscles: ['chest'],
+    secondaryMuscles: ['shoulders', 'triceps'],
+    prescription: '3–4×8–12',
+  },
+  {
+    name: 'Push-ups',
+    module: 'Strength Accessory',
+    primaryMuscles: ['chest'],
+    secondaryMuscles: ['triceps', 'shoulders', 'core'],
+    prescription: '3×AMRAP, body straight',
+  },
+  {
+    name: 'Lateral raises',
+    module: 'Strength Accessory',
+    primaryMuscles: ['shoulders'],
+    prescription: '3–4×10–15, light, controlled',
+  },
+  {
+    name: 'Bicep curl',
+    module: 'Strength Accessory',
+    primaryMuscles: ['biceps'],
+    prescription: '3×8–12',
+  },
+  {
+    name: 'Hammer curl',
+    module: 'Strength Accessory',
+    primaryMuscles: ['biceps'],
+    prescription: '3×10–12, neutral grip',
+  },
+  {
+    name: 'Tricep pushdown',
+    module: 'Strength Accessory',
+    primaryMuscles: ['triceps'],
+    prescription: '3×10–15',
+  },
+  {
+    name: 'Leg curl',
+    module: 'Strength Accessory',
+    primaryMuscles: ['hamstrings'],
+    prescription: '3×10–12',
+  },
+  {
+    name: 'Plank',
+    module: 'Strength Accessory',
+    primaryMuscles: ['core'],
+    prescription: '3×30–60s, ribs down, glutes engaged',
+  },
 ];
 
 // ================================================================
@@ -269,4 +375,90 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
   { id: 'hip mobility', label: 'Hip mobility', category: 'mobility' },
   { id: 'ankle mobility', label: 'Ankle mobility', category: 'mobility' },
   { id: 'hip flexors', label: 'Hip flexors', category: 'mobility' },
+];
+
+// ================================================================
+// STARTER TEMPLATES — built-in workout templates seeded for every user
+// ================================================================
+//
+// These are global (WorkoutTemplate.userId = null, isBuiltin = true). Users
+// see them in their list alongside their own templates and can hide any they
+// don't want via UserHiddenTemplate (settings page → Hidden default templates).
+// They can't delete them.
+//
+// Each entry references SEED_EXERCISES by name. The seed reconciles the
+// exercise list on every run — if a name changes here without a corresponding
+// rename in SEED_EXERCISES, that exercise is silently skipped.
+//
+// Names are intentionally neutral (Upper body, Lower body, Push, Pull, Full
+// body) — these are starting points, not prescriptions. The user's own
+// templates live alongside them and should feel like the same kind of object.
+
+export type StarterTemplate = {
+  name: string;
+  description: string;
+  // Display order matches array order. Each name must match a SEED_EXERCISES.name.
+  exerciseNames: string[];
+};
+
+export const STARTER_TEMPLATES: StarterTemplate[] = [
+  {
+    name: 'Upper body',
+    description: 'A balanced push + pull session for upper body.',
+    exerciseNames: [
+      'Bench press',
+      'Barbell row',
+      'Overhead press',
+      'Pull-ups',
+      'Bicep curl',
+      'Tricep pushdown',
+    ],
+  },
+  {
+    name: 'Lower body',
+    description: 'Squat, hinge, and accessory work for legs and glutes.',
+    exerciseNames: [
+      'Back squat',
+      'Conventional deadlift',
+      'Bulgarian squat (seated step away)',
+      'Leg curl',
+      'Banded glute bridges with abduction',
+    ],
+  },
+  {
+    name: 'Push',
+    description: 'Chest, shoulders, and triceps.',
+    exerciseNames: [
+      'Bench press',
+      'Overhead press',
+      'Incline dumbbell press',
+      'Lateral raises',
+      'Tricep pushdown',
+      'Push-ups',
+    ],
+  },
+  {
+    name: 'Pull',
+    description: 'Back, biceps, and rear delts.',
+    exerciseNames: [
+      'Pull-ups',
+      'Barbell row',
+      'Lat pulldown',
+      'Bicep curl',
+      'Hammer curl',
+      'Banded face pulls',
+    ],
+  },
+  {
+    name: 'Full body',
+    description: 'One movement from each major pattern.',
+    exerciseNames: [
+      'Conventional deadlift',
+      'Bench press',
+      'Pull-ups',
+      'Back squat',
+      'Overhead press',
+      'Plank',
+    ],
+  },
 ];

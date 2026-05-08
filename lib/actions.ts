@@ -65,42 +65,71 @@ async function getOrCreateActiveSession(userId: string) {
 // SESSION ACTIONS
 // ============================================================
 
-const AddExerciseSchema = z.object({ exerciseId: z.string().min(1) });
+const AddExercisesSchema = z.object({
+  exerciseIds: z.array(z.string().min(1)).min(1).max(50),
+});
 
-export const addExerciseToActiveSession = withLogging('addExerciseToActiveSession', async (input: z.infer<typeof AddExerciseSchema>) => {
+/**
+ * Add one or more exercises to the user's active session in a single
+ * transaction. Used by the multi-select picker. Skips any IDs that are
+ * already in the session (no-op for the duplicate subset) and preserves
+ * caller-provided order for new additions. Creates the session lazily if
+ * none exists.
+ */
+export const addExercisesToActiveSession = withLogging('addExercisesToActiveSession', async (
+  input: z.infer<typeof AddExercisesSchema>,
+) => {
   const userId = await requireUser();
-  const { exerciseId } = AddExerciseSchema.parse(input);
+  const { exerciseIds } = AddExercisesSchema.parse(input);
 
-  await requireAvailableExercise(userId, exerciseId);
+  // Verify access for every exercise up front. If any fail, none are added.
+  // Fetching them all in one query rather than N round-trips.
+  const accessible = await db.exercise.findMany({
+    where: {
+      id: { in: exerciseIds },
+      OR: [{ ownerId: null }, { ownerId: userId }],
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  const accessibleIds = new Set(accessible.map((e) => e.id));
+  for (const id of exerciseIds) {
+    if (!accessibleIds.has(id)) {
+      throw new Error('Exercise not available');
+    }
+  }
 
   const session = await getOrCreateActiveSession(userId);
 
-  // Don't add duplicate exercise to the same session — if it's already there, no-op
-  const existingSet = await db.setLog.findFirst({
-    where: { sessionId: session.id, exerciseId },
+  // Skip any exercises already in the session — preserve no-op semantics from
+  // the single-add. Stable order across the not-yet-added subset.
+  const existing = await db.setLog.findMany({
+    where: { sessionId: session.id, exerciseId: { in: exerciseIds } },
+    select: { exerciseId: true },
+    distinct: ['exerciseId'],
   });
-  if (existingSet) {
+  const alreadyIn = new Set(existing.map((s) => s.exerciseId));
+  const toAdd = exerciseIds.filter((id) => !alreadyIn.has(id));
+  if (toAdd.length === 0) {
     revalidatePath('/');
     return;
   }
 
-  // Place the new exercise at the end of the session's order
   const maxPos = await db.setLog.aggregate({
     where: { sessionId: session.id },
     _max: { position: true },
   });
-  const nextPosition = (maxPos._max.position ?? -1) + 1;
+  const startPosition = (maxPos._max.position ?? -1) + 1;
 
-  // Add an empty first set
-  await db.setLog.create({
-    data: {
+  await db.setLog.createMany({
+    data: toAdd.map((exId, idx) => ({
       sessionId: session.id,
-      exerciseId,
+      exerciseId: exId,
       setNumber: 1,
-      position: nextPosition,
+      position: startPosition + idx,
       reps: null,
       weight: null,
-    },
+    })),
   });
 
   revalidatePath('/');
@@ -143,7 +172,7 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
   const { exerciseId } = AddSetSchema.parse(input);
 
   // SECURITY: verify the user actually has access to this exercise.
-  // Without this, addSet could be used to bypass addExerciseToActiveSession
+  // Without this, addSet could be used to bypass addExercisesToActiveSession
   // and create SetLogs referencing other users' custom exercises.
   await requireAvailableExercise(userId, exerciseId);
 
@@ -613,7 +642,11 @@ export const saveActiveAsTemplate = withLogging('saveActiveAsTemplate', async (
     throw new Error('Add at least one exercise before saving as a template');
   }
 
-  // Friendly error on name collision
+  // Friendly error on name collision against the user's own templates. We
+  // intentionally don't check against built-ins — Postgres treats (null, name)
+  // and (userId, name) as distinct, and surfacing "you already have a template
+  // by that name" when the conflict is with a built-in would be confusing.
+  // The user can rename or hide the built-in if they want to.
   const collision = await db.workoutTemplate.findFirst({
     where: { userId, name },
     select: { id: true },
@@ -625,6 +658,7 @@ export const saveActiveAsTemplate = withLogging('saveActiveAsTemplate', async (
   await db.workoutTemplate.create({
     data: {
       userId,
+      isBuiltin: false,
       name,
       description: description || null,
       exercises: {
@@ -662,9 +696,21 @@ export const startFromTemplate = withLogging('startFromTemplate', async (input: 
     );
   }
 
-  // Load the template (and verify ownership)
+  // Load the template — either the user's own, or a built-in that they
+  // haven't hidden. Built-ins (userId = null, isBuiltin = true) are reachable
+  // by anyone unless they've added a UserHiddenTemplate row for it.
   const template = await db.workoutTemplate.findFirst({
-    where: { id: templateId, userId },
+    where: {
+      id: templateId,
+      OR: [
+        { userId },
+        {
+          userId: null,
+          isBuiltin: true,
+          hiddenBy: { none: { userId } },
+        },
+      ],
+    },
     include: {
       exercises: {
         orderBy: { position: 'asc' },
@@ -710,12 +756,68 @@ export const startFromTemplate = withLogging('startFromTemplate', async (input: 
 
 const DeleteTemplateSchema = z.object({ templateId: z.string().min(1) });
 
+/**
+ * Delete a user-owned template. Built-ins can't be deleted — use hideTemplate
+ * for those. Scope-by-userId acts as the ownership check; if the templateId
+ * is a built-in the deleteMany is a no-op (built-in userId is null).
+ */
 export const deleteTemplate = withLogging('deleteTemplate', async (input: z.infer<typeof DeleteTemplateSchema>) => {
   const userId = await requireUser();
   const { templateId } = DeleteTemplateSchema.parse(input);
 
-  // Scope-by-userId acts as the ownership check — deleteMany is a no-op if it doesn't match
+  // Pre-check so we can return a meaningful error if the user tries to delete
+  // a built-in. The deleteMany below would silently do nothing without this.
+  const template = await db.workoutTemplate.findUnique({
+    where: { id: templateId },
+    select: { userId: true, isBuiltin: true },
+  });
+  if (template?.isBuiltin) {
+    throw new Error('Built-in templates can be hidden but not deleted');
+  }
+
   await db.workoutTemplate.deleteMany({ where: { id: templateId, userId } });
+
+  revalidatePath('/');
+});
+
+const HideTemplateSchema = z.object({ templateId: z.string().min(1) });
+
+/**
+ * Hide a built-in template from the current user's list. No-op if the
+ * template is the user's own (only built-ins are hideable) or already hidden.
+ * Idempotent.
+ */
+export const hideTemplate = withLogging('hideTemplate', async (input: z.infer<typeof HideTemplateSchema>) => {
+  const userId = await requireUser();
+  const { templateId } = HideTemplateSchema.parse(input);
+
+  const template = await db.workoutTemplate.findUnique({
+    where: { id: templateId },
+    select: { isBuiltin: true },
+  });
+  if (!template?.isBuiltin) {
+    throw new Error('Only built-in templates can be hidden');
+  }
+
+  // upsert pattern via createMany skipDuplicates — cleanly idempotent without
+  // a select-then-insert race window.
+  await db.userHiddenTemplate.createMany({
+    data: [{ userId, templateId }],
+    skipDuplicates: true,
+  });
+
+  revalidatePath('/');
+});
+
+const UnhideTemplateSchema = z.object({ templateId: z.string().min(1) });
+
+export const unhideTemplate = withLogging('unhideTemplate', async (input: z.infer<typeof UnhideTemplateSchema>) => {
+  const userId = await requireUser();
+  const { templateId } = UnhideTemplateSchema.parse(input);
+
+  await db.userHiddenTemplate.deleteMany({
+    where: { userId, templateId },
+  });
 
   revalidatePath('/');
 });

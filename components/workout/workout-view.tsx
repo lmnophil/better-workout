@@ -8,7 +8,7 @@
 import { useState, useTransition, useEffect } from 'react';
 import { Plus, Check, Calendar, Trash2, BookmarkPlus } from 'lucide-react';
 import {
-  addExerciseToActiveSession,
+  addExercisesToActiveSession,
   removeExerciseFromActiveSession,
   addSet,
   updateSet,
@@ -23,6 +23,7 @@ import {
   saveActiveAsTemplate,
   startFromTemplate,
   deleteTemplate,
+  hideTemplate,
 } from '@/lib/actions';
 import { ExerciseInSession } from './exercise-in-session';
 import { ExercisePicker } from './exercise-picker';
@@ -30,6 +31,7 @@ import { RestTimerBar, useRestTimer } from './rest-timer';
 import { useConfirm } from '@/components/ui/use-confirm';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { groupBy, relativeDay } from '@/lib/utils';
+import { REGIONS, MUSCLE_CHIPS } from '@/lib/area-filter';
 
 // ============ TYPES ============
 
@@ -76,6 +78,7 @@ export type TemplateClient = {
   id: string;
   name: string;
   description: string | null;
+  isBuiltin: boolean;
   exerciseCount: number;
   // Names of the first few exercises, for preview
   previewNames: string[];
@@ -98,6 +101,11 @@ export function WorkoutView({
   templates,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Chip selection from the empty state. Carries through into the picker so a
+  // user who tapped [Chest] on the home screen sees the picker pre-filtered.
+  // Cleared after the picker closes to avoid surprising mid-session reopens.
+  const [pendingRegionIds, setPendingRegionIds] = useState<string[]>([]);
+  const [pendingMuscleChipIds, setPendingMuscleChipIds] = useState<string[]>([]);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { confirm, Dialog: ConfirmDialog } = useConfirm();
@@ -126,11 +134,23 @@ export function WorkoutView({
   const sessionStarted = activeSession !== null && exerciseOrderInSession.length > 0;
 
   // Handlers — all wrap server actions in a transition so UI stays responsive
-  const handleAddExercise = (exerciseId: string) => {
+  const handleAddExercises = (exerciseIds: string[]) => {
+    if (exerciseIds.length === 0) return;
     startTransition(() => {
-      addExerciseToActiveSession({ exerciseId });
+      addExercisesToActiveSession({ exerciseIds });
     });
     setPickerOpen(false);
+    // Drop the carried-through chip selection — next picker open starts fresh
+    // unless the user re-applies chips from the empty state. Mid-session
+    // re-opens always start unfiltered.
+    setPendingRegionIds([]);
+    setPendingMuscleChipIds([]);
+  };
+
+  const openPicker = (regionIds: string[] = [], muscleChipIds: string[] = []) => {
+    setPendingRegionIds(regionIds);
+    setPendingMuscleChipIds(muscleChipIds);
+    setPickerOpen(true);
   };
 
   const handleRemoveExercise = (exerciseId: string) => {
@@ -263,6 +283,22 @@ export function WorkoutView({
     });
   };
 
+  const handleHideTemplate = async (templateId: string, name: string) => {
+    if (
+      !(await confirm({
+        title: `Hide "${name}"?`,
+        message:
+          'This is a default template — it will disappear from your list. Bring it back any time from Settings.',
+        confirmLabel: 'Hide',
+      }))
+    ) {
+      return;
+    }
+    startTransition(() => {
+      hideTemplate({ templateId });
+    });
+  };
+
   /**
    * Save the active session as a named template. Returns true on success,
    * throws on failure. The dialog awaits this and only closes when it resolves
@@ -332,10 +368,11 @@ export function WorkoutView({
       {/* Body */}
       {!sessionStarted ? (
         <EmptyState
-          onPick={() => setPickerOpen(true)}
+          onOpenPicker={openPicker}
           templates={templates}
           onStartFromTemplate={handleStartFromTemplate}
           onDeleteTemplate={handleDeleteTemplate}
+          onHideTemplate={handleHideTemplate}
           isPending={isPending}
         />
       ) : (
@@ -376,11 +413,11 @@ export function WorkoutView({
           })}
 
           <button
-            onClick={() => setPickerOpen(true)}
+            onClick={() => openPicker()}
             className="w-full mt-3 border border-dashed border-ink-700 rounded-lg py-3 text-sm text-ink-300 hover:border-accent/50 hover:text-ink-100 transition flex items-center justify-center gap-2"
           >
             <Plus size={16} />
-            Add another exercise
+            Add more exercises
           </button>
 
           {/* Save as template — small, secondary affordance */}
@@ -400,8 +437,14 @@ export function WorkoutView({
         <ExercisePicker
           availableExercises={availableExercises}
           excludeIds={exerciseIdsAlreadyInSession}
-          onPick={handleAddExercise}
-          onClose={() => setPickerOpen(false)}
+          initialRegionIds={pendingRegionIds}
+          initialMuscleChipIds={pendingMuscleChipIds}
+          onPickMany={handleAddExercises}
+          onClose={() => {
+            setPickerOpen(false);
+            setPendingRegionIds([]);
+            setPendingMuscleChipIds([]);
+          }}
           onCreateCustom={handleCreateCustom}
           onDeleteCustom={handleDeleteCustom}
         />
@@ -445,24 +488,94 @@ export function WorkoutView({
 // ============ EMPTY STATE ============
 
 function EmptyState({
-  onPick,
+  onOpenPicker,
   templates,
   onStartFromTemplate,
   onDeleteTemplate,
+  onHideTemplate,
   isPending,
 }: {
-  onPick: () => void;
+  onOpenPicker: (regionIds?: string[], muscleChipIds?: string[]) => void;
   templates: TemplateClient[];
   onStartFromTemplate: (id: string) => void;
   onDeleteTemplate: (id: string, name: string) => void;
+  onHideTemplate: (id: string, name: string) => void;
   isPending: boolean;
 }) {
+  // Chip selection here is local — once the user taps a chip and proceeds,
+  // we hand the selection off to the picker via onOpenPicker. The empty
+  // state itself doesn't need to remember chip state across re-renders.
+  const [regionIds, setRegionIds] = useState<string[]>([]);
+  const [muscleChipIds, setMuscleChipIds] = useState<string[]>([]);
+
+  function toggleRegion(id: string) {
+    setRegionIds((prev) => {
+      if (id === 'full') return prev.includes('full') ? [] : ['full'];
+      const without = prev.filter((r) => r !== 'full');
+      return without.includes(id) ? without.filter((r) => r !== id) : [...without, id];
+    });
+  }
+  function toggleMuscle(id: string) {
+    setMuscleChipIds((prev) =>
+      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
+    );
+    setRegionIds((prev) => prev.filter((r) => r !== 'full'));
+  }
+
+  const anyChipSelected = regionIds.length > 0 || muscleChipIds.length > 0;
+
   return (
     <div className="px-5 py-6">
+      {/* Chip-driven entry — primary path for "what should I do today" */}
+      <div className="mb-6">
+        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-3">
+          What are you training today?
+        </div>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {REGIONS.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => toggleRegion(r.id)}
+              className={`text-xs px-3 py-1.5 rounded-full border transition ${
+                regionIds.includes(r.id)
+                  ? 'accent-bg text-ink-950 border-transparent'
+                  : 'border-ink-800 text-ink-300 hover:border-ink-600'
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {MUSCLE_CHIPS.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => toggleMuscle(m.id)}
+              className={`text-xs px-3 py-1.5 rounded-full border transition ${
+                muscleChipIds.includes(m.id)
+                  ? 'bg-ink-200 text-ink-950 border-transparent'
+                  : 'border-ink-800 text-ink-300 hover:border-ink-600'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => onOpenPicker(regionIds, muscleChipIds)}
+          className="accent-bg text-ink-950 px-5 py-2.5 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition inline-flex items-center gap-2"
+        >
+          <Plus size={16} strokeWidth={2.5} />
+          {anyChipSelected ? 'Pick exercises' : 'Browse all exercises'}
+        </button>
+      </div>
+
       {templates.length > 0 && (
         <div className="mb-6">
           <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-3">
-            Start from a template
+            Or start from a template
           </div>
           <div className="space-y-1.5">
             {templates.map((t) => (
@@ -470,29 +583,17 @@ function EmptyState({
                 key={t.id}
                 template={t}
                 onStart={() => onStartFromTemplate(t.id)}
-                onDelete={() => onDeleteTemplate(t.id, t.name)}
+                onDelete={() =>
+                  t.isBuiltin
+                    ? onHideTemplate(t.id, t.name)
+                    : onDeleteTemplate(t.id, t.name)
+                }
                 disabled={isPending}
               />
             ))}
           </div>
         </div>
       )}
-
-      <div className="border border-dashed border-ink-800 rounded-xl p-8 text-center">
-        <p className="text-sm text-ink-300 leading-relaxed mb-1">
-          {templates.length > 0 ? 'Or build it from scratch.' : 'No exercises logged yet for today.'}
-        </p>
-        <p className="text-xs text-ink-500 italic font-display mb-6">
-          Pick an exercise to start the session — it&apos;ll save automatically as you go.
-        </p>
-        <button
-          onClick={onPick}
-          className="accent-bg text-ink-950 px-5 py-3 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition inline-flex items-center gap-2"
-        >
-          <Plus size={16} strokeWidth={2.5} />
-          Pick an exercise
-        </button>
-      </div>
     </div>
   );
 }
@@ -504,10 +605,14 @@ function TemplateRow({
   disabled,
 }: {
   template: TemplateClient;
+  // Called when the user taps the trash icon. The parent decides whether
+  // this means "delete" (user template) or "hide" (built-in) — by the time
+  // it reaches here both look the same.
   onStart: () => void;
   onDelete: () => void;
   disabled: boolean;
 }) {
+  const trailingActionLabel = template.isBuiltin ? 'Hide' : 'Delete';
   return (
     <div className="border border-ink-800 hover:border-accent/40 transition rounded-lg flex items-stretch">
       <button
@@ -515,7 +620,14 @@ function TemplateRow({
         disabled={disabled}
         className="flex-1 px-4 py-3 text-left disabled:opacity-50"
       >
-        <div className="text-sm text-ink-100">{template.name}</div>
+        <div className="text-sm text-ink-100 flex items-center gap-2">
+          <span>{template.name}</span>
+          {template.isBuiltin && (
+            <span className="text-[9px] tracking-[0.2em] uppercase text-ink-500 border border-ink-800 rounded px-1.5 py-0.5">
+              Default
+            </span>
+          )}
+        </div>
         <div className="text-[11px] text-ink-500 mt-0.5">
           {template.exerciseCount}{' '}
           {template.exerciseCount === 1 ? 'exercise' : 'exercises'}
@@ -532,8 +644,8 @@ function TemplateRow({
         onClick={onDelete}
         disabled={disabled}
         className="px-4 text-ink-500 hover:text-bad transition border-l border-ink-800 disabled:opacity-50"
-        aria-label={`Delete template ${template.name}`}
-        title="Delete template"
+        aria-label={`${trailingActionLabel} template ${template.name}`}
+        title={`${trailingActionLabel} template`}
       >
         <Trash2 size={14} />
       </button>

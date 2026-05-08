@@ -246,13 +246,26 @@ export const getUserPreferences = cache(async function getUserPreferences(userId
 export type UserPreferencesShape = Awaited<ReturnType<typeof getUserPreferences>>;
 
 /**
- * List all of a user's saved workout templates, with their exercises in order.
- * Drives both the management view and the "start from template" picker.
+ * List the templates a user sees in the picker: their own user templates plus
+ * any built-in (isBuiltin = true, userId = null) templates they haven't hidden.
+ *
+ * Built-ins are sorted before user templates within the same recency band so
+ * the empty state has a stable, recognizable lead. User templates win recency
+ * ordering against each other as before.
  */
 export async function getTemplates(userId: string) {
   return db.workoutTemplate.findMany({
-    where: { userId },
-    orderBy: [{ updatedAt: 'desc' }],
+    where: {
+      OR: [
+        { userId },
+        {
+          userId: null,
+          isBuiltin: true,
+          hiddenBy: { none: { userId } },
+        },
+      ],
+    },
+    orderBy: [{ isBuiltin: 'desc' }, { updatedAt: 'desc' }],
     include: {
       exercises: {
         orderBy: { position: 'asc' },
@@ -264,4 +277,29 @@ export async function getTemplates(userId: string) {
       },
     },
   });
+}
+
+/**
+ * List built-in templates the user has hidden. Powers the settings page
+ * "Hidden default templates" section so they can unhide any.
+ */
+export async function getHiddenBuiltinTemplates(userId: string) {
+  const rows = await db.userHiddenTemplate.findMany({
+    where: { userId },
+    include: {
+      template: {
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          isBuiltin: true,
+          exercises: { select: { id: true } },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  // Defensive: a hide row could exist for a template that's no longer built-in
+  // (shouldn't happen, but the schema doesn't enforce it). Filter those out.
+  return rows.filter((r) => r.template.isBuiltin);
 }

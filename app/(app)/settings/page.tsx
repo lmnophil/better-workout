@@ -3,10 +3,11 @@
 
 import { auth } from '@/auth';
 import { redirect } from 'next/navigation';
-import { getUserVolumeTargets } from '@/lib/queries';
+import { getUserVolumeTargets, getHiddenBuiltinTemplates } from '@/lib/queries';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { VolumeTargetsEditor } from '@/components/settings/volume-targets-editor';
 import { RestTimerEditor } from '@/components/settings/rest-timer-editor';
+import { HiddenTemplatesEditor } from '@/components/settings/hidden-templates-editor';
 
 export const metadata = { title: 'Settings — Tracker' };
 
@@ -15,7 +16,17 @@ export default async function SettingsPage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const overrides = await getUserVolumeTargets(userId);
+  const [overrides, hiddenTemplates] = await Promise.all([
+    getUserVolumeTargets(userId),
+    getHiddenBuiltinTemplates(userId),
+  ]);
+
+  const hiddenForClient = hiddenTemplates.map((row) => ({
+    templateId: row.template.id,
+    name: row.template.name,
+    description: row.template.description,
+    exerciseCount: row.template.exercises.length,
+  }));
 
   // Only show muscles that have a default target (lifting muscles, not mobility/balance)
   const trackable = MUSCLE_GROUPS.filter((m) => m.weeklyVolumeTarget !== undefined).map(
@@ -54,7 +65,7 @@ export default async function SettingsPage() {
         <RestTimerEditor />
       </section>
 
-      <section>
+      <section className="mb-8">
         <div className="mb-3">
           <h2 className="font-display text-xl">Weekly volume targets</h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
@@ -63,6 +74,16 @@ export default async function SettingsPage() {
           </p>
         </div>
         <VolumeTargetsEditor muscles={trackable} />
+      </section>
+
+      <section>
+        <div className="mb-3">
+          <h2 className="font-display text-xl">Hidden default templates</h2>
+          <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
+            Default templates you&apos;ve hidden from the workout page. Bring any back here.
+          </p>
+        </div>
+        <HiddenTemplatesEditor templates={hiddenForClient} />
       </section>
     </div>
   );

@@ -75,6 +75,7 @@ export default async function WorkoutPage() {
         id: t.id,
         name: t.name,
         description: t.description,
+        isBuiltin: t.isBuiltin,
         exerciseCount: t.exercises.length,
         // Preview shows up to 3 exercise names; gracefully handles
         // exercises that have been deleted out from under the template.

@@ -74,13 +74,13 @@ Every server action calls `requireUser()` first; the function throws `'Unauthori
 
 ## Server actions
 
-Eighteen actions in `lib/actions.ts`, grouped into nine categories that match the `// =====` section headers in the file.
+Twenty actions in `lib/actions.ts`, grouped into nine categories that match the `// =====` section headers in the file.
 
 ### Session lifecycle
 
 How a user's active session gets created, populated, finished, or thrown away.
 
-- **`addExerciseToActiveSession({ exerciseId })`** — Adds an exercise to the active session, creating the session if none exists. No-op if the exercise is already in the session. Pre-fills with one empty set.
+- **`addExercisesToActiveSession({ exerciseIds })`** — Adds one or more exercises to the active session, creating the session if none exists. Skips IDs already in the session (no-op for the duplicate subset). Pre-fills each new exercise with an empty first set, in caller-provided order. The picker calls this with the user's multi-select; mid-session "add more" goes through the same path.
 - **`removeExerciseFromActiveSession({ exerciseId })`** — Removes all sets for an exercise from the active session. Deletes the session entirely if it had no other exercises.
 - **`completeActiveSession()`** — Marks the active session `completedAt: now`. Refuses if the session has zero sets (deletes it instead).
 - **`discardActiveSession()`** — Hard-deletes the active session and all its sets. Used when the user wants to throw away an in-progress workout.
@@ -130,9 +130,11 @@ Free-text per-set annotations. Surfaced in the "last time" reference.
 
 Named, reusable lineups. Saving captures only the exercises and order — not the logged sets.
 
-- **`saveActiveAsTemplate({ name, description? })`** — Snapshots the active session's exercises into a new named template. Rejects name collisions.
-- **`startFromTemplate({ templateId })`** — Creates a fresh active session pre-populated with empty SetLogs from the template. Refuses if the user already has an active session — they must complete or discard the current one first.
-- **`deleteTemplate({ templateId })`** — Removes the template. Existing sessions started from it are unaffected.
+- **`saveActiveAsTemplate({ name, description? })`** — Snapshots the active session's exercises into a new user-owned (`isBuiltin: false`) template. Rejects collisions with the user's existing templates; doesn't check against built-ins (Postgres NULL semantics make `(null, name)` and `(userId, name)` distinct anyway).
+- **`startFromTemplate({ templateId })`** — Creates a fresh active session pre-populated with empty SetLogs from the template. Works for both user templates and unhidden built-ins. Refuses if the user already has an active session — they must complete or discard the current one first.
+- **`deleteTemplate({ templateId })`** — Removes a user-owned template. Throws if the target is a built-in (use `hideTemplate` instead). Existing sessions started from it are unaffected.
+- **`hideTemplate({ templateId })`** — Hides a built-in template from the user's list by inserting a `UserHiddenTemplate` row. Throws if the target isn't built-in. Idempotent.
+- **`unhideTemplate({ templateId })`** — Removes the user's hide marker for a built-in template. Idempotent.
 
 ## Server-side queries
 
@@ -153,7 +155,8 @@ Eight queries in `lib/queries.ts`. All take `userId` as the first parameter; nev
 ### Preferences and templates
 
 - **`getUserPreferences(userId)`** — The user's prefs, with defaults filled in if no row exists. Wrapped with `React.cache` so multiple callers in one request share a single DB hit.
-- **`getTemplates(userId)`** — All saved templates with their exercises in order. Includes a small subset of the exercise relation (id, name, module, deletedAt) for preview rendering.
+- **`getTemplates(userId)`** — User's templates plus built-in (`isBuiltin: true`, `userId: null`) templates the user hasn't hidden. Sorted built-ins first, then by `updatedAt`. Includes a small subset of the exercise relation (id, name, module, deletedAt) for preview rendering.
+- **`getHiddenBuiltinTemplates(userId)`** — Built-in templates the user has hidden. Drives the settings-page unhide list.
 
 ## HTTP routes
 

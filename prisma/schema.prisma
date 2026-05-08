@@ -33,6 +33,7 @@ model User {
   preferences     UserPreferences?
   exerciseSettings ExerciseUserSettings[]
   templates       WorkoutTemplate[]
+  hiddenTemplates UserHiddenTemplate[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -198,21 +199,51 @@ model UserPreferences {
 
 // A named, reusable workout — a list of exercises in a chosen order. Loading a
 // template into the active session creates an empty SetLog for each exercise
-// so the user can start logging right away. Templates are private to the
-// creating user (sharing/PT features are future scope).
+// so the user can start logging right away.
+//
+// Built-in: userId is null, isBuiltin is true. Shared across all users, seeded
+//           from STARTER_TEMPLATES. A user can hide one (UserHiddenTemplate)
+//           but can't delete it.
+// User:     userId is set, isBuiltin is false. Owned by the user.
+//
+// Mirrors the Exercise built-in/custom split; a soft-delete column isn't
+// needed because (a) users can't delete built-ins, and (b) deleting a user
+// template doesn't need to preserve any history (no SetLog refers to a
+// template, only to the exercises inside it).
 model WorkoutTemplate {
   id          String  @id @default(cuid())
-  userId      String
-  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String?
+  user        User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isBuiltin   Boolean @default(false)
   name        String
   description String?
 
   exercises TemplateExercise[]
+  hiddenBy  UserHiddenTemplate[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([userId, name])
+  @@index([userId])
+}
+
+// Per-user hide marker for a built-in WorkoutTemplate. Built-ins are global,
+// so there's no per-user delete; instead the user creates a hide row that
+// excludes the template from their list. Removing the row unhides it.
+// Only meaningful when the referenced template has isBuiltin=true; the app
+// enforces that — there's no DB constraint.
+model UserHiddenTemplate {
+  id         String @id @default(cuid())
+  userId     String
+  templateId String
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, templateId])
   @@index([userId])
 }
 

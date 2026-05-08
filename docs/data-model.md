@@ -12,7 +12,7 @@ Twelve models, in three groups:
 |---|---|---|
 | Auth.js adapter tables | `User`, `Account`, `AuthSession`, `VerificationToken` | Managed by the `@auth/prisma-adapter`. The app reads `User.id` to scope everything; the rest is opaque infrastructure. |
 | Core domain | `Exercise`, `WorkoutSession`, `SetLog` | The spine of the app. Every workout is a session containing setLogs that reference exercises. |
-| User-customization layer | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `WorkoutTemplate`, `TemplateExercise` | Per-user preferences, per-(user, exercise) overrides, and saved workout lineups. |
+| User-customization layer | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, saved workout lineups, and per-user hide markers for built-in templates. |
 
 ## Diagram
 
@@ -25,7 +25,8 @@ erDiagram
     User ||--o| UserPreferences : has
     User ||--o{ UserVolumeTarget : has
     User ||--o{ ExerciseUserSettings : has
-    User ||--o{ WorkoutTemplate : owns
+    User ||--o{ WorkoutTemplate : "owns (user templates)"
+    User ||--o{ UserHiddenTemplate : "hides built-ins"
 
     WorkoutSession ||--o{ SetLog : contains
     Exercise ||--o{ SetLog : "logged as (Restrict)"
@@ -33,6 +34,7 @@ erDiagram
     Exercise ||--o{ TemplateExercise : "appears in"
 
     WorkoutTemplate ||--o{ TemplateExercise : contains
+    WorkoutTemplate ||--o{ UserHiddenTemplate : "hidden by"
 
     User {
         string id PK
@@ -67,8 +69,14 @@ erDiagram
     }
     WorkoutTemplate {
         string id PK
-        string userId FK
+        string userId FK "null = built-in"
+        boolean isBuiltin
         string name
+    }
+    UserHiddenTemplate {
+        string id PK
+        string userId FK
+        string templateId FK
     }
     TemplateExercise {
         string id PK
@@ -139,9 +147,22 @@ Key behaviors:
 
 ### `WorkoutTemplate` + `TemplateExercise`
 
-A user-named, reusable lineup of exercises in chosen order. Saving captures only the exercises and order — not the logged sets. Loading pre-populates the active session with one empty SetLog per exercise.
+A named, reusable lineup of exercises in chosen order. Saving captures only the exercises and order — not the logged sets. Loading pre-populates the active session with one empty SetLog per exercise.
+
+Templates come in two flavors, mirroring the `Exercise` built-in/custom split:
+
+- **Built-in:** `userId` is null, `isBuiltin` is true. Seeded from `STARTER_TEMPLATES` in `lib/exercises-data.ts`. Shared across all users. Rebuilt from scratch on every seed run (no revision history — explicit trade-off).
+- **User:** `userId` is set, `isBuiltin` is false. Owned by the creating user. `saveActiveAsTemplate` always creates this kind.
+
+The `@@unique([userId, name])` constraint relies on Postgres NULL semantics — `(null, 'Push')` and `(userId, 'Push')` are distinct rows, so a user creating a custom template named the same as a built-in is allowed. The picker shows both with a "Default" tag distinguishing built-ins.
 
 `TemplateExercise` is the junction row with a `position` field. If the source `Exercise` is later (hard-)deleted, the junction goes with it (Cascade) — the template degrades gracefully. In practice exercises soft-delete, so this only fires for built-ins.
+
+### `UserHiddenTemplate`
+
+Per-user hide marker for built-in templates. A user can't delete a built-in (it's shared), but they can hide it from their own list by inserting a row here. `getTemplates` filters built-ins by `hiddenBy: { none: { userId } }`. Settings page exposes an unhide control.
+
+A row only makes sense when the referenced `WorkoutTemplate.isBuiltin` is true — `hideTemplate` enforces that at write time. The schema doesn't constrain it; defensive code in `getHiddenBuiltinTemplates` filters out any rare orphan that points at a non-built-in.
 
 ### `ExerciseUserSettings`
 

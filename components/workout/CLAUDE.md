@@ -63,13 +63,23 @@ The `finishedFor` ref makes the chime fire exactly once per timer run, even acro
 
 The picker's two tabs (browse / add-custom) share an enclosing modal but have nothing else in common. They could be split into separate files; they're not, because the file is short enough and the boundary is clear.
 
+The browse tab is **multi-select**. Tapping a row toggles a checkbox; the sticky footer shows a target summary, an optional balance hint (`lib/area-filter.ts → balanceHint`), and a single "Add N to session" button that calls `onPickMany`. The legacy single-pick `onPick` prop is gone — anything that wants to add exercises uses `onPickMany`.
+
+Above the search box are two rows of chips: regions (Upper / Lower / Full body / Mobility) and muscle groups (Chest / Back / Shoulders / Arms / Glutes / Quads / Hamstrings / Core). Selection is multi — chips are unioned with each other and with the search box. The "Full body" region chip is exclusive: tapping it clears every other chip. Tapping any non-Full chip cancels Full. The chip taxonomy and filter logic live in `lib/area-filter.ts` so other surfaces (empty state, future coverage→picker links) can reuse them.
+
+When the workout-view empty state opens the picker after the user has tapped chips, those chips are passed in via `initialRegionIds` / `initialMuscleChipIds` so the picker boots already filtered. Mid-session "Add more exercises" reopens always start unfiltered — workout-view clears the pending chip state when the picker closes.
+
 The browse tab's search matches name OR primary muscle OR secondary muscle, case-insensitive. If you add another searchable field to `Exercise`, update the filter.
 
 The custom-add tab enforces `primary muscles >= 1`. The Zod schema in `createCustomExercise` enforces the same. These need to match.
 
 ## Templates
 
-Save-from-active and start-from-template are fully implemented. There's no dedicated `/templates` management page yet — deletion happens inline in the empty-state list. If you add `/templates`, the data model already supports it (see `prisma/schema.prisma`); just write the page.
+Save-from-active and start-from-template are fully implemented. There's no dedicated `/templates` management page yet — the empty-state list shows everything (built-in + user) inline.
+
+**Built-in vs user templates**: built-ins (`isBuiltin: true`, `userId: null`) are seeded from `STARTER_TEMPLATES` in `lib/exercises-data.ts`. They're shared across all users. User templates are owned by the creating user. The picker shows both, sorted built-ins first. The `TemplateRow` component flips its trailing trash button between "Delete" (user) and "Hide" (built-in) based on `template.isBuiltin`. Hide writes a `UserHiddenTemplate` row; the user can unhide from the settings page.
+
+If you add a new built-in template, edit `STARTER_TEMPLATES` and re-run `npm run db:seed`. The seeder rebuilds each built-in's exercise list on every run — there's no revision history (deliberate trade-off; users with their own customizations should fork to a user template).
 
 `SaveTemplateDialog` does NOT close optimistically — it awaits the action and surfaces collision errors inline. If you change this to optimistic, you've reintroduced a bug the audit fixed.
 
