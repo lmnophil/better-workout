@@ -15,6 +15,16 @@ export default {
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
+      // Allow Google to link to an existing User whose email already matches —
+      // i.e. someone who first signed up via magic link can later sign in with
+      // Google (or vice versa) without hitting OAuthAccountNotLinked. The
+      // "dangerous" naming is the generic warning: with an unverified-email
+      // provider this would let an attacker claim someone else's account.
+      // Safe here because Google verifies emails before issuing tokens and
+      // our only other provider is Resend magic links, which inherently prove
+      // ownership (the user must click a link in that inbox). See
+      // docs/decisions.md.
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
   pages: {

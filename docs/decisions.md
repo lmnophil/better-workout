@@ -23,6 +23,7 @@ These are decisions worth knowing but where the rationale is summarizable in a s
 - **Plain SQL gzipped backups.** Human-readable, partially restorable, no `pg_restore` needed. Tradeoff is larger files. Custom format is the right call once the DB grows to GB-scale; we're not there.
 - **Backups not encrypted at rest.** The user's offsite pipeline handles encryption. Doing it twice complicates restore.
 - **`x-logging` anchor in compose with json-file rotation.** All services share the same rotation policy. Compatible with future log shippers.
+- **Cross-method account linking by verified email.** `allowDangerousEmailAccountLinking: true` is set on the Google provider so a user who signed up via magic link can later sign in with Google (and vice versa) without hitting `OAuthAccountNotLinked`. Safe here because both of our providers gate on a verified email — Google verifies before issuing tokens, and Resend magic links require clicking a link delivered to the inbox. The "dangerous" warning applies to providers that don't verify emails or to password signups; we have neither.
 
 ---
 
