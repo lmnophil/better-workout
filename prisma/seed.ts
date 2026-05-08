@@ -9,10 +9,19 @@
 // - If an exercise is removed from the seed list, it's NOT auto-deleted from the DB —
 //   that would orphan historical SetLogs. Mark as deletedAt manually if needed.
 
-import { PrismaClient } from '@prisma/client';
+// Prisma 7's CLI no longer auto-loads .env, and tsx doesn't either, so the
+// seed pulls dotenv in itself. The side-effect import is a no-op when the
+// file isn't present (e.g. inside the Docker runtime, where env vars come
+// from compose).
+import 'dotenv/config';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from './generated/prisma/client';
 import { SEED_EXERCISES } from '../lib/exercises-data';
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+});
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log(`Seeding ${SEED_EXERCISES.length} built-in exercises...`);

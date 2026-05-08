@@ -31,15 +31,26 @@ If you write a query that lists exercises, **include `deletedAt: null` in the wh
 
 The `seed.ts` script intentionally clears `deletedAt` on built-ins it touches — so a built-in that was somehow soft-deleted gets restored on the next seed run. This shouldn't happen for built-ins (the UI doesn't expose a delete for them), but it's a self-healing belt.
 
+## Prisma 7 layout
+
+A few v7-specific things that bite if you assume v6 patterns:
+
+**Generated client lives in the project tree, not `node_modules`.** The generator outputs `prisma/generated/prisma/` (gitignored, regenerated on every `prisma generate`). The PrismaClient export is at `prisma/generated/prisma/client` — note the `/client` suffix. Importing the directory itself fails under ESM resolution (no `package.json` exports map). Both `lib/db.ts` and `prisma/seed.ts` use the `/client` import path; new code should too.
+
+**Driver adapter, not query engine.** v7 ships pure JS — there's no Rust binary to ship. `lib/db.ts` constructs `PrismaPg` from `@prisma/adapter-pg` with `process.env.DATABASE_URL` and passes it to `new PrismaClient({ adapter, log: [...] })`. `client.$on('query'|'error'|'warn', ...)` event listeners still work; that's how slow-query logging and the Prometheus histogram are wired up. (If a future Prisma drops `$on`, fall back to a `client.$extends({ query: { ... } })` extension.)
+
+**`prisma.config.ts` replaces `package.json#prisma`.** It sets the schema path, migrations path, seed command, and the datasource URL. Two non-obvious things:
+
+- The datasource is built conditionally — `datasource: process.env.DATABASE_URL ? { url: env('DATABASE_URL') } : undefined`. The `env()` helper is eager and throws at config-load time if the var is missing, which would break `prisma generate` during the Docker build (no DB env at build time). The conditional sidesteps that.
+- `import 'dotenv/config'` at the top because v7's CLI no longer auto-loads `.env`. `prisma/seed.ts` does the same for the same reason.
+
 ## Seed compilation
 
-`seed.ts` is TypeScript. In development it runs via `tsx`. In the Docker build it gets compiled to `seed.js` via esbuild (see `Dockerfile`) so the runtime image doesn't need `tsx`. This means:
-
-- The seed can `import` from anywhere in `lib/` at dev time.
-- Build-time bundling pulls all imports into one file, so the runtime image only needs Node + Prisma client.
-- `@prisma/client` is marked external in the bundle — it's already in the runtime image as a generated module.
+`seed.ts` is TypeScript. In development it runs via `tsx`. In the Docker build it gets bundled to `seed.js` via esbuild (see `Dockerfile`) so the runtime image doesn't need `tsx`. The bundle is **ESM** (because `package.json` sets `"type": "module"`) and uses `--packages=external`, which keeps everything from `node_modules` out of the bundle while still inlining the generated client (which is local code under `prisma/generated/`). The runtime image gets the prod-deps node_modules wholesale, so the externals resolve at runtime.
 
 If you add an import to `seed.ts`, verify it's bundleable (no Node native modules, no things that require ts-node/tsx semantics).
+
+To run the seed against a running compose stack, use `docker compose exec app node prisma/seed.js` — `docker compose run app node prisma/seed.js` will be ignored because `entrypoint.sh` hardcodes `node server.js` instead of forwarding `$@`.
 
 ## Indexes worth knowing about
 
@@ -64,3 +75,5 @@ If you add an action that writes `SetLog` or `WorkoutSession`, check you preserv
 - **Adding `dayFocus` or `type` to `WorkoutSession`.** Sessions are records, not plans. See root CLAUDE.md.
 - **Hard-deleting `Exercise` rows.** Use soft-delete. The Restrict on `SetLog.exercise` will block hard-deletes anyway — that's by design.
 - **Changing muscle IDs from strings to an enum.** They're user-extensible (custom exercises pick from `MUSCLE_GROUPS` but the schema doesn't constrain) and the spaces/casing are deliberate. See `docs/decisions.md`.
+- **Making `prisma.config.ts`'s datasource unconditional.** The conditional exists so `prisma generate` works at Docker build time when there's no DB. Removing the conditional breaks the image build. If you need to set the URL inline always, set it via `process.env.DATABASE_URL ?? '<placeholder>'` rather than dropping the conditional.
+- **Importing the generated client as `from './generated/prisma'`.** ESM can't resolve directory imports without an exports manifest. The entry is `from './generated/prisma/client'`.

@@ -10,7 +10,7 @@ A few working agreements that matter more than any specific fact in this documen
 
 **Do quality work, but don't gold-plate.** "Best solution" doesn't mean the most clever or the most general. It means: solves the actual problem, fits the codebase's existing style, doesn't introduce premature abstraction, and you'd be comfortable defending the trade-offs. If something feels wrong, say so before writing code. If you find an unrelated issue while working, mention it; don't silently fix it as a drive-by.
 
-**Verify, don't assume.** Read the file before editing it. Run `npm run typecheck` after meaningful changes. Don't claim a feature works because it "should" — actually trace the data flow. Don't assume a library API based on training data — check the version we're on (`package.json`) and look at how it's used elsewhere in the repo. The Next.js 15 + React 19 + Auth.js v5 + Prisma 6 stack is recent enough that older patterns are real footguns.
+**Verify, don't assume.** Read the file before editing it. Run `npm run typecheck` after meaningful changes. Don't claim a feature works because it "should" — actually trace the data flow. Don't assume a library API based on training data — check the version we're on (`package.json`) and look at how it's used elsewhere in the repo. The Next.js 15 + React 19 + Auth.js v5 + Prisma 7 stack is recent enough that older patterns are real footguns.
 
 **The previous session can be wrong too.** Inheriting a session's direction doesn't mean inheriting its mistakes. If the last thing that happened was a half-finished refactor or a questionable design call, you can push back rather than continuing it.
 
@@ -32,7 +32,7 @@ If a feature request feels like it's pulling toward "tell the user what to do," 
 
 - **Next.js 15** (App Router, React 19, Server Actions). Stable, not bleeding-edge — but recent enough that older patterns are real footguns.
 - **TypeScript** strict throughout.
-- **Prisma 6** + **Postgres 16** for persistence. Migrations are committed; `npm run db:migrate dev` after schema changes.
+- **Prisma 7** + **Postgres 16** for persistence. The Rust query engine is gone — queries run through the `@prisma/adapter-pg` driver adapter (see `lib/db.ts`). Generator output goes to `prisma/generated/prisma/` (gitignored), not `node_modules/.prisma`. CLI config lives in `prisma.config.ts` at the repo root, not the deprecated `package.json#prisma` block. Migrations are committed; `npm run db:migrate dev` after schema changes.
 - **Auth.js v5** (`next-auth@5.0.0-beta`). Google OAuth + Resend magic links. JWT session strategy (1-year lifetime — see `docs/decisions.md` for why).
 - **Tailwind 3** + custom design tokens. Warm dark theme, Fraunces / Bricolage Grotesque / JetBrains Mono via `next/font/google` (self-hosted at build time, no runtime CDN call).
 - **Pino** for structured JSON logging. **prom-client** for Prometheus metrics.

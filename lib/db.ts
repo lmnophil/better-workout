@@ -6,8 +6,13 @@
 //
 // Query timing is recorded into Prometheus regardless of speed; queries over
 // SLOW_QUERY_MS get an extra log warning so they're easy to spot in stderr.
+//
+// Prisma 7 dropped the bundled query engine in favour of pluggable driver
+// adapters. PrismaPg pipes queries through node-postgres directly — the
+// generated client itself is now pure JS.
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@/prisma/generated/prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { logger } from './logger';
 import { metrics } from './metrics';
 
@@ -18,7 +23,12 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function makeClient() {
+  const adapter = new PrismaPg({
+    connectionString: process.env.DATABASE_URL,
+  });
+
   const client = new PrismaClient({
+    adapter,
     // Emit events instead of logging to console so we can route them through
     // the structured logger and metrics.
     log: [

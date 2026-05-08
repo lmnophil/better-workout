@@ -1,0 +1,17 @@
+node_modules
+.next
+.git
+.env
+.env.*
+!.env.example
+README.md
+DEPLOY.md
+CLAUDE.md
+docs
+.vscode
+.idea
+*.log
+.DS_Store
+docker-compose.yml
+Caddyfile
+scripts

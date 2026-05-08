@@ -2,12 +2,15 @@
 // Run `npx prisma migrate dev` after edits.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "./generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // The connection URL lives in prisma.config.ts (Prisma 7 no longer accepts
+  // it in the schema). At runtime, the Prisma client is constructed with a
+  // PrismaPg driver adapter that reads DATABASE_URL directly — see lib/db.ts.
 }
 
 // ================================================================

@@ -88,6 +88,11 @@ declare module 'next-auth' {
   }
 }
 
+// TS only resolves a `declare module` augmentation if it has already seen the
+// module elsewhere in the type graph. The empty type-only import does that
+// without affecting the runtime bundle.
+import type {} from 'next-auth/jwt';
+
 declare module 'next-auth/jwt' {
   interface JWT {
     userId?: string;

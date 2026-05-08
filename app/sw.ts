@@ -1,3 +1,4 @@
+/// <reference lib="webworker" />
 // Service worker source. Compiled by Serwist into public/sw.js at build time.
 //
 // Strategy:

@@ -179,10 +179,10 @@ First build takes a few minutes — Docker pulls Node, Postgres, Caddy, and buil
 **Seed the built-in exercises (one-time):**
 
 ```bash
-docker compose run --rm app node prisma/seed.js
+docker compose exec app node prisma/seed.js
 ```
 
-The seed script is compiled at build time so it runs with plain `node` (no need for `tsx` in the runtime image). It's idempotent — safe to re-run after updating `lib/exercises-data.ts` and rebuilding.
+Use `exec` against the already-running app container, not `run` — the entrypoint script hardcodes `node server.js` and ignores any args you pass to `run`. The seed script is compiled at build time so it runs with plain `node` (no need for `tsx` in the runtime image). It's idempotent — safe to re-run after updating `lib/exercises-data.ts` and rebuilding.
 
 ## Part 8 — Verify
 
@@ -217,7 +217,7 @@ docker compose logs -f app
 docker compose exec db psql -U workout -d workout
 
 # Re-seed (idempotent — re-running won't duplicate)
-docker compose run --rm app node prisma/seed.js
+docker compose exec app node prisma/seed.js
 ```
 
 ### Rotating the Postgres password
@@ -465,7 +465,7 @@ This endpoint backs:
 Hit it manually:
 
 ```bash
-docker compose exec app node healthcheck.js && echo "healthy" || echo "unhealthy"
+docker compose exec app node healthcheck.cjs && echo "healthy" || echo "unhealthy"
 # or from outside:
 curl -i https://workout.example.com/api/healthz
 ```

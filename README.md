@@ -28,7 +28,7 @@ The app is deliberately neutral about *how* you train — no prescribed program,
 ## Stack
 
 - **Next.js 15** (App Router, React 19, Server Actions), **TypeScript** strict
-- **Prisma 6** + **Postgres 16**
+- **Prisma 7** + **Postgres 16** (driver adapter via `@prisma/adapter-pg`, no Rust query engine)
 - **Auth.js v5** (Google OAuth + Resend magic links)
 - **Tailwind 3** + custom design tokens (warm dark theme)
 - **Serwist** for PWA / offline support

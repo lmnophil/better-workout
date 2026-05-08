@@ -64,7 +64,7 @@ services:
       # Hits /api/healthz which does SELECT 1 against Postgres — confirms the
       # full path (driver, network, db) is working, not just that the Node
       # process is alive.
-      test: ['CMD', 'node', 'healthcheck.js']
+      test: ['CMD', 'node', 'healthcheck.cjs']
       interval: 30s
       timeout: 10s
       retries: 3

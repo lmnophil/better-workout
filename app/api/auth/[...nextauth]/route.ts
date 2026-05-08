@@ -4,7 +4,9 @@
 //   GET      /api/auth/callback/{provider}
 //   ...and the rest.
 
-export { GET, POST } from '@/auth';
+import { handlers } from '@/auth';
+
+export const { GET, POST } = handlers;
 
 // We export the runtime explicitly so OAuth callbacks run on Node
 // (Resend's email sending requires Node, and Prisma adapter is Node-only).
