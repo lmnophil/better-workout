@@ -1,0 +1,136 @@
+# Production stack: Postgres + Next.js app + Caddy reverse proxy.
+#
+# All secrets live in .env (sibling to this file). Caddy handles HTTPS
+# automatically via Let's Encrypt — set DOMAIN to a real domain pointed at
+# this host and ports 80/443 must be reachable from the public internet.
+#
+# Log rotation: every service uses the json-file driver with size + count
+# caps. Each service tops out at ~50MB on disk (5 × 10MB rotated, gzipped).
+# That keeps Docker logs friendly to small VMs without losing recent history.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+    compress: 'true'
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-workout}
+      POSTGRES_USER: ${POSTGRES_USER:-workout}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-workout} -d ${POSTGRES_DB:-workout}',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - internal
+    logging: *default-logging
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-workout}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-workout}
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_URL: ${AUTH_URL}
+      # We're always behind Caddy in this deployment, so trusting forwarded
+      # host headers is correct. If you ever expose the app container directly,
+      # remove this.
+      AUTH_TRUST_HOST: 'true'
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET}
+      AUTH_RESEND_KEY: ${AUTH_RESEND_KEY}
+      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      METRICS_TOKEN: ${METRICS_TOKEN}
+      NODE_ENV: production
+    healthcheck:
+      # Hits /api/healthz which does SELECT 1 against Postgres — confirms the
+      # full path (driver, network, db) is working, not just that the Node
+      # process is alive.
+      test: ['CMD', 'node', 'healthcheck.js']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # First-boot grace: migrations run during entrypoint, then the server
+      # has to compile. 30s is comfortable on a small VM.
+      start_period: 30s
+    networks:
+      - internal
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: ${DOMAIN}
+    depends_on:
+      # Wait for the app to actually be healthy before letting traffic in,
+      # not just for the container to exist. Avoids the "deploy → 502 for 30s"
+      # window that confuses uptime monitors.
+      app:
+        condition: service_healthy
+    networks:
+      - internal
+    logging: *default-logging
+
+  backup:
+    # Same Postgres major version as the db service so pg_dump matches the
+    # server format exactly. (pg_dump from a newer client to an older server
+    # works; the reverse can fail. Pinning the same image is simplest.)
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER:-workout}
+      POSTGRES_DB: ${POSTGRES_DB:-workout}
+      # PGPASSWORD is the standard env var pg_dump reads; no flag needed.
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_SCHEDULE_HOUR: ${BACKUP_SCHEDULE_HOUR:-03}
+      BACKUP_KEEP_LOCAL: ${BACKUP_KEEP_LOCAL:-7}
+    volumes:
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - ./scripts/backup-loop.sh:/usr/local/bin/backup-loop.sh:ro
+      # BACKUP_HOST_DIR is the host path where dumps land. Your existing
+      # offsite pipeline picks them up from there.
+      - ${BACKUP_HOST_DIR:?BACKUP_HOST_DIR must be set in .env}:/backups
+    entrypoint: ['sh', '/usr/local/bin/backup-loop.sh']
+    networks:
+      - internal
+    logging: *default-logging
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

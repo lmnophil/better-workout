@@ -1,0 +1,32 @@
+// Offline fallback. Shown by the service worker when a navigation request
+// can't be served from network or cache. Kept deliberately spartan.
+
+export const metadata = { title: 'Offline — Workout Tracker' };
+
+export default function OfflinePage() {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-5 py-10 bg-ink-950 text-ink-100">
+      <div className="max-w-sm text-center">
+        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-2">
+          Offline
+        </div>
+        <h1
+          className="font-display text-3xl tracking-tight mb-3"
+          style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 30" }}
+        >
+          You&apos;re offline
+        </h1>
+        <p className="text-sm text-ink-300 leading-relaxed mb-6">
+          You can still browse cached pages from earlier sessions. New workout data
+          will sync when you&apos;re back online.
+        </p>
+        <a
+          href="/"
+          className="text-xs tracking-[0.2em] uppercase accent-text underline underline-offset-4 hover:no-underline"
+        >
+          Try again
+        </a>
+      </div>
+    </div>
+  );
+}

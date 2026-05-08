@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* Font set via next/font CSS variable on <html> in app/layout.tsx */
+    font-family: var(--font-body), system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-ink-950 text-ink-100;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Hide number input arrows — we use them for reps/weight */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer utilities {
+  .accent-text {
+    color: theme('colors.accent.DEFAULT');
+  }
+  .accent-bg {
+    background-color: theme('colors.accent.DEFAULT');
+  }
+  .accent-border {
+    border-color: theme('colors.accent.DEFAULT');
+  }
+}

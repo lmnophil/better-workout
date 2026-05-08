@@ -1,0 +1,61 @@
+# Caddy config for the workout tracker.
+# Auto-HTTPS via Let's Encrypt — just point DNS at this host and run.
+
+{$DOMAIN} {
+    encode gzip zstd
+
+    # Block direct internet access to the metrics endpoint. The scraper
+    # (Prometheus, etc.) should reach the app on the internal Docker network
+    # at app:3000/api/metrics instead — that's how DEPLOY.md describes it.
+    # If you do want the endpoint reachable externally, swap "respond ... 404"
+    # for the proxy directive; the METRICS_TOKEN check still protects it.
+    handle /api/metrics {
+        respond "Not Found" 404
+    }
+
+    # Service worker needs the right MIME type and shouldn't be cached longer than needed
+    @sw path /sw.js
+    header @sw {
+        Cache-Control "no-cache"
+        Service-Worker-Allowed "/"
+    }
+
+    # Long-lived cache for static assets (Next.js fingerprints them)
+    @static path /_next/static/*
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    header {
+        # HSTS — force HTTPS for a year. Comment out the first time if you're
+        # still testing on a subdomain you might want to revert.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        # Remove the default "Server: Caddy" header
+        -Server
+    }
+
+    reverse_proxy app:3000 {
+        # Caddy adds these by default for reverse_proxy, but being explicit
+        # keeps it discoverable. Used by the rate limiter to identify clients.
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # JSON-formatted access logs to stdout. Each request becomes a JSON line
+    # — Docker captures them, and they're easy to parse with jq or pipe into
+    # Loki / OpenSearch / etc.
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+
+    # Skip access logs for static asset noise so real traffic isn't drowned
+    # out. App-level logs (server actions, errors) come from the app container,
+    # not Caddy.
+    @noisy path /_next/static/* /icons/* /favicon.ico /sw.js /manifest.webmanifest /api/healthz
+    log_skip @noisy
+}

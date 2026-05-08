@@ -1,0 +1,253 @@
+// Prisma schema — workout tracker
+// Run `npx prisma migrate dev` after edits.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ================================================================
+// AUTH.JS TABLES (required by @auth/prisma-adapter)
+// ================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+
+  accounts        Account[]
+  sessions        AuthSession[]
+  // App-side relations
+  customExercises Exercise[]             @relation("ExerciseOwner")
+  workoutSessions WorkoutSession[]
+  volumeTargets   UserVolumeTarget[]
+  preferences     UserPreferences?
+  exerciseSettings ExerciseUserSettings[]
+  templates       WorkoutTemplate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model AuthSession {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ================================================================
+// APP MODELS
+// ================================================================
+
+// Exercise represents both built-in (seeded) exercises and user-created custom ones.
+// Built-in: ownerId is null, isCustom is false. Shared across all users.
+// Custom:   ownerId is set, isCustom is true. Scoped to owner.
+model Exercise {
+  id           String   @id @default(cuid())
+  name         String
+  module       String // 'Activation Lower' | 'Activation Upper' | 'Mobility Lower' | 'Strength Barbell' | 'Strength Accessory' | 'Balance' | 'Custom'
+  prescription String? // Suggested set/rep scheme, e.g. "3×12, 5-sec hold"
+
+  // Muscles trained, split by emphasis:
+  //   primary   = the targets the lift was chosen for (full credit in volume)
+  //   secondary = muscles meaningfully worked but not the focus (half credit)
+  // Coverage (recency) treats both equally — being touched at all "freshens" a muscle.
+  // Volume tracking weights them: each primary set counts 1.0; each secondary set counts 0.5.
+  primaryMuscles   String[]
+  secondaryMuscles String[] @default([])
+
+  // Optional demonstration video. Manually added, no auto-fetching. UI surfaces
+  // a small play icon when present.
+  videoUrl String?
+
+  isCustom Boolean @default(false)
+
+  // Soft-delete: preserves historical SetLogs even after a user removes a custom from their list.
+  deletedAt DateTime?
+
+  ownerId String?
+  owner   User?   @relation("ExerciseOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  setLogs SetLog[]
+
+  // Per-user, per-exercise overrides (rest timer, etc.)
+  userSettings ExerciseUserSettings[]
+
+  // Templates this exercise appears in
+  inTemplates TemplateExercise[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([ownerId, name])
+  @@index([ownerId])
+  @@index([module])
+}
+
+// Per-user override settings for an Exercise. One row per (user, exercise).
+// Used so users can give built-in exercises their own rest-timer durations
+// without needing to fork them. Custom exercises also use this table for
+// consistency. Missing row = use UserPreferences defaults.
+model ExerciseUserSettings {
+  id         String @id @default(cuid())
+  userId     String
+  exerciseId String
+
+  // Override the global default rest timer for just this exercise. Null means
+  // "no override — use the global default."
+  restTimerSeconds Int?
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, exerciseId])
+  @@index([userId])
+}
+
+model WorkoutSession {
+  id          String    @id @default(cuid())
+  userId      String
+  date        DateTime  @default(now())
+  // Null while the workout is in progress; set when the user marks it complete.
+  // At most one in-progress session per user is the convention (enforced by app, not DB).
+  completedAt DateTime?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  setLogs SetLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, date])
+  @@index([userId, completedAt])
+}
+
+// Per-user override for weekly volume targets (sets/week for a muscle group).
+// If no row exists for a (user, muscle), the app falls back to the default
+// in lib/exercises-data.ts. Lets users tune targets to their own goals.
+model UserVolumeTarget {
+  id       String @id @default(cuid())
+  userId   String
+  muscleId String // Matches MuscleGroup.id, e.g. "glutes"
+  target   Int // Sets per week
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, muscleId])
+  @@index([userId])
+}
+
+// Per-user app preferences. One row per user, lazily created on first read.
+// Fields default to sensible values, so a missing row = use all defaults.
+model UserPreferences {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Rest timer settings
+  restTimerEnabled Boolean @default(true)
+  restTimerSeconds Int     @default(90) // Default rest period after each set
+  restTimerSound   Boolean @default(true) // Play a chime when timer ends
+  restTimerVibrate Boolean @default(true) // Vibrate when timer ends (mobile)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A named, reusable workout — a list of exercises in a chosen order. Loading a
+// template into the active session creates an empty SetLog for each exercise
+// so the user can start logging right away. Templates are private to the
+// creating user (sharing/PT features are future scope).
+model WorkoutTemplate {
+  id          String  @id @default(cuid())
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+
+  exercises TemplateExercise[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+// Junction row: an exercise inside a template, with its display position.
+// On load, we copy these into SetLogs (one empty set per exercise) preserving
+// the ordering. If the source exercise is later deleted, this row goes with it
+// (Cascade) — the template degrades gracefully.
+model TemplateExercise {
+  id         String          @id @default(cuid())
+  templateId String
+  template   WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  exerciseId String
+  exercise   Exercise        @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  position   Int
+
+  createdAt DateTime @default(now())
+
+  @@unique([templateId, exerciseId])
+  @@index([templateId, position])
+}
+
+model SetLog {
+  id         String  @id @default(cuid())
+  sessionId  String
+  exerciseId String
+  setNumber  Int
+  // Order of this exercise within the session. All sets of the same exercise
+  // share the same position. Higher = later in the workout. Updated by the
+  // reorderExercise action when the user moves an exercise up or down.
+  position   Int     @default(0)
+  reps       Int?
+  weight     Float? // Stored as number; UI handles unit display
+  notes      String?
+
+  session  WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise       @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId])
+  @@index([sessionId, position])
+  @@index([exerciseId])
+}
