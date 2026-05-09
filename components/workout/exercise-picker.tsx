@@ -21,6 +21,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Search, Trash2, PlayCircle, Check } from 'lucide-react';
 import {
+  EXERCISE_MODULES,
   MUSCLE_GROUPS,
   MuscleGroup,
 } from '@/lib/exercises-data';
@@ -259,15 +260,10 @@ function BrowseTab({
     return groups;
   }, [availableExercises, excludeIds, regionIds, muscleChipIds, query]);
 
-  const moduleOrder = [
-    'Activation Lower',
-    'Activation Upper',
-    'Mobility Lower',
-    'Strength Barbell',
-    'Strength Accessory',
-    'Balance',
-    'Custom',
-  ];
+  // Order derives from EXERCISE_MODULES (the natural session flow) with 'Custom'
+  // appended so user-created exercises sort last. Single source of truth — if
+  // EXERCISE_MODULES is reordered, the picker follows.
+  const moduleOrder = [...EXERCISE_MODULES, 'Custom'];
   const orderedModules = moduleOrder.filter((m) => groupedByModule.has(m));
   const totalCount = Array.from(groupedByModule.values()).reduce((s, arr) => s + arr.length, 0);
 

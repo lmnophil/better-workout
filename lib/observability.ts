@@ -48,6 +48,20 @@ const EXPECTED_MESSAGES = [
   'Add at least one exercise',
   'This template no longer',
   'That exercise is already in this session',
+  'Built-in templates',
+  'This template is used in your routine',
+  'No routine',
+  'You already have a routine',
+  'No routine to update',
+  'Routine day not found',
+  'A routine can have at most',
+  'That weekday is already taken',
+  'That exercise is already in this day',
+  "That exercise isn't in this day's template",
+  "That exercise isn't in the template",
+  'That exercise is already in the template',
+  'This day uses a default template',
+  'This day has no usable exercises',
 ];
 
 function isExpectedError(err: unknown): boolean {

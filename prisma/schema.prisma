@@ -24,16 +24,17 @@ model User {
   emailVerified DateTime?
   image         String?
 
-  accounts        Account[]
-  sessions        AuthSession[]
+  accounts         Account[]
+  sessions         AuthSession[]
   // App-side relations
-  customExercises Exercise[]             @relation("ExerciseOwner")
-  workoutSessions WorkoutSession[]
-  volumeTargets   UserVolumeTarget[]
-  preferences     UserPreferences?
+  customExercises  Exercise[]             @relation("ExerciseOwner")
+  workoutSessions  WorkoutSession[]
+  volumeTargets    UserVolumeTarget[]
+  preferences      UserPreferences?
   exerciseSettings ExerciseUserSettings[]
-  templates       WorkoutTemplate[]
-  hiddenTemplates UserHiddenTemplate[]
+  templates        WorkoutTemplate[]
+  hiddenTemplates  UserHiddenTemplate[]
+  routine          Routine?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -83,9 +84,9 @@ model VerificationToken {
 // Built-in: ownerId is null, isCustom is false. Shared across all users.
 // Custom:   ownerId is set, isCustom is true. Scoped to owner.
 model Exercise {
-  id           String   @id @default(cuid())
+  id           String  @id @default(cuid())
   name         String
-  module       String // 'Activation Lower' | 'Activation Upper' | 'Mobility Lower' | 'Strength Barbell' | 'Strength Accessory' | 'Balance' | 'Custom'
+  module       String // EXERCISE_MODULES values from lib/exercises-data.ts ('SMR Lower'…'Rev Up') or 'Custom' for user-created.
   prescription String? // Suggested set/rep scheme, e.g. "3×12, 5-sec hold"
 
   // Muscles trained, split by emphasis:
@@ -115,6 +116,11 @@ model Exercise {
 
   // Templates this exercise appears in
   inTemplates TemplateExercise[]
+
+  // Routine-day pending swaps that reference this exercise as outgoing or
+  // incoming. Two named relations because both endpoints point at Exercise.
+  pendingSwapsOut RoutineDayPendingSwap[] @relation("PendingSwapOut")
+  pendingSwapsIn  RoutineDayPendingSwap[] @relation("PendingSwapIn")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -155,6 +161,13 @@ model WorkoutSession {
   // At most one in-progress session per user is the convention (enforced by app, not DB).
   completedAt DateTime?
 
+  // Set when this session was started from a RoutineDay (via the routine
+  // timeline's "Start" affordance). Null for ad-hoc sessions and template-direct
+  // starts. Sessions are durable records — if the routine day is later deleted,
+  // we SetNull rather than cascade so history is preserved.
+  startedFromRoutineDayId String?
+  startedFromRoutineDay   RoutineDay? @relation(fields: [startedFromRoutineDayId], references: [id], onDelete: SetNull)
+
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   setLogs SetLog[]
 
@@ -163,6 +176,7 @@ model WorkoutSession {
 
   @@index([userId, date])
   @@index([userId, completedAt])
+  @@index([startedFromRoutineDayId])
 }
 
 // Per-user override for weekly volume targets (sets/week for a muscle group).
@@ -218,8 +232,12 @@ model WorkoutTemplate {
   name        String
   description String?
 
-  exercises TemplateExercise[]
-  hiddenBy  UserHiddenTemplate[]
+  exercises   TemplateExercise[]
+  hiddenBy    UserHiddenTemplate[]
+  // Routine days that reference this template. A user can't hard-delete a
+  // template that's still in their routine — the action checks first and
+  // returns a friendly error rather than relying on the FK to refuse.
+  routineDays RoutineDay[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -284,4 +302,101 @@ model SetLog {
   @@index([sessionId])
   @@index([sessionId, position])
   @@index([exerciseId])
+}
+
+// ================================================================
+// ROUTINES
+// ================================================================
+//
+// A Routine is the user's named cycle of templates. Templates are the plans
+// for individual workouts; a routine is how those plans rotate. The app does
+// not author or recommend routines — it represents the cycle the user
+// declares ("last time I did A, this time B, then C, then loop"). Coverage
+// remains the muscle-level signal; the routine is structure, not prescription.
+//
+// One routine per user (enforced by @unique on userId). Capped at 7 days.
+// Two scheduling styles, picked when the routine is created:
+//   - 'sequence': self-paced cycle. Cursor (lastCompletedPosition) advances
+//     when a routine-started session is completed via completeActiveSession.
+//   - 'weekday':  each day is pinned to a weekday (0=Sun..6=Sat). Calendar
+//     drives "today's workout"; no cursor.
+
+model Routine {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+
+  // 'sequence' | 'weekday' — see comment above.
+  scheduleStyle String @default("sequence")
+
+  // Sequence mode only. The position of the most-recently-completed routine
+  // session. Next-up = (lastCompletedPosition + 1) mod days.length. Null
+  // until the user completes their first routine session.
+  lastCompletedPosition Int?
+
+  days RoutineDay[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One day within a Routine. Always has a position (display order, 0-indexed
+// and contiguous). Has a weekday only in weekday mode. References an existing
+// WorkoutTemplate — routines reuse the template concept rather than duplicate
+// it, so editing a template propagates to every routine day that uses it.
+model RoutineDay {
+  id         String          @id @default(cuid())
+  routineId  String
+  routine    Routine         @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  templateId String
+  template   WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  position Int
+  // Sequence mode: null. Weekday mode: 0-6, unique within a routine so a
+  // weekday can't be double-booked. The unique constraint relies on Postgres
+  // NULL semantics — multiple sequence-mode rows with weekday=null don't
+  // collide.
+  weekday  Int?
+  // Optional user-defined label (e.g. "Heavy day"). The template name is
+  // primary; this is auxiliary display text.
+  label    String?
+
+  pendingSwaps RoutineDayPendingSwap[]
+  // Sessions started from this day. SetNull on session.startedFromRoutineDayId
+  // when this day is deleted, so completed sessions remain in history.
+  sessions     WorkoutSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([routineId, position])
+  @@unique([routineId, weekday])
+  @@index([routineId])
+}
+
+// A one-time exercise substitution staged on a RoutineDay. Applied (and then
+// cleared) when the day's session is started. Persists across calendar days —
+// the user can stage a swap days in advance.
+//
+// Exercise relations are Cascade. For built-ins (no UI delete) this never
+// fires. For user customs that hard-delete (rare; the UI soft-deletes), the
+// pending swap goes away with the exercise. Soft-deleted exercises in a swap
+// row are filtered out at apply time, since the swap action validates the
+// incoming exercise is still available.
+model RoutineDayPendingSwap {
+  id           String     @id @default(cuid())
+  routineDayId String
+  routineDay   RoutineDay @relation(fields: [routineDayId], references: [id], onDelete: Cascade)
+
+  outExerciseId String
+  outExercise   Exercise @relation("PendingSwapOut", fields: [outExerciseId], references: [id], onDelete: Cascade)
+  inExerciseId  String
+  inExercise    Exercise @relation("PendingSwapIn", fields: [inExerciseId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([routineDayId, outExerciseId])
+  @@index([routineDayId])
 }

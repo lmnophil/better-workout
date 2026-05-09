@@ -6,13 +6,14 @@ For schema-editing operational guidance (migrations, seed compilation, things-th
 
 ## Entity overview
 
-Twelve models, in three groups:
+Fifteen models, in four groups:
 
 | Group | Models | Notes |
 |---|---|---|
 | Auth.js adapter tables | `User`, `Account`, `AuthSession`, `VerificationToken` | Managed by the `@auth/prisma-adapter`. The app reads `User.id` to scope everything; the rest is opaque infrastructure. |
 | Core domain | `Exercise`, `WorkoutSession`, `SetLog` | The spine of the app. Every workout is a session containing setLogs that reference exercises. |
 | User-customization layer | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, saved workout lineups, and per-user hide markers for built-in templates. |
+| Routines | `Routine`, `RoutineDay`, `RoutineDayPendingSwap` | The user's named cycle of templates and any one-time substitutions staged for upcoming days. Capped at 7 days per routine. |
 
 ## Diagram
 
@@ -27,14 +28,21 @@ erDiagram
     User ||--o{ ExerciseUserSettings : has
     User ||--o{ WorkoutTemplate : "owns (user templates)"
     User ||--o{ UserHiddenTemplate : "hides built-ins"
+    User ||--o| Routine : has
 
     WorkoutSession ||--o{ SetLog : contains
+    WorkoutSession }o--|| RoutineDay : "started from (optional)"
     Exercise ||--o{ SetLog : "logged as (Restrict)"
     Exercise ||--o{ ExerciseUserSettings : "configured by"
     Exercise ||--o{ TemplateExercise : "appears in"
+    Exercise ||--o{ RoutineDayPendingSwap : "swapped in/out"
 
     WorkoutTemplate ||--o{ TemplateExercise : contains
     WorkoutTemplate ||--o{ UserHiddenTemplate : "hidden by"
+    WorkoutTemplate ||--o{ RoutineDay : "scheduled in"
+
+    Routine ||--o{ RoutineDay : has
+    RoutineDay ||--o{ RoutineDayPendingSwap : "stages"
 
     User {
         string id PK
@@ -101,6 +109,27 @@ erDiagram
         string userId FK,UK
         boolean restTimerEnabled
         int restTimerSeconds
+    }
+    Routine {
+        string id PK
+        string userId FK,UK
+        string name
+        string scheduleStyle "sequence | weekday"
+        int lastCompletedPosition "sequence-mode cursor"
+    }
+    RoutineDay {
+        string id PK
+        string routineId FK
+        string templateId FK
+        int position "0..N-1"
+        int weekday "0=Sun..6=Sat, weekday mode only"
+        string label "optional user label"
+    }
+    RoutineDayPendingSwap {
+        string id PK
+        string routineDayId FK
+        string outExerciseId FK
+        string inExerciseId FK
     }
 ```
 
@@ -181,6 +210,35 @@ Per-(user, muscle) override of the weekly volume target. Default targets live as
 One row per user, **lazily created on first write**. The query `getUserPreferences()` returns hard-coded defaults when no row exists, so reading is cheap on every page load and we only write when something actually changes.
 
 The fields are all rest-timer related right now (`restTimerEnabled`, `restTimerSeconds`, `restTimerSound`, `restTimerVibrate`). Future preferences (units, theme, notification settings) would slot in here.
+
+## Routines
+
+The user's named cycle of templates. See [`docs/decisions.md`](./decisions.md) for the stance on why routines exist and what they're not. Three models, capped at 7 days per routine (enforced in the action layer; the unique constraint on `(routineId, weekday)` doubles as a natural cap in weekday mode).
+
+### `Routine`
+
+One per user, enforced by `@unique` on `userId`. The `scheduleStyle` field picks the cycling model:
+
+- **`'sequence'`** — self-paced cycle. The `lastCompletedPosition` cursor advances when a session that was started from this routine completes. "Today's day" = the day at position `(lastCompletedPosition + 1) mod days.length`. Null cursor means "haven't completed a routine session yet — today is position 0."
+- **`'weekday'`** — calendar-anchored. Each `RoutineDay` carries a non-null `weekday` (0=Sun..6=Sat, unique per routine). `lastCompletedPosition` is unused; today's day comes from the calendar.
+
+Switching styles in `updateRoutine` clears state that doesn't apply to the new mode (weekday → sequence wipes weekday assignments; sequence → weekday resets the cursor).
+
+### `RoutineDay`
+
+A position within the cycle. Always has a `position` (0-indexed, contiguous, unique per routine). The `templateId` is a *reference*, not a copy — editing the template propagates to every routine day that uses it. The `label` is optional auxiliary text ("Heavy day", "Light day"); the template name is the primary display.
+
+Weekday is only meaningful in weekday mode; in sequence mode it's null. The `(routineId, weekday)` unique constraint relies on Postgres NULL semantics — multiple sequence-mode rows with weekday=null don't collide.
+
+`onDelete: Cascade` from the routine; `onDelete: Cascade` from the template. Sessions started from the day reference it via `WorkoutSession.startedFromRoutineDayId` with `onDelete: SetNull`, so completed sessions stay in history even after the day is removed.
+
+### `RoutineDayPendingSwap`
+
+A one-time exercise substitution staged on a routine day. The user can preview a day's planned workout, swap an exercise, choose "just next time," and the swap waits here until they actually start the session. At session-start, the swaps for that day are applied as the lineup is populated, then the rows are cleared.
+
+Persists across calendar days — if you stage a swap Tuesday for "next Wednesday" and don't actually start the session until Friday, the swap still applies. The unique `(routineDayId, outExerciseId)` constraint means re-staging a swap for the same outgoing exercise replaces the previous one.
+
+Permanent swaps don't go through this table — they edit the underlying `TemplateExercise` row directly via `swapInRoutineTemplate`, and (for safety) refuse to modify built-in templates.
 
 ## Auth.js tables
 

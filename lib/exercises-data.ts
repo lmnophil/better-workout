@@ -2,13 +2,25 @@
 // This is the source of truth for built-in exercises. Updates here flow into
 // the database via `npm run db:seed` (idempotent upsert).
 
+// Modules are visual chunks within a workout. The order here is the natural
+// flow within a single session: prep (SMR → mobility → activation), then load
+// (strength), then balance/conditioning at the end. Templates and the active
+// session group exercises by module using this ordering.
 export const EXERCISE_MODULES = [
+  'SMR Lower',
+  'SMR Upper',
+  'SMR Trunk',
+  'Mobility Lower',
+  'Mobility Upper',
+  'Mobility Trunk',
   'Activation Lower',
   'Activation Upper',
-  'Mobility Lower',
+  'Activation Trunk',
   'Strength Barbell',
   'Strength Accessory',
+  'Strength Thoracic',
   'Balance',
+  'Rev Up',
 ] as const;
 
 export type ExerciseModule = (typeof EXERCISE_MODULES)[number];
@@ -26,6 +38,69 @@ export type SeedExercise = {
 };
 
 export const SEED_EXERCISES: SeedExercise[] = [
+  // ============ SMR LOWER ============
+  // Soft-tissue work uses the 'soft tissue' muscle id — a recency-only marker
+  // (no weekly volume target). Lets coverage show "did I roll out recently?"
+  // without crediting foam rolling as hypertrophy work.
+  {
+    name: 'Foam roll quads',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1–2 min per leg, slow passes',
+  },
+  {
+    name: 'Foam roll IT band / outer thigh',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, ease into tender spots',
+  },
+  {
+    name: 'Foam roll glutes / piriformis',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, lacrosse ball OK for depth',
+  },
+  {
+    name: 'Foam roll calves',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per leg',
+  },
+
+  // ============ SMR UPPER ============
+  {
+    name: 'Foam roll T-spine extensions',
+    module: 'SMR Upper',
+    primaryMuscles: ['soft tissue', 't-spine mobility'],
+    prescription: '5–8 slow extensions per spinal segment',
+  },
+  {
+    name: 'Foam roll lats',
+    module: 'SMR Upper',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side',
+  },
+  {
+    name: 'Lacrosse ball pec / anterior shoulder',
+    module: 'SMR Upper',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, against a wall',
+  },
+
+  // ============ SMR TRUNK ============
+  {
+    name: 'Foam roll obliques',
+    module: 'SMR Trunk',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side',
+  },
+  {
+    name: 'Foam roll mid-back',
+    module: 'SMR Trunk',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min, slow passes',
+  },
+
   // ============ ACTIVATION LOWER ============
   {
     name: 'Banded glute bridges with abduction',
@@ -104,6 +179,85 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '8–10 per side',
   },
 
+  // ============ MOBILITY UPPER ============
+  {
+    name: 'Thread the needle',
+    module: 'Mobility Upper',
+    primaryMuscles: ['t-spine mobility', 'shoulder mobility'],
+    prescription: '6–8 per side, controlled',
+  },
+  {
+    name: 'Quadruped T-spine rotations',
+    module: 'Mobility Upper',
+    primaryMuscles: ['t-spine mobility'],
+    prescription: '6–8 per side, hand behind head',
+  },
+  {
+    name: 'Doorway pec stretch',
+    module: 'Mobility Upper',
+    primaryMuscles: ['shoulder mobility'],
+    prescription: '30s per side',
+  },
+  {
+    name: 'Sleeper stretch',
+    module: 'Mobility Upper',
+    primaryMuscles: ['shoulder mobility'],
+    prescription: '30s per side, side-lying',
+  },
+
+  // ============ MOBILITY TRUNK ============
+  {
+    name: "World's greatest stretch",
+    module: 'Mobility Trunk',
+    primaryMuscles: ['hip mobility', 't-spine mobility'],
+    prescription: '5 reaches per side',
+  },
+  {
+    name: 'Cat-cow',
+    module: 'Mobility Trunk',
+    primaryMuscles: ['t-spine mobility'],
+    prescription: '8–10 reps, slow with breath',
+  },
+  {
+    name: 'Supine spinal twist',
+    module: 'Mobility Trunk',
+    primaryMuscles: ['t-spine mobility'],
+    prescription: '30s per side',
+  },
+  {
+    name: "Child's pose with reach",
+    module: 'Mobility Trunk',
+    primaryMuscles: ['shoulder mobility', 't-spine mobility'],
+    prescription: '30s per side, reach hand under',
+  },
+
+  // ============ ACTIVATION TRUNK ============
+  {
+    name: 'Dead bug',
+    module: 'Activation Trunk',
+    primaryMuscles: ['core'],
+    prescription: '2×8 per side, slow with breath',
+  },
+  {
+    name: 'Bird dog',
+    module: 'Activation Trunk',
+    primaryMuscles: ['core'],
+    secondaryMuscles: ['glutes', 'lower back'],
+    prescription: '2×8 per side, hold the top',
+  },
+  {
+    name: 'Side plank',
+    module: 'Activation Trunk',
+    primaryMuscles: ['core'],
+    prescription: '2×20–30s per side',
+  },
+  {
+    name: 'Hollow hold',
+    module: 'Activation Trunk',
+    primaryMuscles: ['core'],
+    prescription: '2×20–30s, lower back pressed down',
+  },
+
   // ============ STRENGTH BARBELL ============
   {
     name: 'Trap bar deadlift',
@@ -174,6 +328,60 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes', 'hamstrings'],
     secondaryMuscles: ['lower back'],
     prescription: '3×10, 5-sec hold with band tension',
+  },
+
+  // ============ STRENGTH THORACIC ============
+  // Postural strength for the thoracic spine and surrounding muscles.
+  // Pairs with Activation Upper / SMR Upper on Days 2 and 3 of Edwardo's split.
+  {
+    name: 'Banded pull-aparts',
+    module: 'Strength Thoracic',
+    primaryMuscles: ['rear delts', 'scapular'],
+    prescription: '3×12–15, arms straight',
+  },
+  {
+    name: 'Half-kneeling Pallof press',
+    module: 'Strength Thoracic',
+    primaryMuscles: ['core'],
+    secondaryMuscles: ['scapular'],
+    prescription: '3×8 per side, anti-rotation',
+  },
+  {
+    name: 'Prone press-ups (cobra)',
+    module: 'Strength Thoracic',
+    primaryMuscles: ['t-spine mobility'],
+    secondaryMuscles: ['lower back'],
+    prescription: '2×10, hips down, smooth extension',
+  },
+  {
+    name: 'Reverse fly',
+    module: 'Strength Thoracic',
+    primaryMuscles: ['rear delts'],
+    secondaryMuscles: ['scapular'],
+    prescription: '3×10–12, light DB or band',
+  },
+
+  // ============ REV UP ============
+  // Brief conditioning at the end of a session. Cardio uses an 'other'
+  // category id with no volume target — recency matters, set count doesn't.
+  {
+    name: 'Jump rope',
+    module: 'Rev Up',
+    primaryMuscles: ['cardio'],
+    prescription: '1–2 min, light bounce',
+  },
+  {
+    name: 'Jumping jacks',
+    module: 'Rev Up',
+    primaryMuscles: ['cardio'],
+    prescription: '30–45s',
+  },
+  {
+    name: 'Mountain climbers',
+    module: 'Rev Up',
+    primaryMuscles: ['cardio'],
+    secondaryMuscles: ['core'],
+    prescription: '30–45s, controlled',
   },
 
   // ============ ACTIVATION UPPER ============
@@ -324,6 +532,12 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '3×10–15',
   },
   {
+    name: 'Overhead tricep extension',
+    module: 'Strength Accessory',
+    primaryMuscles: ['triceps'],
+    prescription: '3×10–12, full stretch overhead',
+  },
+  {
     name: 'Leg curl',
     module: 'Strength Accessory',
     primaryMuscles: ['hamstrings'],
@@ -372,9 +586,13 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
   { id: 'core', label: 'Core', category: 'trunk', weeklyVolumeTarget: 8 },
   { id: 'lower back', label: 'Lower back', category: 'trunk', weeklyVolumeTarget: 6 },
   { id: 'balance', label: 'Balance', category: 'other' },
+  { id: 'cardio', label: 'Cardio', category: 'other' },
   { id: 'hip mobility', label: 'Hip mobility', category: 'mobility' },
   { id: 'ankle mobility', label: 'Ankle mobility', category: 'mobility' },
   { id: 'hip flexors', label: 'Hip flexors', category: 'mobility' },
+  { id: 'shoulder mobility', label: 'Shoulder mobility', category: 'mobility' },
+  { id: 't-spine mobility', label: 'T-spine mobility', category: 'mobility' },
+  { id: 'soft tissue', label: 'Soft tissue', category: 'mobility' },
 ];
 
 // ================================================================

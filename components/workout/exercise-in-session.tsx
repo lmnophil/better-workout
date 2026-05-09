@@ -1,7 +1,8 @@
 'use client';
 
 // One exercise within the active session. Renders:
-//   - header with module tag, name, optional video link, reorder + remove controls
+//   - header with name, custom marker, optional video link, reorder + remove controls
+//     (the module tag lives on the section header above the card, not here)
 //   - prescription line with inline rest-timer editor (override per exercise)
 //   - last-time reference line
 //   - set rows with reps/weight inputs, saved indicator, per-set notes (collapsible)
@@ -89,18 +90,13 @@ export function ExerciseInSession({
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-[10px] tracking-[0.2em] uppercase text-ink-500">
-              {exercise.module}
-            </span>
-            {exercise.isCustom && (
-              <span className="text-[9px] tracking-[0.2em] uppercase accent-text">
-                · Custom
-              </span>
-            )}
-          </div>
           <div className="text-sm font-medium text-ink-100 flex items-center gap-2">
             <span>{exercise.name}</span>
+            {exercise.isCustom && (
+              <span className="text-[9px] tracking-[0.2em] uppercase accent-text shrink-0">
+                Custom
+              </span>
+            )}
             {exercise.videoUrl && (
               <a
                 href={exercise.videoUrl}

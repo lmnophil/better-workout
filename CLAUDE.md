@@ -20,13 +20,14 @@ A self-hosted workout tracker. Single-user or small-group deployment, runs on th
 
 The philosophical stance is the most important thing about this app, and the easiest thing to accidentally undo:
 
-- **The app is neutral.** It does not prescribe workouts, suggest exercises, or tell the user what to do. It shows them their own data. The original trigger was a user who couldn't follow a fitness program because it was too prescriptive; this app is the opposite of that.
-- **Sessions are records, not plans.** A `WorkoutSession` is a date plus a list of sets that happened. There's no "type of day" stored on it. Don't add a `dayFocus` field. Don't add suggested-exercises-for-today. The Coverage view is the only nudge.
-- **Coverage drives guidance.** A color-graded map of muscle groups (recently worked → neglected) is the primary signal for "what should I do today." If we ever add a recommendation feature, it grows from coverage data, not from a stored plan.
+- **The app is neutral.** It does not prescribe workouts, suggest exercises, or tell the user what to do. It shows them their own data, and reflects back the structures the user has declared. The original trigger was a user who couldn't follow a fitness program because it was too prescriptive; this app is the opposite of that.
+- **Sessions are records, not plans.** A `WorkoutSession` is a date plus a list of sets that happened. There's no "type of day" stored on it. Don't add a `dayFocus` field. Sessions can be *started from* a routine day (via the optional `startedFromRoutineDayId` FK), but the session itself remains a record. The plan lives on the routine, not the session.
+- **Templates and routines are user-authored plans.** A template is a named lineup of exercises in chosen order. A routine is the user's ordered cycle of templates ("last time I did A, this time B, then C, then loop"). Both are user-declared structures the app represents back; they are not prescriptions or recommendations. The app does not invent or coach. No streaks, no adherence tracking, no "you missed Wednesday" nags.
+- **Coverage drives muscle-level guidance.** The color-graded coverage map is the recovery/balance signal. If we ever add an *algorithmic* recommendation feature, it grows from coverage data, not from any stored plan.
 - **Volume targets are configurable defaults, not gospel.** ~10 sets/muscle/week for hypertrophy is baked in; users override per-muscle in settings. Don't tighten the defaults; don't add prescriptive ranges.
-- **Built-in vs custom exercises coexist.** The seed data is one trainer's program. Users can add anything else as customs. Both flow through the same model.
+- **Built-in vs custom exercises coexist.** The seed data is one trainer's program with a few common-gym additions. Users can add anything else as customs. Both flow through the same model.
 
-If a feature request feels like it's pulling toward "tell the user what to do," push back before building it.
+If a feature request feels like it's pulling toward "tell the user what to do" (rather than "represent what the user told us"), push back before building it.
 
 ## Stack
 
@@ -132,7 +133,8 @@ README.md                  User-facing project intro
 
 These are not oversights — pushing back if asked to add them is fair:
 
-- **Suggested workouts / "today's plan"** — see philosophical stance above.
+- **App-prescribed workouts / "you should do X today"** — see philosophical stance above. Routines surface "today's day" because the user *told* the app what comes next; the app doesn't invent it. Anything that has the app picking exercises or sequencing without user authorship is out of scope.
+- **Streaks, adherence tracking, gamification** — directly conflicts with neutral-tool stance.
 - **Social features** (friends, sharing, leaderboards) — single-user app.
 - **Trainer/PT relationships** — discussed and deferred (see `docs/roadmap.md`).
 - **Public-internet multi-user SaaS hardening** — designed for self-host. Rate limits are in-memory; sessions are 1 year; admin tooling is mostly absent. Don't add Redis or harden against threats this deployment model doesn't have.

@@ -14,6 +14,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { withLogging } from './observability';
 import { metrics } from './metrics';
+import { MAX_ROUTINE_DAYS } from './routine';
 
 async function requireUser() {
   const session = await auth();
@@ -302,13 +303,33 @@ export const completeActiveSession = withLogging('completeActiveSession', async 
   const setCount = await db.setLog.count({ where: { sessionId: session.id } });
   if (setCount === 0) {
     await db.workoutSession.delete({ where: { id: session.id } });
-  } else {
-    await db.workoutSession.update({
-      where: { id: session.id },
-      data: { completedAt: new Date() },
-    });
-    metrics.sessionsCompleted.inc();
+    revalidatePath('/');
+    return;
   }
+
+  await db.workoutSession.update({
+    where: { id: session.id },
+    data: { completedAt: new Date() },
+  });
+  metrics.sessionsCompleted.inc();
+
+  // If this session was started from a routine day, advance the routine cursor.
+  // Only matters in sequence mode — weekday mode is calendar-driven and ignores
+  // the cursor — but we write it unconditionally so a later mode-flip behaves
+  // sanely. Defensive: if the day was deleted between start and complete, skip.
+  if (session.startedFromRoutineDayId) {
+    const day = await db.routineDay.findUnique({
+      where: { id: session.startedFromRoutineDayId },
+      select: { position: true, routineId: true },
+    });
+    if (day) {
+      await db.routine.update({
+        where: { id: day.routineId },
+        data: { lastCompletedPosition: day.position },
+      });
+    }
+  }
+
   revalidatePath('/');
 });
 
@@ -844,6 +865,18 @@ export const deleteTemplate = withLogging('deleteTemplate', async (input: z.infe
     throw new Error('Built-in templates can be hidden but not deleted');
   }
 
+  // Refuse if the template is referenced by a routine day. Cascade would
+  // silently drop the day (and its pending swaps), and a user who can't
+  // see the connection would be surprised. Make them remove the day first.
+  const routineUse = await db.routineDay.count({
+    where: { templateId, routine: { userId } },
+  });
+  if (routineUse > 0) {
+    throw new Error(
+      "This template is used in your routine. Remove it from the routine first.",
+    );
+  }
+
   await db.workoutTemplate.deleteMany({ where: { id: templateId, userId } });
 
   revalidatePath('/');
@@ -888,5 +921,626 @@ export const unhideTemplate = withLogging('unhideTemplate', async (input: z.infe
     where: { userId, templateId },
   });
 
+  revalidatePath('/');
+});
+
+// ============================================================
+// ROUTINES
+// ============================================================
+//
+// One routine per user (DB-enforced via @unique on Routine.userId). Days are
+// thin wrappers around existing templates — picking a template into a day is
+// a reference, not a copy, so editing the template propagates everywhere it's
+// used. Capped at MAX_ROUTINE_DAYS days to keep the timeline UI bounded.
+
+const ScheduleStyleSchema = z.enum(['sequence', 'weekday']);
+
+async function requireUserTemplate(userId: string, templateId: string) {
+  // Ownership-or-built-in check; built-ins (userId null) are reachable to
+  // everyone unless hidden, but for routine purposes we don't filter hidden —
+  // the user explicitly selected the template, hidden status is about list
+  // surfacing.
+  const template = await db.workoutTemplate.findFirst({
+    where: {
+      id: templateId,
+      OR: [{ userId }, { userId: null, isBuiltin: true }],
+    },
+  });
+  if (!template) throw new Error('Template not found');
+  return template;
+}
+
+const CreateRoutineSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(300).optional(),
+  scheduleStyle: ScheduleStyleSchema.default('sequence'),
+});
+
+/**
+ * Create the user's routine. Throws if one already exists — routines are
+ * one-per-user and editing the existing one is the natural path. The unique
+ * constraint on userId would block the insert anyway; the explicit check
+ * surfaces a friendlier message.
+ */
+export const createRoutine = withLogging('createRoutine', async (
+  input: z.infer<typeof CreateRoutineSchema>,
+) => {
+  const userId = await requireUser();
+  const { name, description, scheduleStyle } = CreateRoutineSchema.parse(input);
+
+  const existing = await db.routine.findUnique({ where: { userId } });
+  if (existing) {
+    throw new Error('You already have a routine. Edit it instead of creating a new one.');
+  }
+
+  await db.routine.create({
+    data: {
+      userId,
+      name,
+      description: description || null,
+      scheduleStyle,
+    },
+  });
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+const UpdateRoutineSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  description: z.string().trim().max(300).nullable().optional(),
+  scheduleStyle: ScheduleStyleSchema.optional(),
+});
+
+/**
+ * Edit the routine's metadata. Switching scheduleStyle clears state that
+ * doesn't apply to the new mode:
+ *   - sequence → weekday: weekday assignments stay null until the user picks
+ *     them; lastCompletedPosition is reset to null since it's irrelevant.
+ *   - weekday → sequence: weekday assignments are cleared so a future
+ *     re-switch starts clean. lastCompletedPosition stays null until the
+ *     user completes a routine session.
+ */
+export const updateRoutine = withLogging('updateRoutine', async (
+  input: z.infer<typeof UpdateRoutineSchema>,
+) => {
+  const userId = await requireUser();
+  const data = UpdateRoutineSchema.parse(input);
+
+  const routine = await db.routine.findUnique({ where: { userId } });
+  if (!routine) throw new Error('No routine to update');
+
+  await db.$transaction(async (tx) => {
+    if (data.scheduleStyle && data.scheduleStyle !== routine.scheduleStyle) {
+      // Mode change: reset lastCompletedPosition and clear weekday pins.
+      await tx.routineDay.updateMany({
+        where: { routineId: routine.id },
+        data: { weekday: null },
+      });
+    }
+    await tx.routine.update({
+      where: { id: routine.id },
+      data: {
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(data.description !== undefined
+          ? { description: data.description || null }
+          : {}),
+        ...(data.scheduleStyle !== undefined
+          ? {
+              scheduleStyle: data.scheduleStyle,
+              lastCompletedPosition: null,
+            }
+          : {}),
+      },
+    });
+  });
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+export const deleteRoutine = withLogging('deleteRoutine', async () => {
+  const userId = await requireUser();
+  // Cascade handles RoutineDay → RoutineDayPendingSwap.
+  // Sessions that referenced any of these days lose their FK (SetNull) but
+  // remain in history.
+  await db.routine.deleteMany({ where: { userId } });
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+const AddRoutineDaySchema = z.object({
+  templateId: z.string().min(1),
+  label: z.string().trim().max(60).optional(),
+  weekday: z.number().int().min(0).max(6).nullable().optional(),
+});
+
+/**
+ * Append a day to the routine. New day's position = current count
+ * (0-indexed, contiguous). For weekday mode, weekday must be in 0..6 and
+ * not already pinned — the unique constraint enforces; we pre-check for a
+ * friendly error. For sequence mode, weekday is silently ignored (stored
+ * as null even if provided).
+ */
+export const addRoutineDay = withLogging('addRoutineDay', async (
+  input: z.infer<typeof AddRoutineDaySchema>,
+) => {
+  const userId = await requireUser();
+  const { templateId, label, weekday } = AddRoutineDaySchema.parse(input);
+
+  const routine = await db.routine.findUnique({
+    where: { userId },
+    include: { _count: { select: { days: true } } },
+  });
+  if (!routine) throw new Error('No routine — create one first');
+
+  if (routine._count.days >= MAX_ROUTINE_DAYS) {
+    throw new Error(`A routine can have at most ${MAX_ROUTINE_DAYS} days.`);
+  }
+
+  await requireUserTemplate(userId, templateId);
+
+  const effectiveWeekday = routine.scheduleStyle === 'weekday' && weekday != null ? weekday : null;
+  if (effectiveWeekday !== null) {
+    const collision = await db.routineDay.findFirst({
+      where: { routineId: routine.id, weekday: effectiveWeekday },
+      select: { id: true },
+    });
+    if (collision) {
+      throw new Error('That weekday is already taken in your routine.');
+    }
+  }
+
+  await db.routineDay.create({
+    data: {
+      routineId: routine.id,
+      templateId,
+      position: routine._count.days,
+      weekday: effectiveWeekday,
+      label: label || null,
+    },
+  });
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+const UpdateRoutineDaySchema = z.object({
+  routineDayId: z.string().min(1),
+  templateId: z.string().min(1).optional(),
+  label: z.string().trim().max(60).nullable().optional(),
+  weekday: z.number().int().min(0).max(6).nullable().optional(),
+});
+
+export const updateRoutineDay = withLogging('updateRoutineDay', async (
+  input: z.infer<typeof UpdateRoutineDaySchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId, templateId, label, weekday } = UpdateRoutineDaySchema.parse(input);
+
+  // Ownership: walk through routine
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    include: { routine: { select: { id: true, scheduleStyle: true } } },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  if (templateId !== undefined) {
+    await requireUserTemplate(userId, templateId);
+  }
+
+  // Weekday update only meaningful in weekday mode; ignore in sequence mode
+  // so a stale client can't introduce inconsistent state.
+  let effectiveWeekday: number | null | undefined = undefined;
+  if (weekday !== undefined) {
+    if (day.routine.scheduleStyle !== 'weekday') {
+      effectiveWeekday = null;
+    } else if (weekday !== null) {
+      const collision = await db.routineDay.findFirst({
+        where: {
+          routineId: day.routine.id,
+          weekday: weekday,
+          NOT: { id: routineDayId },
+        },
+        select: { id: true },
+      });
+      if (collision) {
+        throw new Error('That weekday is already taken in your routine.');
+      }
+      effectiveWeekday = weekday;
+    } else {
+      effectiveWeekday = null;
+    }
+  }
+
+  await db.routineDay.update({
+    where: { id: routineDayId },
+    data: {
+      ...(templateId !== undefined ? { templateId } : {}),
+      ...(label !== undefined ? { label: label || null } : {}),
+      ...(effectiveWeekday !== undefined ? { weekday: effectiveWeekday } : {}),
+    },
+  });
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+const RemoveRoutineDaySchema = z.object({ routineDayId: z.string().min(1) });
+
+/**
+ * Delete a routine day and renumber remaining days so positions stay
+ * contiguous from 0. Sessions that referenced this day stay (SetNull on the
+ * FK), preserving history. Pending swaps cascade with the day.
+ *
+ * If the deleted day's position was at or below lastCompletedPosition, we
+ * need to adjust the cursor — otherwise the next "today's day" calculation
+ * could skip a position. Simplest correct fix: if cursor was past the
+ * deleted day, decrement it.
+ */
+export const removeRoutineDay = withLogging('removeRoutineDay', async (
+  input: z.infer<typeof RemoveRoutineDaySchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId } = RemoveRoutineDaySchema.parse(input);
+
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    include: {
+      routine: { select: { id: true, lastCompletedPosition: true } },
+    },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  await db.$transaction(async (tx) => {
+    await tx.routineDay.delete({ where: { id: routineDayId } });
+
+    // Renumber: any day with position > the removed one shifts down by 1.
+    const remaining = await tx.routineDay.findMany({
+      where: { routineId: day.routine.id },
+      orderBy: { position: 'asc' },
+      select: { id: true, position: true },
+    });
+    for (let i = 0; i < remaining.length; i++) {
+      if (remaining[i].position !== i) {
+        await tx.routineDay.update({
+          where: { id: remaining[i].id },
+          data: { position: i },
+        });
+      }
+    }
+
+    // Cursor adjustment: if cursor was at or beyond the removed position,
+    // decrement (clamped at -1, which we represent as null).
+    const cursor = day.routine.lastCompletedPosition;
+    if (cursor !== null && cursor >= day.position) {
+      const newCursor = cursor - 1;
+      await tx.routine.update({
+        where: { id: day.routine.id },
+        data: { lastCompletedPosition: newCursor < 0 ? null : newCursor },
+      });
+    }
+  });
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+const ReorderRoutineDaySchema = z.object({
+  routineDayId: z.string().min(1),
+  direction: z.enum(['up', 'down']),
+});
+
+/**
+ * Move a routine day up or down — swaps positions with the adjacent day.
+ * Position is the unique key (routineId, position) so the swap goes through
+ * an intermediate sentinel value to avoid colliding mid-update.
+ */
+export const reorderRoutineDay = withLogging('reorderRoutineDay', async (
+  input: z.infer<typeof ReorderRoutineDaySchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId, direction } = ReorderRoutineDaySchema.parse(input);
+
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  const days = await db.routineDay.findMany({
+    where: { routineId: day.routineId },
+    orderBy: { position: 'asc' },
+    select: { id: true, position: true },
+  });
+  const myIndex = days.findIndex((d) => d.id === routineDayId);
+  const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
+  if (neighborIndex < 0 || neighborIndex >= days.length) return; // edge
+
+  const me = days[myIndex];
+  const neighbor = days[neighborIndex];
+  // Move via a sentinel position to dodge the unique constraint.
+  const sentinel = -1;
+
+  await db.$transaction([
+    db.routineDay.update({
+      where: { id: me.id },
+      data: { position: sentinel },
+    }),
+    db.routineDay.update({
+      where: { id: neighbor.id },
+      data: { position: me.position },
+    }),
+    db.routineDay.update({
+      where: { id: me.id },
+      data: { position: neighbor.position },
+    }),
+  ]);
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+const SetPendingSwapSchema = z.object({
+  routineDayId: z.string().min(1),
+  outExerciseId: z.string().min(1),
+  inExerciseId: z.string().min(1),
+});
+
+/**
+ * Stage a one-time exercise substitution on a routine day. Applied (and
+ * cleared) when the day's session is started. Persists across calendar days
+ * — the user can stage a swap days in advance.
+ *
+ * Validates: the day belongs to the user, the outgoing exercise is actually
+ * in the day's template, and the incoming exercise is one the user can use.
+ * Idempotent: re-staging the same (out → new) replaces any existing swap
+ * for that out exercise.
+ */
+export const setPendingSwap = withLogging('setPendingSwap', async (
+  input: z.infer<typeof SetPendingSwapSchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId, outExerciseId, inExerciseId } = SetPendingSwapSchema.parse(input);
+
+  if (outExerciseId === inExerciseId) {
+    // No-op; treat as remove-existing for self-consistency.
+    await db.routineDayPendingSwap.deleteMany({
+      where: { routineDayId, outExerciseId, routineDay: { routine: { userId } } },
+    });
+    revalidatePath('/');
+    return;
+  }
+
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    include: {
+      template: {
+        include: {
+          exercises: { select: { exerciseId: true } },
+        },
+      },
+    },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  const templateExerciseIds = new Set(day.template.exercises.map((te) => te.exerciseId));
+  if (!templateExerciseIds.has(outExerciseId)) {
+    throw new Error("That exercise isn't in this day's template.");
+  }
+  if (templateExerciseIds.has(inExerciseId)) {
+    throw new Error('That exercise is already in this day.');
+  }
+
+  await requireAvailableExercise(userId, inExerciseId);
+
+  await db.routineDayPendingSwap.upsert({
+    where: {
+      routineDayId_outExerciseId: { routineDayId, outExerciseId },
+    },
+    create: { routineDayId, outExerciseId, inExerciseId },
+    update: { inExerciseId },
+  });
+
+  revalidatePath('/');
+});
+
+const ClearPendingSwapSchema = z.object({
+  routineDayId: z.string().min(1),
+  outExerciseId: z.string().min(1),
+});
+
+export const clearPendingSwap = withLogging('clearPendingSwap', async (
+  input: z.infer<typeof ClearPendingSwapSchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId, outExerciseId } = ClearPendingSwapSchema.parse(input);
+
+  await db.routineDayPendingSwap.deleteMany({
+    where: {
+      routineDayId,
+      outExerciseId,
+      routineDay: { routine: { userId } },
+    },
+  });
+
+  revalidatePath('/');
+});
+
+const SwapInRoutineTemplateSchema = z.object({
+  routineDayId: z.string().min(1),
+  outExerciseId: z.string().min(1),
+  inExerciseId: z.string().min(1),
+});
+
+/**
+ * Permanent swap: edit the template the routine day points at, replacing
+ * `outExerciseId` with `inExerciseId` at the same position. Affects every
+ * future use of the template (in this routine day or anywhere else it's
+ * referenced).
+ *
+ * Refuses to modify built-in templates — they're shared across users. The
+ * user-facing message tells them how to fork manually (build a new template
+ * from scratch). Auto-forking on built-ins is an obvious next step but
+ * deliberately deferred to keep this action focused.
+ */
+export const swapInRoutineTemplate = withLogging('swapInRoutineTemplate', async (
+  input: z.infer<typeof SwapInRoutineTemplateSchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId, outExerciseId, inExerciseId } = SwapInRoutineTemplateSchema.parse(input);
+
+  if (outExerciseId === inExerciseId) return;
+
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    include: { template: { select: { id: true, isBuiltin: true, userId: true } } },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  if (day.template.isBuiltin || day.template.userId === null) {
+    throw new Error(
+      'This day uses a default template, which can’t be edited directly. Build your own copy first.',
+    );
+  }
+
+  await requireAvailableExercise(userId, inExerciseId);
+
+  const targetEntry = await db.templateExercise.findFirst({
+    where: { templateId: day.template.id, exerciseId: outExerciseId },
+  });
+  if (!targetEntry) {
+    throw new Error("That exercise isn't in the template anymore.");
+  }
+
+  // Refuse if the new exercise is already in the template — would violate
+  // the (templateId, exerciseId) unique constraint and is probably user error.
+  const collision = await db.templateExercise.findFirst({
+    where: { templateId: day.template.id, exerciseId: inExerciseId },
+    select: { id: true },
+  });
+  if (collision) {
+    throw new Error('That exercise is already in the template.');
+  }
+
+  await db.$transaction([
+    db.templateExercise.update({
+      where: { id: targetEntry.id },
+      data: { exerciseId: inExerciseId },
+    }),
+    // If a one-time pending swap was staged for the outgoing exercise, drop
+    // it — the permanent change supersedes any pending one-shot.
+    db.routineDayPendingSwap.deleteMany({
+      where: { routineDayId, outExerciseId },
+    }),
+  ]);
+
+  revalidatePath('/');
+  revalidatePath('/settings');
+});
+
+const StartFromRoutineDaySchema = z.object({
+  routineDayId: z.string().min(1),
+});
+
+/**
+ * Begin a fresh active session populated from a routine day's template, with
+ * any pending one-time swaps applied during population. Marks the new
+ * session with startedFromRoutineDayId so completing it can advance the
+ * routine cursor (sequence mode).
+ *
+ * Refuses if there's already an active session — mirrors startFromTemplate.
+ * After population, all pending swaps for this day are cleared.
+ */
+export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
+  input: z.infer<typeof StartFromRoutineDaySchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId } = StartFromRoutineDaySchema.parse(input);
+
+  const existing = await findActiveSession(userId);
+  if (existing) {
+    throw new Error(
+      'You already have a workout in progress. Complete or discard it first.',
+    );
+  }
+
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    include: {
+      template: {
+        include: {
+          exercises: {
+            orderBy: { position: 'asc' },
+            include: {
+              exercise: {
+                select: { id: true, deletedAt: true, ownerId: true },
+              },
+            },
+          },
+        },
+      },
+      pendingSwaps: {
+        include: {
+          inExercise: {
+            select: { id: true, deletedAt: true, ownerId: true },
+          },
+        },
+      },
+    },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  const swapsByOutId = new Map(
+    day.pendingSwaps
+      .filter((s) => {
+        const ex = s.inExercise;
+        if (ex.deletedAt !== null) return false;
+        if (ex.ownerId !== null && ex.ownerId !== userId) return false;
+        return true;
+      })
+      .map((s) => [s.outExerciseId, s.inExerciseId]),
+  );
+
+  // Walk template exercises, substitute via pending swaps, drop unusable.
+  const lineup: string[] = [];
+  for (const te of day.template.exercises) {
+    const ex = te.exercise;
+    const replacement = swapsByOutId.get(te.exerciseId);
+    if (replacement !== undefined) {
+      lineup.push(replacement);
+    } else if (ex.deletedAt === null && (ex.ownerId === null || ex.ownerId === userId)) {
+      lineup.push(te.exerciseId);
+    }
+  }
+
+  if (lineup.length === 0) {
+    throw new Error('This day has no usable exercises right now.');
+  }
+
+  await db.$transaction(async (tx) => {
+    const newSession = await tx.workoutSession.create({
+      data: {
+        userId,
+        date: new Date(),
+        startedFromRoutineDayId: day.id,
+      },
+    });
+    await tx.setLog.createMany({
+      data: lineup.map((exerciseId, idx) => ({
+        sessionId: newSession.id,
+        exerciseId,
+        setNumber: 1,
+        position: idx,
+        reps: null,
+        weight: null,
+      })),
+    });
+    // Pending swaps consumed.
+    await tx.routineDayPendingSwap.deleteMany({
+      where: { routineDayId: day.id },
+    });
+  });
+
+  metrics.templatesUsed.inc();
   revalidatePath('/');
 });

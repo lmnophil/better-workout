@@ -83,8 +83,10 @@ If you add an action that writes `SetLog` or `WorkoutSession`, check you preserv
 ## Things you might want to do that would be wrong
 
 - **Adding a unique partial index on `(userId)` where `completedAt is null`.** Tempting but Prisma's support is awkward and the app-level check is sufficient. See `docs/decisions.md`.
-- **Adding `dayFocus` or `type` to `WorkoutSession`.** Sessions are records, not plans. See root CLAUDE.md.
+- **Adding `dayFocus` or `type` to `WorkoutSession`.** Sessions are records, not plans. The plan lives on the routine via `RoutineDay`; `WorkoutSession.startedFromRoutineDayId` is the only acknowledgment a session has of any plan, and even that's nullable. See root CLAUDE.md.
 - **Hard-deleting `Exercise` rows.** Use soft-delete. The Restrict on `SetLog.exercise` will block hard-deletes anyway — that's by design.
 - **Changing muscle IDs from strings to an enum.** They're user-extensible (custom exercises pick from `MUSCLE_GROUPS` but the schema doesn't constrain) and the spaces/casing are deliberate. See `docs/decisions.md`.
 - **Making `prisma.config.ts`'s datasource unconditional.** The conditional exists so `prisma generate` works at Docker build time when there's no DB. Removing the conditional breaks the image build. If you need to set the URL inline always, set it via `process.env.DATABASE_URL ?? '<placeholder>'` rather than dropping the conditional.
 - **Importing the generated client as `from './generated/prisma'`.** ESM can't resolve directory imports without an exports manifest. The entry is `from './generated/prisma/client'`.
+- **Allowing more than one routine per user.** Enforced by `@unique` on `Routine.userId`. The single-operator UX assumes one routine; multiple-routine support is documented as deferred in `docs/decisions.md`.
+- **Lifting the routine-day cap.** `MAX_ROUTINE_DAYS = 7` in `lib/routine.ts` is enforced in actions. The timeline UI assumes a bounded list. Raising it requires UI work and a renewed look at the decision in `docs/decisions.md`.

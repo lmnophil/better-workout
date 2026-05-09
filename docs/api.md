@@ -74,7 +74,7 @@ Every server action calls `requireUser()` first; the function throws `'Unauthori
 
 ## Server actions
 
-Twenty-one actions in `lib/actions.ts`, grouped into nine categories that match the `// =====` section headers in the file.
+Thirty-plus actions in `lib/actions.ts`, grouped into ten categories that match the `// =====` section headers in the file.
 
 ### Session lifecycle
 
@@ -137,6 +137,23 @@ Named, reusable lineups. Saving captures only the exercises and order — not th
 - **`hideTemplate({ templateId })`** — Hides a built-in template from the user's list by inserting a `UserHiddenTemplate` row. Throws if the target isn't built-in. Idempotent.
 - **`unhideTemplate({ templateId })`** — Removes the user's hide marker for a built-in template. Idempotent.
 
+### Routines
+
+The user's named cycle of templates. One routine per user, capped at 7 days. See [`docs/decisions.md`](./decisions.md) for the stance and [`docs/data-model.md`](./data-model.md) for the entities.
+
+- **`createRoutine({ name, description?, scheduleStyle? })`** — Creates the user's routine. Throws if one already exists. `scheduleStyle` defaults to `'sequence'`.
+- **`updateRoutine({ name?, description?, scheduleStyle? })`** — Patches the routine. Switching `scheduleStyle` clears state that doesn't apply to the new mode (weekday assignments cleared, cursor reset).
+- **`deleteRoutine()`** — Removes the user's routine. Cascades to days and pending swaps. Sessions started from any of these days lose their FK (SetNull) but stay in history.
+- **`addRoutineDay({ templateId, label?, weekday? })`** — Appends a day to the routine. Position auto-assigned to `count`. Refuses if the routine is at the 7-day cap. In weekday mode, refuses if the weekday is already pinned.
+- **`updateRoutineDay({ routineDayId, templateId?, label?, weekday? })`** — Patches a day. Weekday updates are silently ignored in sequence mode.
+- **`removeRoutineDay({ routineDayId })`** — Deletes a day and renumbers remaining positions to stay contiguous from 0. Adjusts the cursor (`lastCompletedPosition`) if it pointed at or past the removed position.
+- **`reorderRoutineDay({ routineDayId, direction })`** — Swaps a day's position with its neighbor via a sentinel value to dodge the unique constraint.
+- **`setPendingSwap({ routineDayId, outExerciseId, inExerciseId })`** — Stages a one-time exercise substitution on a routine day. Validates the outgoing exercise is in the day's template and the incoming one is available to the user. Idempotent — re-staging replaces an existing swap for the same outgoing exercise.
+- **`clearPendingSwap({ routineDayId, outExerciseId })`** — Removes a staged swap. Idempotent.
+- **`swapInRoutineTemplate({ routineDayId, outExerciseId, inExerciseId })`** — Permanent swap: edits the underlying `TemplateExercise` so the change applies every time the template is used. Refuses to modify built-in templates (they're shared); user fixes by building their own template first.
+- **`startFromRoutineDay({ routineDayId })`** — Creates a fresh active session populated from the day's template, applying any pending swaps as the lineup is built. Marks the new session with `startedFromRoutineDayId` so completing it advances the routine cursor. Refuses if there's already an active session.
+- **`completeActiveSession()`** *(extended)* — Now also advances the routine cursor (`Routine.lastCompletedPosition`) when the completed session has a `startedFromRoutineDayId`.
+
 ## Server-side queries
 
 Eight queries in `lib/queries.ts`. All take `userId` as the first parameter; never trust a client-supplied one.
@@ -158,6 +175,16 @@ Eight queries in `lib/queries.ts`. All take `userId` as the first parameter; nev
 - **`getUserPreferences(userId)`** — The user's prefs, with defaults filled in if no row exists. Wrapped with `React.cache` so multiple callers in one request share a single DB hit.
 - **`getTemplates(userId)`** — User's templates plus built-in (`isBuiltin: true`, `userId: null`) templates the user hasn't hidden. Sorted built-ins first, then by `updatedAt`. Includes a small subset of the exercise relation (id, name, module, deletedAt) for preview rendering.
 - **`getHiddenBuiltinTemplates(userId)`** — Built-in templates the user has hidden. Drives the settings-page unhide list.
+
+### Routines
+
+- **`getRoutineForUser(userId)`** — Full routine with all days, each day's template (with exercises), and any pending swaps. Returns `null` if the user has no routine. Drives both the settings editor and the workout-page timeline.
+- **`getRoutineRecentSessions(userId, take)`** — Recent completed sessions started from a routine day, capped to the trailing 30 days and the `take` count. Drives the "Recent" portion of the timeline.
+
+Pure-logic helpers in `lib/routine.ts` accompany these:
+
+- **`pickTodaysRoutineDay(routine, now?)`** — Picks "today's day" per the routine's scheduling style. Sequence mode advances from `lastCompletedPosition`; weekday mode reads today's `getDay()`. Returns null when there's nothing for today (rest day in weekday mode, empty routine).
+- **`pickUpcomingRoutineDays(routine, todaysDay, now?)`** — Lists the days after today's. In weekday mode, walks forward through the next 7 weekdays. In sequence mode, returns the cycle order starting after today, wrapping back to position 0 (the wrap entry is the "loops back" indicator in the UI).
 
 ## HTTP routes
 

@@ -33,6 +33,10 @@ import { useConfirm } from '@/components/ui/use-confirm';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { groupBy, relativeDay } from '@/lib/utils';
 import { muscleIdsToChipIds } from '@/lib/area-filter';
+import {
+  RoutineTimeline,
+  type RoutineTimelineProps,
+} from '@/components/routines/routine-timeline';
 
 // ============ TYPES ============
 
@@ -91,6 +95,9 @@ type Props = {
   availableExercises: ExerciseInfo[];
   lastSets: LastSetsForExercise[];
   templates: TemplateClient[];
+  // Null when the user hasn't created a routine. Otherwise drives the
+  // timeline panel above the empty state.
+  routine: Omit<RoutineTimelineProps, 'availableExercises'> | null;
 };
 
 // ============ COMPONENT ============
@@ -100,6 +107,7 @@ export function WorkoutView({
   availableExercises,
   lastSets,
   templates,
+  routine,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   // Chip selection from the empty state. Carries through into the picker so a
@@ -405,44 +413,67 @@ export function WorkoutView({
           onDeleteTemplate={handleDeleteTemplate}
           onHideTemplate={handleHideTemplate}
           isPending={isPending}
+          routine={routine}
+          availableExercises={availableExercises}
         />
       ) : (
         <div className="px-5 space-y-3">
-          {exerciseOrderInSession.map((exerciseId, idx) => {
-            const exercise = exerciseById.get(exerciseId);
-            if (!exercise) return null; // Defensive — shouldn't happen
-            const sets = setLogsByExercise.get(exerciseId) ?? [];
-            const last = lastByExercise.get(exerciseId);
-            return (
-              <ExerciseInSession
-                key={exerciseId}
-                exercise={exercise}
-                sets={sets}
-                lastTime={
-                  last
-                    ? {
-                        when: relativeDay(new Date(last.sessionDate)),
-                        sets: last.sets,
-                      }
-                    : null
-                }
-                canMoveUp={idx > 0}
-                canMoveDown={idx < exerciseOrderInSession.length - 1}
-                globalRestSeconds={prefs.restTimerSeconds}
-                onAddSet={() => handleAddSet(exerciseId)}
-                onUpdateSet={handleUpdateSet}
-                onUpdateNotes={handleUpdateNotes}
-                onRemoveSet={handleRemoveSet}
-                onRemoveExercise={() => handleRemoveExercise(exerciseId)}
-                onMoveUp={() => handleMoveExercise(exerciseId, 'up')}
-                onMoveDown={() => handleMoveExercise(exerciseId, 'down')}
-                onSwap={() => startSwap(exerciseId)}
-                onSetRestOverride={(seconds) =>
-                  handleSetExerciseRestOverride(exerciseId, seconds)
-                }
-              />
-            );
-          })}
+          {(() => {
+            // Walk exercises in position order; emit a section header each time
+            // the module changes. Preserves the user's reorders (so a Mobility
+            // exercise tucked between two Strength Barbell ones gets its own
+            // little section) without forcing a strict module-grouped layout
+            // they didn't ask for.
+            const elements: React.ReactNode[] = [];
+            let lastModule: string | null = null;
+            exerciseOrderInSession.forEach((exerciseId, idx) => {
+              const exercise = exerciseById.get(exerciseId);
+              if (!exercise) return;
+              const sets = setLogsByExercise.get(exerciseId) ?? [];
+              const last = lastByExercise.get(exerciseId);
+              if (exercise.module !== lastModule) {
+                elements.push(
+                  <div
+                    key={`module-${idx}`}
+                    className="text-[10px] tracking-[0.25em] uppercase text-ink-500 pt-2 pb-1 first:pt-0"
+                  >
+                    {exercise.module}
+                  </div>,
+                );
+                lastModule = exercise.module;
+              }
+              elements.push(
+                <ExerciseInSession
+                  key={exerciseId}
+                  exercise={exercise}
+                  sets={sets}
+                  lastTime={
+                    last
+                      ? {
+                          when: relativeDay(new Date(last.sessionDate)),
+                          sets: last.sets,
+                        }
+                      : null
+                  }
+                  canMoveUp={idx > 0}
+                  canMoveDown={idx < exerciseOrderInSession.length - 1}
+                  globalRestSeconds={prefs.restTimerSeconds}
+                  onAddSet={() => handleAddSet(exerciseId)}
+                  onUpdateSet={handleUpdateSet}
+                  onUpdateNotes={handleUpdateNotes}
+                  onRemoveSet={handleRemoveSet}
+                  onRemoveExercise={() => handleRemoveExercise(exerciseId)}
+                  onMoveUp={() => handleMoveExercise(exerciseId, 'up')}
+                  onMoveDown={() => handleMoveExercise(exerciseId, 'down')}
+                  onSwap={() => startSwap(exerciseId)}
+                  onSetRestOverride={(seconds) =>
+                    handleSetExerciseRestOverride(exerciseId, seconds)
+                  }
+                />,
+              );
+            });
+            return elements;
+          })()}
 
           <button
             onClick={() => openPicker()}
@@ -541,6 +572,8 @@ function EmptyState({
   onDeleteTemplate,
   onHideTemplate,
   isPending,
+  routine,
+  availableExercises,
 }: {
   onOpenPicker: () => void;
   templates: TemplateClient[];
@@ -548,20 +581,28 @@ function EmptyState({
   onDeleteTemplate: (id: string, name: string) => void;
   onHideTemplate: (id: string, name: string) => void;
   isPending: boolean;
+  routine: Omit<RoutineTimelineProps, 'availableExercises'> | null;
+  availableExercises: ExerciseInfo[];
 }) {
-  // Two equally-weighted entry paths share this screen: load a template (the
-  // lowest-friction "go" — one tap and a session is staged) or open the
-  // picker to assemble a lineup. The order below puts templates first so a
-  // returning user lands on the fastest path, but the section labels are
-  // parallel so neither reads as a fallback for the other. Filtering happens
-  // inside the picker, alongside the actual exercise list — no abstract
-  // pre-filter on the home screen.
+  // Layered surface: a routine timeline (when the user has one) leads, with
+  // template-list and ad-hoc paths underneath. Without a routine, the layout
+  // is what it always was — templates and the picker.
   return (
     <div className="px-5 py-6 space-y-7">
+      {routine && (
+        <RoutineTimeline
+          routine={routine.routine}
+          todaysDay={routine.todaysDay}
+          upcomingDays={routine.upcomingDays}
+          recentSessions={routine.recentSessions}
+          availableExercises={availableExercises}
+        />
+      )}
+
       {templates.length > 0 && (
         <div>
           <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-3">
-            Start from a template
+            {routine ? 'Or start from a template' : 'Start from a template'}
           </div>
           <div className="space-y-1.5">
             {templates.map((t) => (
@@ -583,7 +624,7 @@ function EmptyState({
 
       <div>
         <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-3">
-          Build your own
+          {routine || templates.length > 0 ? 'Or build something else' : 'Build your own'}
         </div>
         <button
           onClick={() => onOpenPicker()}

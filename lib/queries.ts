@@ -280,6 +280,82 @@ export async function getTemplates(userId: string) {
 }
 
 /**
+ * Fetch the user's routine (or null) with all days, their templates, and any
+ * pending one-time swaps. Single query — used by both the settings editor and
+ * the workout-page timeline view.
+ */
+export async function getRoutineForUser(userId: string) {
+  return db.routine.findUnique({
+    where: { userId },
+    include: {
+      days: {
+        orderBy: { position: 'asc' },
+        include: {
+          template: {
+            include: {
+              exercises: {
+                orderBy: { position: 'asc' },
+                include: {
+                  exercise: {
+                    select: {
+                      id: true,
+                      name: true,
+                      module: true,
+                      deletedAt: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          pendingSwaps: {
+            include: {
+              outExercise: { select: { id: true, name: true, deletedAt: true } },
+              inExercise: { select: { id: true, name: true, deletedAt: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+export type RoutineForView = NonNullable<Awaited<ReturnType<typeof getRoutineForUser>>>;
+
+/**
+ * Recent completed sessions started from a routine day. Drives the "Recent"
+ * portion of the timeline view. Bounded by `take` so the timeline never
+ * renders an unbounded list.
+ */
+export async function getRoutineRecentSessions(userId: string, take: number = 10) {
+  const since = new Date();
+  since.setDate(since.getDate() - 30);
+
+  return db.workoutSession.findMany({
+    where: {
+      userId,
+      completedAt: { not: null },
+      startedFromRoutineDayId: { not: null },
+      date: { gte: since },
+    },
+    orderBy: { date: 'desc' },
+    take,
+    include: {
+      startedFromRoutineDay: {
+        select: {
+          id: true,
+          position: true,
+          weekday: true,
+          label: true,
+          template: { select: { id: true, name: true } },
+        },
+      },
+      _count: { select: { setLogs: true } },
+    },
+  });
+}
+
+/**
  * List built-in templates the user has hidden. Powers the settings page
  * "Hidden default templates" section so they can unhide any.
  */
