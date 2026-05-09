@@ -326,6 +326,9 @@ export type UserPreferencesShape = UserPrefs;
 export async function getTemplates(userId: string) {
   return db.workoutTemplate.findMany({
     where: {
+      // Templates owned by a routine day are surfaced through the routine
+      // timeline, not the regular template list — exclude them here.
+      routineDays: { none: {} },
       OR: [
         { userId },
         {

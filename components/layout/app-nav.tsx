@@ -2,12 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Activity, BarChart3, Settings } from 'lucide-react';
+import { Activity, BarChart3, ListChecks } from 'lucide-react';
 
 const TABS = [
   { href: '/', label: 'Workout', icon: Activity },
+  { href: '/routine', label: 'Routine', icon: ListChecks },
   { href: '/coverage', label: 'Coverage', icon: BarChart3 },
-  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export function AppNav() {

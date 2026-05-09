@@ -672,7 +672,7 @@ function BuildRoutineCTA() {
         Set up a routine
       </div>
       <Link
-        href="/routine/build"
+        href="/routine"
         className="block border border-ink-800 hover:border-accent/50 transition rounded-lg px-4 py-3 group"
       >
         <div className="flex items-center justify-between gap-3">

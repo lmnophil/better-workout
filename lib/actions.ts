@@ -1153,15 +1153,20 @@ export const unhideTemplate = withLogging('unhideTemplate', async (input: z.infe
 // ROUTINES
 // ============================================================
 //
-// One routine per user (DB-enforced via @unique on Routine.userId). Days are
-// thin wrappers around existing templates — picking a template into a day is
-// a reference, not a copy, so editing the template propagates everywhere it's
-// used. Capped at MAX_ROUTINE_DAYS days to keep the timeline UI bounded.
+// One routine per user (DB-enforced via @unique on Routine.userId). Each day
+// owns its own WorkoutTemplate — picking a "seed" template at add-time copies
+// the seed's exercises into a fresh per-day template, so subsequent edits to
+// either side don't bleed across. We detect routine-owned templates via the
+// existing `routineDays` reverse relation (`routineDays: { some: {} }`) and
+// hide them from the regular templates list. Capped at MAX_ROUTINE_DAYS to
+// keep the timeline UI bounded.
 
 const ScheduleStyleSchema = z.enum(['sequence', 'weekday']);
 
+type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
+
 async function requireUserTemplate(userId: string, templateId: string) {
-  // Ownership-or-built-in check; built-ins (userId null) are reachable to
+  // Ownership-or-built-in check. Built-ins (userId null) are reachable to
   // everyone unless hidden, but for routine purposes we don't filter hidden —
   // the user explicitly selected the template, hidden status is about list
   // surfacing.
@@ -1175,8 +1180,121 @@ async function requireUserTemplate(userId: string, templateId: string) {
   return template;
 }
 
+/**
+ * Pick a name for a new template that won't collide with the user's existing
+ * templates. Tries `base` first, then `base (2)`, `base (3)`, etc. We rely on
+ * a single SELECT and resolve in JS — fine at the small scales involved.
+ */
+async function uniqueTemplateName(tx: Tx, userId: string, base: string): Promise<string> {
+  const trimmed = base.trim() || 'Day';
+  const taken = new Set(
+    (
+      await tx.workoutTemplate.findMany({
+        where: { userId, name: { startsWith: trimmed } },
+        select: { name: true },
+      })
+    ).map((t) => t.name),
+  );
+  if (!taken.has(trimmed)) return trimmed;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${trimmed} (${i})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  throw new Error('Too many similarly-named templates — pick a different base name.');
+}
+
+/**
+ * Snapshot a source template's exercises into a fresh user-owned template.
+ * The source must be reachable to the user (own or built-in); soft-deleted
+ * exercises in the source are skipped silently. Returns the new template id.
+ */
+async function cloneTemplateForUser(
+  tx: Tx,
+  userId: string,
+  sourceTemplateId: string,
+  desiredName: string,
+): Promise<string> {
+  const source = await tx.workoutTemplate.findFirst({
+    where: {
+      id: sourceTemplateId,
+      OR: [{ userId }, { userId: null, isBuiltin: true }],
+    },
+    include: {
+      exercises: {
+        orderBy: { position: 'asc' },
+        include: { exercise: { select: { deletedAt: true, ownerId: true } } },
+      },
+    },
+  });
+  if (!source) throw new Error('Template not found');
+
+  const lineup = source.exercises.filter(
+    (te) =>
+      te.exercise.deletedAt === null &&
+      (te.exercise.ownerId === null || te.exercise.ownerId === userId),
+  );
+
+  const name = await uniqueTemplateName(tx, userId, desiredName);
+  const created = await tx.workoutTemplate.create({
+    data: {
+      userId,
+      isBuiltin: false,
+      name,
+      exercises: {
+        create: lineup.map((te, position) => ({
+          exerciseId: te.exerciseId,
+          position,
+        })),
+      },
+    },
+  });
+  return created.id;
+}
+
+/**
+ * Create a fresh blank template owned by the user, optionally seeded with an
+ * explicit list of exercise ids (in array order). Used when the user builds a
+ * day from scratch. Validates exercise access; refuses dup ids.
+ */
+async function freshTemplateForUser(
+  tx: Tx,
+  userId: string,
+  desiredName: string,
+  exerciseIds: string[],
+): Promise<string> {
+  if (new Set(exerciseIds).size !== exerciseIds.length) {
+    throw new Error("A day can't list the same exercise twice.");
+  }
+  if (exerciseIds.length > 0) {
+    const accessible = await tx.exercise.findMany({
+      where: {
+        id: { in: exerciseIds },
+        OR: [{ ownerId: null }, { ownerId: userId }],
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    const accessibleIds = new Set(accessible.map((e) => e.id));
+    for (const id of exerciseIds) {
+      if (!accessibleIds.has(id)) throw new Error('Exercise not available');
+    }
+  }
+  const name = await uniqueTemplateName(tx, userId, desiredName);
+  const created = await tx.workoutTemplate.create({
+    data: {
+      userId,
+      isBuiltin: false,
+      name,
+      exercises: {
+        create: exerciseIds.map((exerciseId, position) => ({ exerciseId, position })),
+      },
+    },
+  });
+  return created.id;
+}
+
 const CreateRoutineSchema = z.object({
-  name: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().max(300).optional(),
   scheduleStyle: ScheduleStyleSchema.default('sequence'),
 });
@@ -1201,13 +1319,14 @@ export const createRoutine = withLogging('createRoutine', async (
   await db.routine.create({
     data: {
       userId,
-      name,
+      name: name || 'My routine',
       description: description || null,
       scheduleStyle,
     },
   });
 
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
 });
 
@@ -1237,7 +1356,10 @@ export const updateRoutine = withLogging('updateRoutine', async (
 
   await db.$transaction(async (tx) => {
     if (data.scheduleStyle && data.scheduleStyle !== routine.scheduleStyle) {
-      // Mode change: reset lastCompletedPosition and clear weekday pins.
+      // Mode change: clear weekday pins; cursor reset is handled below in the
+      // routine update. Switching from weekday → sequence keeps days in their
+      // current `position` order; sequence → weekday leaves them unpinned for
+      // the user to assign.
       await tx.routineDay.updateMany({
         where: { routineId: routine.id },
         data: { weekday: null },
@@ -1261,37 +1383,70 @@ export const updateRoutine = withLogging('updateRoutine', async (
   });
 
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
-});
-
-export const deleteRoutine = withLogging('deleteRoutine', async () => {
-  const userId = await requireUser();
-  // Cascade handles RoutineDay → RoutineDayPendingSwap.
-  // Sessions that referenced any of these days lose their FK (SetNull) but
-  // remain in history.
-  await db.routine.deleteMany({ where: { userId } });
-  revalidatePath('/');
-  revalidatePath('/settings');
-});
-
-const AddRoutineDaySchema = z.object({
-  templateId: z.string().min(1),
-  label: z.string().trim().max(60).optional(),
-  weekday: z.number().int().min(0).max(6).nullable().optional(),
 });
 
 /**
+ * Delete the user's routine and all the per-day templates it owns. The
+ * routine.deleteMany cascades into RoutineDay (and its pending swaps), but
+ * the templates have no inbound cascade — we collect their ids first and
+ * delete them after the routine cascade fires. Sessions that referenced any
+ * of these days lose their FK (SetNull) but remain in history; their SetLogs
+ * still reference the underlying exercises directly, so workout history is
+ * unaffected by template deletion.
+ */
+export const deleteRoutine = withLogging('deleteRoutine', async () => {
+  const userId = await requireUser();
+  await db.$transaction(async (tx) => {
+    const routine = await tx.routine.findUnique({
+      where: { userId },
+      include: { days: { select: { templateId: true } } },
+    });
+    if (!routine) return;
+    const ownedTemplateIds = routine.days.map((d) => d.templateId);
+    await tx.routine.delete({ where: { id: routine.id } });
+    if (ownedTemplateIds.length > 0) {
+      await tx.workoutTemplate.deleteMany({
+        where: { id: { in: ownedTemplateIds }, userId },
+      });
+    }
+  });
+  revalidatePath('/');
+  revalidatePath('/routine');
+  revalidatePath('/settings');
+});
+
+const AddRoutineDaySchema = z
+  .object({
+    seedTemplateId: z.string().min(1).optional(),
+    exerciseIds: z.array(z.string().min(1)).max(50).optional(),
+    name: z.string().trim().min(1).max(80).optional(),
+    label: z.string().trim().max(60).optional(),
+    weekday: z.number().int().min(0).max(6).nullable().optional(),
+  })
+  .refine((d) => !(d.seedTemplateId && d.exerciseIds && d.exerciseIds.length > 0), {
+    message: 'Pass either seedTemplateId or exerciseIds, not both.',
+  });
+
+/**
  * Append a day to the routine. New day's position = current count
- * (0-indexed, contiguous). For weekday mode, weekday must be in 0..6 and
- * not already pinned — the unique constraint enforces; we pre-check for a
- * friendly error. For sequence mode, weekday is silently ignored (stored
- * as null even if provided).
+ * (0-indexed, contiguous). Always creates a fresh template owned by the
+ * user — either by cloning a `seedTemplateId` (lifting its exercises) or by
+ * starting blank/with the provided `exerciseIds`. The day's template name is
+ * derived from `name`, the seed's name, or a positional fallback ("Day N" /
+ * weekday short label), with collisions resolved via uniqueTemplateName.
+ *
+ * For weekday mode, weekday must be in 0..6 and not already pinned — we
+ * pre-check for a friendly error. For sequence mode, weekday is silently
+ * ignored (stored as null even if provided).
  */
 export const addRoutineDay = withLogging('addRoutineDay', async (
   input: z.infer<typeof AddRoutineDaySchema>,
 ) => {
   const userId = await requireUser();
-  const { templateId, label, weekday } = AddRoutineDaySchema.parse(input);
+  const { seedTemplateId, exerciseIds, name, label, weekday } =
+    AddRoutineDaySchema.parse(input);
 
   const routine = await db.routine.findUnique({
     where: { userId },
@@ -1303,9 +1458,8 @@ export const addRoutineDay = withLogging('addRoutineDay', async (
     throw new Error(`A routine can have at most ${MAX_ROUTINE_DAYS} days.`);
   }
 
-  await requireUserTemplate(userId, templateId);
-
-  const effectiveWeekday = routine.scheduleStyle === 'weekday' && weekday != null ? weekday : null;
+  const effectiveWeekday =
+    routine.scheduleStyle === 'weekday' && weekday != null ? weekday : null;
   if (effectiveWeekday !== null) {
     const collision = await db.routineDay.findFirst({
       where: { routineId: routine.id, weekday: effectiveWeekday },
@@ -1316,43 +1470,76 @@ export const addRoutineDay = withLogging('addRoutineDay', async (
     }
   }
 
-  await db.routineDay.create({
-    data: {
-      routineId: routine.id,
-      templateId,
-      position: routine._count.days,
-      weekday: effectiveWeekday,
-      label: label || null,
-    },
+  const fallbackName =
+    name ||
+    (effectiveWeekday !== null
+      ? WEEKDAY_LONG[effectiveWeekday]
+      : `Day ${routine._count.days + 1}`);
+
+  await db.$transaction(async (tx) => {
+    // If a seed was given, look up its name once so the clone inherits it
+    // (overridable by the explicit `name` arg).
+    let templateBaseName = name || fallbackName;
+    if (!name && seedTemplateId) {
+      const seed = await tx.workoutTemplate.findFirst({
+        where: { id: seedTemplateId },
+        select: { name: true },
+      });
+      if (seed) templateBaseName = seed.name;
+    }
+
+    const templateId = seedTemplateId
+      ? await cloneTemplateForUser(tx, userId, seedTemplateId, templateBaseName)
+      : await freshTemplateForUser(tx, userId, templateBaseName, exerciseIds ?? []);
+
+    await tx.routineDay.create({
+      data: {
+        routineId: routine.id,
+        templateId,
+        position: routine._count.days,
+        weekday: effectiveWeekday,
+        label: label || null,
+      },
+    });
   });
 
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
 });
 
+const WEEKDAY_LONG = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+] as const;
+
 const UpdateRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
-  templateId: z.string().min(1).optional(),
   label: z.string().trim().max(60).nullable().optional(),
   weekday: z.number().int().min(0).max(6).nullable().optional(),
+  // Renaming the day really means renaming the day's owned template — the
+  // template's `name` is what the timeline and editors surface as the day's
+  // identity. We resolve collisions with uniqueTemplateName so the user's
+  // chosen text is preserved when possible.
+  name: z.string().trim().min(1).max(80).optional(),
 });
 
 export const updateRoutineDay = withLogging('updateRoutineDay', async (
   input: z.infer<typeof UpdateRoutineDaySchema>,
 ) => {
   const userId = await requireUser();
-  const { routineDayId, templateId, label, weekday } = UpdateRoutineDaySchema.parse(input);
+  const { routineDayId, label, weekday, name } = UpdateRoutineDaySchema.parse(input);
 
-  // Ownership: walk through routine
   const day = await db.routineDay.findFirst({
     where: { id: routineDayId, routine: { userId } },
     include: { routine: { select: { id: true, scheduleStyle: true } } },
   });
   if (!day) throw new Error('Routine day not found');
-
-  if (templateId !== undefined) {
-    await requireUserTemplate(userId, templateId);
-  }
 
   // Weekday update only meaningful in weekday mode; ignore in sequence mode
   // so a stale client can't introduce inconsistent state.
@@ -1378,16 +1565,27 @@ export const updateRoutineDay = withLogging('updateRoutineDay', async (
     }
   }
 
-  await db.routineDay.update({
-    where: { id: routineDayId },
-    data: {
-      ...(templateId !== undefined ? { templateId } : {}),
-      ...(label !== undefined ? { label: label || null } : {}),
-      ...(effectiveWeekday !== undefined ? { weekday: effectiveWeekday } : {}),
-    },
+  await db.$transaction(async (tx) => {
+    if (name !== undefined) {
+      const resolved = await uniqueTemplateName(tx, userId, name);
+      await tx.workoutTemplate.update({
+        where: { id: day.templateId },
+        data: { name: resolved },
+      });
+    }
+    if (label !== undefined || effectiveWeekday !== undefined) {
+      await tx.routineDay.update({
+        where: { id: routineDayId },
+        data: {
+          ...(label !== undefined ? { label: label || null } : {}),
+          ...(effectiveWeekday !== undefined ? { weekday: effectiveWeekday } : {}),
+        },
+      });
+    }
   });
 
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
 });
 
@@ -1420,6 +1618,13 @@ export const removeRoutineDay = withLogging('removeRoutineDay', async (
   await db.$transaction(async (tx) => {
     await tx.routineDay.delete({ where: { id: routineDayId } });
 
+    // The day owned its template — drop it now that nothing references it.
+    // Skipped for the rare legacy case where a routine day pointed at a
+    // built-in template (userId null) before we moved to per-day cloning.
+    await tx.workoutTemplate.deleteMany({
+      where: { id: day.templateId, userId },
+    });
+
     // Renumber: any day with position > the removed one shifts down by 1.
     const remaining = await tx.routineDay.findMany({
       where: { routineId: day.routine.id },
@@ -1448,8 +1653,155 @@ export const removeRoutineDay = withLogging('removeRoutineDay', async (
   });
 
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
 });
+
+// ============================================================
+// Editing a routine day's exercises (operates on the day's owned template)
+// ============================================================
+
+const AddExerciseToRoutineDaySchema = z.object({
+  routineDayId: z.string().min(1),
+  exerciseId: z.string().min(1),
+});
+
+export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', async (
+  input: z.infer<typeof AddExerciseToRoutineDaySchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId, exerciseId } = AddExerciseToRoutineDaySchema.parse(input);
+
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    select: { templateId: true },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  await requireAvailableExercise(userId, exerciseId);
+
+  const collision = await db.templateExercise.findFirst({
+    where: { templateId: day.templateId, exerciseId },
+    select: { id: true },
+  });
+  if (collision) throw new Error('That exercise is already in this day.');
+
+  const last = await db.templateExercise.findFirst({
+    where: { templateId: day.templateId },
+    orderBy: { position: 'desc' },
+    select: { position: true },
+  });
+  const nextPos = (last?.position ?? -1) + 1;
+
+  await db.templateExercise.create({
+    data: { templateId: day.templateId, exerciseId, position: nextPos },
+  });
+
+  revalidatePath('/');
+  revalidatePath('/routine');
+});
+
+const RemoveExerciseFromRoutineDaySchema = z.object({
+  routineDayId: z.string().min(1),
+  exerciseId: z.string().min(1),
+});
+
+export const removeExerciseFromRoutineDay = withLogging(
+  'removeExerciseFromRoutineDay',
+  async (input: z.infer<typeof RemoveExerciseFromRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, exerciseId } = RemoveExerciseFromRoutineDaySchema.parse(input);
+
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      select: { templateId: true },
+    });
+    if (!day) throw new Error('Routine day not found');
+
+    await db.$transaction(async (tx) => {
+      const target = await tx.templateExercise.findFirst({
+        where: { templateId: day.templateId, exerciseId },
+        select: { id: true, position: true },
+      });
+      if (!target) return;
+
+      await tx.templateExercise.delete({ where: { id: target.id } });
+
+      // Renumber to keep positions contiguous.
+      const remaining = await tx.templateExercise.findMany({
+        where: { templateId: day.templateId },
+        orderBy: { position: 'asc' },
+        select: { id: true, position: true },
+      });
+      for (let i = 0; i < remaining.length; i++) {
+        if (remaining[i].position !== i) {
+          await tx.templateExercise.update({
+            where: { id: remaining[i].id },
+            data: { position: i },
+          });
+        }
+      }
+
+      // Drop any pending swap that referenced this exercise — it can't apply
+      // anymore.
+      await tx.routineDayPendingSwap.deleteMany({
+        where: { routineDayId, OR: [{ outExerciseId: exerciseId }, { inExerciseId: exerciseId }] },
+      });
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
+
+const ReorderRoutineDayExerciseSchema = z.object({
+  routineDayId: z.string().min(1),
+  exerciseId: z.string().min(1),
+  direction: z.enum(['up', 'down']),
+});
+
+export const reorderRoutineDayExercise = withLogging(
+  'reorderRoutineDayExercise',
+  async (input: z.infer<typeof ReorderRoutineDayExerciseSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, exerciseId, direction } = ReorderRoutineDayExerciseSchema.parse(input);
+
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      select: { templateId: true },
+    });
+    if (!day) throw new Error('Routine day not found');
+
+    const entries = await db.templateExercise.findMany({
+      where: { templateId: day.templateId },
+      orderBy: { position: 'asc' },
+      select: { id: true, exerciseId: true, position: true },
+    });
+    const myIndex = entries.findIndex((e) => e.exerciseId === exerciseId);
+    if (myIndex < 0) return;
+    const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
+    if (neighborIndex < 0 || neighborIndex >= entries.length) return;
+
+    const me = entries[myIndex];
+    const neighbor = entries[neighborIndex];
+    const sentinel = -1;
+
+    await db.$transaction([
+      db.templateExercise.update({ where: { id: me.id }, data: { position: sentinel } }),
+      db.templateExercise.update({
+        where: { id: neighbor.id },
+        data: { position: me.position },
+      }),
+      db.templateExercise.update({
+        where: { id: me.id },
+        data: { position: neighbor.position },
+      }),
+    ]);
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
 
 const ReorderRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
@@ -1502,6 +1854,7 @@ export const reorderRoutineDay = withLogging('reorderRoutineDay', async (
   ]);
 
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
 });
 
@@ -1598,15 +1951,10 @@ const SwapInRoutineTemplateSchema = z.object({
 });
 
 /**
- * Permanent swap: edit the template the routine day points at, replacing
- * `outExerciseId` with `inExerciseId` at the same position. Affects every
- * future use of the template (in this routine day or anywhere else it's
- * referenced).
- *
- * Refuses to modify built-in templates — they're shared across users. The
- * user-facing message tells them how to fork manually (build a new template
- * from scratch). Auto-forking on built-ins is an obvious next step but
- * deliberately deferred to keep this action focused.
+ * Permanent swap: edit the day's owned template, replacing `outExerciseId`
+ * with `inExerciseId` at the same position. Each routine day owns its own
+ * template now, so this only affects this day — no other surface inherits
+ * the change.
  */
 export const swapInRoutineTemplate = withLogging('swapInRoutineTemplate', async (
   input: z.infer<typeof SwapInRoutineTemplateSchema>,
@@ -1618,15 +1966,9 @@ export const swapInRoutineTemplate = withLogging('swapInRoutineTemplate', async 
 
   const day = await db.routineDay.findFirst({
     where: { id: routineDayId, routine: { userId } },
-    include: { template: { select: { id: true, isBuiltin: true, userId: true } } },
+    include: { template: { select: { id: true } } },
   });
   if (!day) throw new Error('Routine day not found');
-
-  if (day.template.isBuiltin || day.template.userId === null) {
-    throw new Error(
-      'This day uses a default template, which can’t be edited directly. Build your own copy first.',
-    );
-  }
 
   await requireAvailableExercise(userId, inExerciseId);
 
@@ -1660,52 +2002,44 @@ export const swapInRoutineTemplate = withLogging('swapInRoutineTemplate', async 
   ]);
 
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
 });
 
 // Wizard-driven routine creation. Lets the user assemble a whole routine in
-// one shot — picking existing templates and authoring new ones inline — and
-// saves it atomically. The incremental routine actions (createRoutine +
-// addRoutineDay × N) work fine for the settings editor, but a wizard that
-// bails halfway would leave orphan partial routines; this action keeps the
-// flow all-or-nothing.
+// one shot — every day always seeds its own owned template (either by
+// cloning the picked seed's exercises, or starting blank with the supplied
+// exercise list). All-or-nothing: a failure mid-build rolls everything back,
+// so a bailed wizard never leaves orphan rows.
 
-const DraftDayExistingSchema = z.object({
-  kind: z.literal('existing'),
-  templateId: z.string().min(1),
-  label: z.string().trim().max(60).optional(),
-  weekday: z.number().int().min(0).max(6).nullable().optional(),
-});
-
-const DraftDayNewSchema = z.object({
-  kind: z.literal('new'),
-  templateName: z.string().trim().min(1).max(80),
-  // Keep order: positions in the new template follow array order.
-  exerciseIds: z.array(z.string().min(1)).min(1).max(50),
-  label: z.string().trim().max(60).optional(),
-  weekday: z.number().int().min(0).max(6).nullable().optional(),
-});
+const DraftDaySchema = z
+  .object({
+    // The day's display name — becomes the day's owned template name. Optional;
+    // server fills in a positional fallback ("Day N" / weekday) when omitted.
+    name: z.string().trim().min(1).max(80).optional(),
+    // Pick one: either seed from an existing template (clones its exercises)
+    // or supply a list of exercises (in array order). Both empty = blank day.
+    seedTemplateId: z.string().min(1).optional(),
+    exerciseIds: z.array(z.string().min(1)).max(50).optional(),
+    label: z.string().trim().max(60).optional(),
+    weekday: z.number().int().min(0).max(6).nullable().optional(),
+  })
+  .refine((d) => !(d.seedTemplateId && d.exerciseIds && d.exerciseIds.length > 0), {
+    message: 'Pass either seedTemplateId or exerciseIds, not both.',
+  });
 
 const CreateRoutineFromDraftSchema = z.object({
-  name: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().max(300).optional(),
   scheduleStyle: ScheduleStyleSchema,
-  days: z
-    .array(z.discriminatedUnion('kind', [DraftDayExistingSchema, DraftDayNewSchema]))
-    .min(1)
-    .max(MAX_ROUTINE_DAYS),
+  days: z.array(DraftDaySchema).min(1).max(MAX_ROUTINE_DAYS),
 });
 
 /**
- * Create a routine, any inline templates, and all routine days in one
- * transaction. Throws (and rolls back) if anything fails — no half-built
- * routines on partial bail-out.
- *
- * Validates up front (outside the transaction) so we surface user-facing
- * errors with friendly messages: existing routine, weekday collisions in the
- * draft, template-name collisions against the user's existing templates,
- * inaccessible templates or exercises. Inside the transaction we do the
- * minimum needed.
+ * Create a routine and all of its days in one transaction. Each day always
+ * owns its own template — either by cloning a `seedTemplateId` (lifting the
+ * source's exercises) or by starting with the supplied exerciseIds list.
+ * Throws and rolls back if anything fails.
  */
 export const createRoutineFromDraft = withLogging('createRoutineFromDraft', async (
   input: z.infer<typeof CreateRoutineFromDraftSchema>,
@@ -1713,8 +2047,6 @@ export const createRoutineFromDraft = withLogging('createRoutineFromDraft', asyn
   const userId = await requireUser();
   const { name, description, scheduleStyle, days } = CreateRoutineFromDraftSchema.parse(input);
 
-  // One routine per user. Mirrors createRoutine — surface a friendly error
-  // before hitting the unique constraint.
   const existingRoutine = await db.routine.findUnique({ where: { userId } });
   if (existingRoutine) {
     throw new Error('You already have a routine. Edit it instead of creating a new one.');
@@ -1733,116 +2065,40 @@ export const createRoutineFromDraft = withLogging('createRoutineFromDraft', asyn
     }
   }
 
-  // Collect referenced existing templates and verify access in one query.
-  const existingTemplateIds = Array.from(
-    new Set(days.flatMap((d) => (d.kind === 'existing' ? [d.templateId] : []))),
-  );
-  if (existingTemplateIds.length > 0) {
-    const accessible = await db.workoutTemplate.findMany({
-      where: {
-        id: { in: existingTemplateIds },
-        OR: [{ userId }, { userId: null, isBuiltin: true }],
-      },
-      select: { id: true },
-    });
-    const accessibleIds = new Set(accessible.map((t) => t.id));
-    for (const id of existingTemplateIds) {
-      if (!accessibleIds.has(id)) throw new Error('Template not found');
-    }
-  }
-
-  // For new templates: verify exercises and check name collisions.
-  const newDayDrafts = days.filter((d): d is z.infer<typeof DraftDayNewSchema> => d.kind === 'new');
-  const allExerciseIds = Array.from(
-    new Set(newDayDrafts.flatMap((d) => d.exerciseIds)),
-  );
-  if (allExerciseIds.length > 0) {
-    const accessibleExercises = await db.exercise.findMany({
-      where: {
-        id: { in: allExerciseIds },
-        OR: [{ ownerId: null }, { ownerId: userId }],
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    const accessibleExerciseIds = new Set(accessibleExercises.map((e) => e.id));
-    for (const id of allExerciseIds) {
-      if (!accessibleExerciseIds.has(id)) throw new Error('Exercise not available');
-    }
-    // Each new template's exercises must be unique within itself —
-    // (templateId, exerciseId) is unique on TemplateExercise.
-    for (const d of newDayDrafts) {
-      if (new Set(d.exerciseIds).size !== d.exerciseIds.length) {
-        throw new Error('A template can\'t list the same exercise twice.');
-      }
-    }
-  }
-
-  // Name collisions for new templates: against each other in this draft, and
-  // against the user's existing templates. (We allow collisions with
-  // built-ins because the unique constraint treats (null, name) and
-  // (userId, name) as distinct — same rule saveActiveAsTemplate uses.)
-  const newNames = newDayDrafts.map((d) => d.templateName);
-  const seenNewNames = new Set<string>();
-  for (const n of newNames) {
-    if (seenNewNames.has(n)) {
-      throw new Error(`Two new templates named "${n}". Give them different names.`);
-    }
-    seenNewNames.add(n);
-  }
-  if (newNames.length > 0) {
-    const userTemplateCollisions = await db.workoutTemplate.findMany({
-      where: { userId, name: { in: newNames } },
-      select: { name: true },
-    });
-    if (userTemplateCollisions.length > 0) {
-      const first = userTemplateCollisions[0].name;
-      throw new Error(`You already have a template called "${first}". Pick a different name.`);
-    }
-  }
-
-  // All checks passed. Build the routine in one transaction.
   await db.$transaction(async (tx) => {
-    // 1. Create new templates first; map draft index → templateId so days can
-    //    reference them. We use the array position as the key since drafts
-    //    aren't otherwise identified.
-    const newTemplateIdByDraftIndex = new Map<number, string>();
-    for (let i = 0; i < days.length; i++) {
-      const day = days[i];
-      if (day.kind !== 'new') continue;
-      const created = await tx.workoutTemplate.create({
-        data: {
-          userId,
-          isBuiltin: false,
-          name: day.templateName,
-          exercises: {
-            create: day.exerciseIds.map((exerciseId, position) => ({
-              exerciseId,
-              position,
-            })),
-          },
-        },
-      });
-      newTemplateIdByDraftIndex.set(i, created.id);
-    }
-
-    // 2. Create the routine.
     const routine = await tx.routine.create({
       data: {
         userId,
-        name,
+        name: name || 'My routine',
         description: description || null,
         scheduleStyle,
       },
     });
 
-    // 3. Create routine days in array order. Positions are 0-indexed.
     for (let i = 0; i < days.length; i++) {
       const day = days[i];
-      const templateId =
-        day.kind === 'existing' ? day.templateId : newTemplateIdByDraftIndex.get(i)!;
       const effectiveWeekday =
         scheduleStyle === 'weekday' && day.weekday != null ? day.weekday : null;
+
+      // Determine the day's template name: explicit > seed's name > positional
+      // fallback. uniqueTemplateName will resolve any collisions on insert.
+      let baseName = day.name?.trim() || '';
+      if (!baseName && day.seedTemplateId) {
+        const seed = await tx.workoutTemplate.findFirst({
+          where: { id: day.seedTemplateId },
+          select: { name: true },
+        });
+        if (seed) baseName = seed.name;
+      }
+      if (!baseName) {
+        baseName =
+          effectiveWeekday !== null ? WEEKDAY_LONG[effectiveWeekday] : `Day ${i + 1}`;
+      }
+
+      const templateId = day.seedTemplateId
+        ? await cloneTemplateForUser(tx, userId, day.seedTemplateId, baseName)
+        : await freshTemplateForUser(tx, userId, baseName, day.exerciseIds ?? []);
+
       await tx.routineDay.create({
         data: {
           routineId: routine.id,
@@ -1857,6 +2113,7 @@ export const createRoutineFromDraft = withLogging('createRoutineFromDraft', asyn
 
   metrics.templatesUsed.inc();
   revalidatePath('/');
+  revalidatePath('/routine');
   revalidatePath('/settings');
 });
 

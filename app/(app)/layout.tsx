@@ -6,6 +6,8 @@
 // rest timer in the workout view share one piece of state. Without that,
 // they each kept their own optimistic mirror and could disagree visually.
 
+import Link from 'next/link';
+import { Settings as SettingsIcon } from 'lucide-react';
 import { auth } from '@/auth';
 import { redirect } from 'next/navigation';
 import { SignOutButton } from '@/components/auth/signout-button';
@@ -43,6 +45,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
           <div className="flex items-center gap-1">
             <CueToggle />
+            <Link
+              href="/settings"
+              aria-label="Settings"
+              className="p-2 text-ink-400 hover:text-ink-100 transition"
+            >
+              <SettingsIcon size={16} />
+            </Link>
             <SignOutButton />
           </div>
         </header>

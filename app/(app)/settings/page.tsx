@@ -6,16 +6,12 @@ import { redirect } from 'next/navigation';
 import {
   getUserVolumeTargets,
   getHiddenBuiltinTemplates,
-  getRoutineForUser,
-  getTemplates,
 } from '@/lib/queries';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
-import { isScheduleStyle } from '@/lib/routine';
 import { VolumeTargetsEditor } from '@/components/settings/volume-targets-editor';
 import { RestTimerEditor } from '@/components/settings/rest-timer-editor';
 import { WorkoutDefaultsEditor } from '@/components/settings/workout-defaults-editor';
 import { HiddenTemplatesEditor } from '@/components/settings/hidden-templates-editor';
-import { RoutineEditor } from '@/components/settings/routine-editor';
 
 export const metadata = { title: 'Settings — Tracker' };
 
@@ -24,44 +20,10 @@ export default async function SettingsPage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const [overrides, hiddenTemplates, routine, templates] = await Promise.all([
+  const [overrides, hiddenTemplates] = await Promise.all([
     getUserVolumeTargets(userId),
     getHiddenBuiltinTemplates(userId),
-    getRoutineForUser(userId),
-    getTemplates(userId),
   ]);
-
-  // Shape the routine for the client component — flattens template/exercise
-  // counts so the editor doesn't need raw template objects.
-  const routineForClient = routine
-    ? {
-        id: routine.id,
-        name: routine.name,
-        description: routine.description,
-        scheduleStyle: isScheduleStyle(routine.scheduleStyle)
-          ? routine.scheduleStyle
-          : ('sequence' as const),
-        lastCompletedPosition: routine.lastCompletedPosition,
-        days: routine.days.map((d) => ({
-          id: d.id,
-          position: d.position,
-          weekday: d.weekday,
-          label: d.label,
-          templateId: d.templateId,
-          templateName: d.template.name,
-          exerciseCount: d.template.exercises.filter(
-            (te) => te.exercise.deletedAt === null,
-          ).length,
-        })),
-      }
-    : null;
-
-  const templateOptionsForClient = templates.map((t) => ({
-    id: t.id,
-    name: t.name,
-    isBuiltin: t.isBuiltin,
-    exerciseCount: t.exercises.filter((te) => te.exercise.deletedAt === null).length,
-  }));
 
   const hiddenForClient = hiddenTemplates.map((row) => ({
     templateId: row.template.id,
@@ -95,18 +57,6 @@ export default async function SettingsPage() {
           Settings
         </h1>
       </div>
-
-      <section className="mb-8">
-        <div className="mb-3">
-          <h2 className="font-display text-xl">Routine</h2>
-          <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
-            Your cycle of templates. The app reflects your plan back at you —
-            it doesn&apos;t prescribe. Up to {7} days, scheduled by cycle position
-            or pinned to weekdays.
-          </p>
-        </div>
-        <RoutineEditor routine={routineForClient} templates={templateOptionsForClient} />
-      </section>
 
       <section className="mb-8">
         <div className="mb-3">
