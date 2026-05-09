@@ -74,6 +74,42 @@ export const EQUIPMENT_TIERS = [
 ] as const;
 export type EquipmentTier = (typeof EQUIPMENT_TIERS)[number];
 
+// Display labels for each equipment token. Keep these short — they show as
+// chip captions in the preset picker. Tokens that aren't in this map fall
+// back to the raw string in the UI; they still work, just look like
+// 'physio ball' instead of 'Physio ball'.
+export const EQUIPMENT_LABELS: Record<string, string> = {
+  barbell: 'Barbell',
+  rack: 'Rack',
+  bench: 'Bench',
+  dumbbells: 'Dumbbells',
+  cable: 'Cable stack',
+  machine: 'Machines',
+  bands: 'Bands',
+  'pull-up bar': 'Pull-up bar',
+  rings: 'Rings',
+  'dip bar': 'Dip bar',
+  'foam roller': 'Foam roller',
+  'lacrosse ball': 'Lacrosse ball',
+  'physio ball': 'Physio ball',
+  bosu: 'BOSU',
+  'airex pad': 'Airex pad',
+  'jump rope': 'Jump rope',
+  mat: 'Mat',
+};
+
+// Grouping for the picker UI. Order within each group is the canonical order
+// surfaced to users. Floor / SMR items group together so users can sweep them
+// on/off as a unit. Specialty items go last — most users don't have them and
+// scrolling past them as the final group keeps the common toggles up top.
+export const EQUIPMENT_GROUPS: { label: string; tokens: readonly string[] }[] = [
+  { label: 'Free weights', tokens: ['barbell', 'rack', 'bench', 'dumbbells'] },
+  { label: 'Cables / machines', tokens: ['cable', 'machine'] },
+  { label: 'Bands & bars', tokens: ['bands', 'pull-up bar', 'rings', 'dip bar'] },
+  { label: 'Floor / SMR', tokens: ['mat', 'foam roller', 'lacrosse ball'] },
+  { label: 'Specialty', tokens: ['physio ball', 'bosu', 'airex pad', 'jump rope'] },
+];
+
 export const EQUIPMENT_TIER_INFO: Record<
   EquipmentTier,
   { label: string; description: string }
@@ -105,7 +141,12 @@ export const EQUIPMENT_TIER_INFO: Record<
 // preset surfaces a small "you'll need a mat" hint instead. Same for foam
 // rollers / lacrosse balls in tiers that include them — having them is
 // nice-to-have, missing them just degrades the SMR section gracefully.
-const TIER_EQUIPMENT: Record<EquipmentTier, ReadonlySet<string>> = {
+//
+// Exported so the picker UI can drive its "Quick set" preset buttons from the
+// same source of truth as the builder. The picker also lets users hand-pick
+// equipment beyond a tier (e.g. "home rack but I also have a cable stack");
+// the builder takes the resulting Set directly via buildStarterRoutine.
+export const TIER_EQUIPMENT: Record<EquipmentTier, ReadonlySet<string>> = {
   'full-gym': new Set([
     'barbell',
     'rack',
@@ -1010,9 +1051,13 @@ export function buildStarterRoutine(input: {
   focus: StarterFocus;
   days: number;
   durationMinutes: StarterDuration;
-  equipmentTier: EquipmentTier;
+  // The equipment the user has available. Either pass `TIER_EQUIPMENT[tier]`
+  // for one of the canonical tiers, or pass a hand-picked Set when the user
+  // has refined per-token availability. The builder doesn't care — every
+  // variant's `equipment` requirements are checked against this Set.
+  availableEquipment: ReadonlySet<string>;
 }): BuildStarterRoutineResult {
-  const { focus, days, durationMinutes, equipmentTier } = input;
+  const { focus, days, durationMinutes, availableEquipment } = input;
   const base = STARTER_ROUTINES[focus]?.[days];
   if (!base) {
     return {
@@ -1022,7 +1067,7 @@ export function buildStarterRoutine(input: {
       needsMat: false,
     };
   }
-  const available = TIER_EQUIPMENT[equipmentTier];
+  const available = availableEquipment;
   const cutoff = PRIORITY_CUTOFF[durationMinutes];
 
   const builtDays: BuiltDay[] = [];
@@ -1071,7 +1116,7 @@ export function buildStarterRoutine(input: {
   }
   if (droppedAny) {
     tradeoffs.add(
-      `Some movement slots were dropped — your equipment tier doesn't cover them. Switch tier or edit the day to fill the gap.`,
+      `Some movement slots were dropped — your available equipment doesn't cover them. Toggle more gear on, or edit the day after to fill the gap.`,
     );
   }
 

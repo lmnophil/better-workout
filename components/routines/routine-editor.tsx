@@ -56,11 +56,13 @@ import {
 import { moduleDescription } from '@/lib/exercises-data';
 import {
   buildStarterRoutine,
+  EQUIPMENT_GROUPS,
+  EQUIPMENT_LABELS,
   EQUIPMENT_TIERS,
   EQUIPMENT_TIER_INFO,
   STARTER_DURATIONS,
-  STARTER_FOCUSES,
   STARTER_FOCUS_INFO,
+  TIER_EQUIPMENT,
   type EquipmentTier,
   type StarterDuration,
   type StarterFocus,
@@ -234,6 +236,19 @@ function makeDraftDay(initial: Partial<DraftDay> = {}): DraftDay {
 // trying to migrate.
 const DRAFT_STORAGE_KEY = 'starter-routine-draft.v1';
 
+// Separate key for the preset picker's filter state (focus tab, days,
+// duration, equipment Set). Kept separate from the draft so the user's
+// equipment toggles persist even after they save a routine and the draft
+// is cleared.
+const FILTERS_STORAGE_KEY = 'starter-routine-filters.v1';
+
+type SerializedFilters = {
+  presetTab?: string;
+  presetDays?: number;
+  presetDuration?: number;
+  availableEquipment?: string[];
+};
+
 type PresetTab = StarterFocus | 'custom';
 
 function DraftEditor({
@@ -257,13 +272,21 @@ function DraftEditor({
   // they pick filters and either click "Use this preset" (which copies the
   // built preset into `days` and switches to 'custom') or they switch to the
   // Custom tab to start blank / continue a WIP draft.
+  //
+  // `availableEquipment` is the picker's source of truth — the per-token Set
+  // of gear the user has access to. The "Quick set" tier buttons in the UI
+  // are convenience presets that snap this Set; users can also toggle
+  // individual items, which un-snaps from any tier match.
   const [presetTab, setPresetTab] = useState<PresetTab>('strength');
   const [presetDays, setPresetDays] = useState<number>(3);
   const [presetDuration, setPresetDuration] = useState<StarterDuration>(45);
-  const [presetTier, setPresetTier] = useState<EquipmentTier>('home-rack');
+  const [availableEquipment, setAvailableEquipment] = useState<Set<string>>(
+    () => new Set(TIER_EQUIPMENT['home-rack']),
+  );
   // Set once we've attempted to hydrate from localStorage so the persistence
-  // effect below doesn't write the empty initial state over a saved draft.
+  // effects below don't write initial defaults over saved state.
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
 
   // Hydrate the Custom draft from localStorage on mount. We only treat the
   // result as valid if every exercise still resolves — exercises can be
@@ -311,6 +334,66 @@ function DraftEditor({
       // persistence; no point yelling at the user.
     }
   }, [days, draftHydrated]);
+
+  // Hydrate the preset filter state (tab, days, duration, equipment) from
+  // localStorage on mount. Each field is independently optional — if any
+  // are missing, we keep the default for that field.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(FILTERS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as SerializedFilters;
+        if (
+          parsed.presetTab === 'strength' ||
+          parsed.presetTab === 'build' ||
+          parsed.presetTab === 'mobility' ||
+          parsed.presetTab === 'custom'
+        ) {
+          setPresetTab(parsed.presetTab);
+        }
+        if (
+          typeof parsed.presetDays === 'number' &&
+          parsed.presetDays >= 1 &&
+          parsed.presetDays <= 7
+        ) {
+          setPresetDays(parsed.presetDays);
+        }
+        if (
+          parsed.presetDuration === 15 ||
+          parsed.presetDuration === 30 ||
+          parsed.presetDuration === 45 ||
+          parsed.presetDuration === 60
+        ) {
+          setPresetDuration(parsed.presetDuration);
+        }
+        if (Array.isArray(parsed.availableEquipment)) {
+          setAvailableEquipment(
+            new Set(parsed.availableEquipment.filter((s) => typeof s === 'string')),
+          );
+        }
+      }
+    } catch {
+      // Treat any failure as "no saved filters" — defaults stand.
+    }
+    setFiltersHydrated(true);
+  }, []);
+
+  // Persist filters on change. Same hydration guard as the draft.
+  useEffect(() => {
+    if (!filtersHydrated || typeof window === 'undefined') return;
+    try {
+      const payload: SerializedFilters = {
+        presetTab,
+        presetDays,
+        presetDuration,
+        availableEquipment: Array.from(availableEquipment).sort(),
+      };
+      window.localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  }, [presetTab, presetDays, presetDuration, availableEquipment, filtersHydrated]);
 
   const exerciseById = useMemo(
     () => new Map(availableExercises.map((e) => [e.id, e])),
@@ -469,17 +552,55 @@ function DraftEditor({
   }
 
   // Compute the current preset's resolved preview. Recomputes whenever the
-  // user changes the focus tab, days, duration, or equipment tier. Cheap —
-  // the builder is just iterating the static base + filtering variants.
+  // user changes the focus tab, days, duration, or equipment selection.
+  // Cheap — the builder is just iterating the static base + filtering
+  // variants against the available-equipment Set.
   const presetResult = useMemo(() => {
     if (presetTab === 'custom') return null;
     return buildStarterRoutine({
       focus: presetTab,
       days: presetDays,
       durationMinutes: presetDuration,
-      equipmentTier: presetTier,
+      availableEquipment,
     });
-  }, [presetTab, presetDays, presetDuration, presetTier]);
+  }, [presetTab, presetDays, presetDuration, availableEquipment]);
+
+  // Project the preset preview into the same EditorDay shape Custom mode uses,
+  // so the existing coverage helpers (computeMuscleTotals, CoveragePanel) work
+  // verbatim against it. Skipped for the Custom tab — that path uses the live
+  // editorDays.
+  const presetEditorDays: EditorDay[] = useMemo(() => {
+    if (!presetResult) return [];
+    const nameToId = new Map(availableExercises.map((e) => [e.name, e.id]));
+    return presetResult.days.map((d, idx) => ({
+      id: `preset-${idx}`,
+      name: d.name,
+      label: null,
+      weekday: null,
+      exercises: d.exercises
+        .map((ex): DayExercise | null => {
+          const id = nameToId.get(ex.exerciseName);
+          if (!id) return null;
+          const e = exerciseById.get(id);
+          if (!e) return null;
+          return {
+            exerciseId: id,
+            name: e.name,
+            module: e.module,
+            metric: e.metric,
+            plannedSets: ex.plannedSets,
+            plannedReps: ex.plannedReps,
+            plannedSeconds: ex.plannedSeconds,
+          };
+        })
+        .filter((x): x is DayExercise => x !== null),
+    }));
+  }, [presetResult, availableExercises, exerciseById]);
+
+  const { totals: presetTotals, anyEstimated: presetAnyEstimated } = useMemo(
+    () => computeMuscleTotals(presetEditorDays, exerciseById),
+    [presetEditorDays, exerciseById],
+  );
 
   // Apply the current preset to the Custom draft and switch tabs. Per the UX
   // spec: this *overwrites* any prior Custom WIP. The user implicitly agreed
@@ -533,11 +654,14 @@ function DraftEditor({
           focus={presetTab}
           days={presetDays}
           duration={presetDuration}
-          tier={presetTier}
+          availableEquipment={availableEquipment}
           result={presetResult}
+          coverageTotals={presetTotals}
+          coverageAnyEstimated={presetAnyEstimated}
+          muscleGroups={muscleGroups}
           onChangeDays={setPresetDays}
           onChangeDuration={setPresetDuration}
-          onChangeTier={setPresetTier}
+          onChangeEquipment={setAvailableEquipment}
           onApply={applyPreset}
           willOverwriteCustom={customHasContent}
         />
@@ -737,29 +861,38 @@ function PresetTabs({
   );
 }
 
-// Read-only preview of a (focus × days × duration × tier) preset, with
-// filter pills above and a "use this preset" button below. Editing happens
-// only after the user clicks "Use this preset" and is dropped into Custom.
+// Read-only preview of a (focus × days × duration × equipment) preset.
+// Filter pills + the per-token equipment selector are above; the days
+// preview and a coverage snapshot are below; an explicit "Use this preset"
+// CTA at the bottom copies into Custom and switches tabs. Editing the
+// resulting days happens in the Custom tab — preset previews are never
+// directly editable, by design.
 function PresetView({
   focus,
   days,
   duration,
-  tier,
+  availableEquipment,
   result,
+  coverageTotals,
+  coverageAnyEstimated,
+  muscleGroups,
   onChangeDays,
   onChangeDuration,
-  onChangeTier,
+  onChangeEquipment,
   onApply,
   willOverwriteCustom,
 }: {
   focus: StarterFocus;
   days: number;
   duration: StarterDuration;
-  tier: EquipmentTier;
+  availableEquipment: ReadonlySet<string>;
   result: ReturnType<typeof buildStarterRoutine>;
+  coverageTotals: MuscleTotals;
+  coverageAnyEstimated: boolean;
+  muscleGroups: MuscleGroupClient[];
   onChangeDays: (n: number) => void;
   onChangeDuration: (n: StarterDuration) => void;
-  onChangeTier: (t: EquipmentTier) => void;
+  onChangeEquipment: (next: Set<string>) => void;
   onApply: () => void;
   willOverwriteCustom: boolean;
 }) {
@@ -770,7 +903,7 @@ function PresetView({
         <p className="text-[12px] text-ink-300 leading-relaxed">{focusInfo.description}</p>
       </div>
 
-      {/* Filter pills */}
+      {/* Days + duration */}
       <div className="space-y-3 mb-5">
         <PillRow
           label="Days / cycle"
@@ -784,20 +917,17 @@ function PresetView({
           value={duration}
           onChange={onChangeDuration}
         />
-        <PillRow
-          label="Equipment"
-          options={EQUIPMENT_TIERS.map((t) => ({
-            value: t,
-            label: EQUIPMENT_TIER_INFO[t].label,
-          }))}
-          value={tier}
-          onChange={onChangeTier}
-        />
       </div>
+
+      {/* Equipment selector */}
+      <EquipmentSelector
+        available={availableEquipment}
+        onChange={onChangeEquipment}
+      />
 
       {/* Tradeoffs / mat hint */}
       {(result.tradeoffs.length > 0 || result.needsMat) && (
-        <div className="mb-4 space-y-1.5">
+        <div className="mt-5 mb-4 space-y-1.5">
           {result.tradeoffs.map((msg) => (
             <p
               key={msg}
@@ -815,10 +945,10 @@ function PresetView({
       )}
 
       {/* Days preview */}
-      <div className="space-y-2.5 mb-5">
+      <div className="space-y-2.5 mt-5 mb-5">
         {result.days.length === 0 ? (
           <p className="text-[12px] text-ink-500 italic font-display">
-            No exercises matched at this combination — try a different equipment tier or duration.
+            No exercises matched at this combination — try toggling more equipment on or picking a longer duration.
           </p>
         ) : (
           result.days.map((d, idx) => (
@@ -853,14 +983,122 @@ function PresetView({
         )}
       </div>
 
+      {/* Coverage snapshot — same component the Custom mode uses, fed by the
+          preview's projected day list. Lets the user see at a glance which
+          muscles the current (focus × days × duration × equipment) hits. */}
+      <CoveragePanel
+        totals={coverageTotals}
+        anyEstimated={coverageAnyEstimated}
+        muscleGroups={muscleGroups}
+      />
+
       {/* Use-this-preset CTA */}
       <button
         onClick={onApply}
         disabled={result.days.every((d) => d.exercises.length === 0)}
-        className="w-full accent-bg text-ink-950 px-4 py-2.5 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed"
+        className="mt-6 w-full accent-bg text-ink-950 px-4 py-2.5 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed"
       >
         Use this preset {willOverwriteCustom && <span className="font-normal opacity-80">— replaces your current draft</span>}
       </button>
+    </div>
+  );
+}
+
+// Per-token equipment selector. Quick-set pills snap the whole Set to a named
+// tier; the grouped checkbox-style pills below let users hand-toggle. The
+// quick-set row highlights the matching tier (or none, if the user has a
+// hand-rolled mix).
+function EquipmentSelector({
+  available,
+  onChange,
+}: {
+  available: ReadonlySet<string>;
+  onChange: (next: Set<string>) => void;
+}) {
+  // Detect which tier (if any) the current selection matches exactly. Compares
+  // by Set equality. A null result means the user has a custom mix.
+  const matchedTier: EquipmentTier | null = useMemo(() => {
+    for (const tier of EQUIPMENT_TIERS) {
+      const tierSet = TIER_EQUIPMENT[tier];
+      if (tierSet.size !== available.size) continue;
+      let same = true;
+      for (const t of tierSet) {
+        if (!available.has(t)) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return tier;
+    }
+    return null;
+  }, [available]);
+
+  function toggle(token: string) {
+    const next = new Set(available);
+    if (next.has(token)) next.delete(token);
+    else next.add(token);
+    onChange(next);
+  }
+
+  function snapToTier(tier: EquipmentTier) {
+    onChange(new Set(TIER_EQUIPMENT[tier]));
+  }
+
+  return (
+    <div className="border border-ink-800 rounded-lg p-3">
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500 w-24 shrink-0">
+          Equipment
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {EQUIPMENT_TIERS.map((tier) => {
+            const active = matchedTier === tier;
+            return (
+              <button
+                key={tier}
+                onClick={() => snapToTier(tier)}
+                className={`px-2.5 py-1 text-[11px] rounded-full border transition ${
+                  active
+                    ? 'accent-bg accent-border text-ink-950 font-medium'
+                    : 'border-ink-800 text-ink-300 hover:border-ink-600 hover:text-ink-100'
+                }`}
+              >
+                {EQUIPMENT_TIER_INFO[tier].label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {EQUIPMENT_GROUPS.map((group) => (
+          <div key={group.label} className="flex items-start gap-2 flex-wrap">
+            <div className="text-[10px] tracking-[0.15em] uppercase text-ink-600 w-24 shrink-0 pt-1">
+              {group.label}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {group.tokens.map((token) => {
+                const on = available.has(token);
+                const label = EQUIPMENT_LABELS[token] ?? token;
+                return (
+                  <button
+                    key={token}
+                    onClick={() => toggle(token)}
+                    aria-pressed={on}
+                    className={`px-2 py-0.5 text-[11px] rounded-full border transition ${
+                      on
+                        ? 'border-accent/60 accent-text bg-accent/10'
+                        : 'border-ink-800 text-ink-500 hover:border-ink-600 hover:text-ink-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
