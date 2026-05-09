@@ -2,6 +2,8 @@
 
 End-to-end deployment of the workout tracker. Primary target: an Ubuntu LXC on Proxmox VE. Notes for Oracle Cloud Free Tier are at the bottom.
 
+> For local development and rehearsing the boot path before shipping, see [`LOCAL.md`](./LOCAL.md). It covers running the same compose stack on your laptop and resetting it to a clean state — the closest dry run to a first prod deploy.
+
 ## What you'll end up with
 
 - Single Ubuntu container running Docker

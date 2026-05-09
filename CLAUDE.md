@@ -33,7 +33,7 @@ If a feature request feels like it's pulling toward "tell the user what to do" (
 
 - **Next.js 15** (App Router, React 19, Server Actions). Stable, not bleeding-edge — but recent enough that older patterns are real footguns.
 - **TypeScript** strict throughout.
-- **Prisma 7** + **Postgres 16** for persistence. The Rust query engine is gone — queries run through the `@prisma/adapter-pg` driver adapter (see `lib/db.ts`). Generator output goes to `prisma/generated/prisma/` (gitignored), not `node_modules/.prisma`. CLI config lives in `prisma.config.ts` at the repo root, not the deprecated `package.json#prisma` block. Migrations are committed; `npm run db:migrate dev` after schema changes.
+- **Prisma 7** + **Postgres 16** for persistence. The Rust query engine is gone — queries run through the `@prisma/adapter-pg` driver adapter (see `lib/db.ts`). Generator output goes to `prisma/generated/prisma/` (gitignored), not `node_modules/.prisma`. CLI config lives in `prisma.config.ts` at the repo root, not the deprecated `package.json#prisma` block. Migrations are committed; `npm run db:migrate` after schema changes.
 - **Auth.js v5** (`next-auth@5.0.0-beta`). Google OAuth + Resend magic links. JWT session strategy (1-year lifetime — see `docs/decisions.md` for why).
 - **Tailwind 3** + custom design tokens. Warm dark theme, Fraunces / Bricolage Grotesque / JetBrains Mono via `next/font/google` (self-hosted at build time, no runtime CDN call).
 - **Pino** for structured JSON logging. **prom-client** for Prometheus metrics.

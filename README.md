@@ -86,33 +86,7 @@ workout-tracker/
 
 ## Local development
 
-**Prerequisites:** Node 20+, Docker (for Postgres), npm.
-
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Start Postgres locally
-docker run -d --name workout-pg \
-  -e POSTGRES_PASSWORD=devpass \
-  -e POSTGRES_DB=workout \
-  -p 5432:5432 \
-  postgres:16
-
-# 3. Set up environment
-cp .env.example .env
-./scripts/generate-secrets.sh >> .env   # appends AUTH_SECRET, etc.
-$EDITOR .env                             # fill in OAuth + Resend credentials
-
-# 4. Run migrations and seed
-npm run db:migrate dev
-npm run db:seed
-
-# 5. Start dev server
-npm run dev
-```
-
-Visit `http://localhost:3000`. For pretty-printed logs in dev: `npm run dev:pretty`.
+See [`LOCAL.md`](./LOCAL.md) for the full local-dev setup — npm mode for everyday hot-reload work, compose mode for verifying the production stack locally, and how to reset either environment to a fresh state.
 
 ## Required external accounts
 
