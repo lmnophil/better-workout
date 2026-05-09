@@ -129,6 +129,14 @@ README.md                  User-facing project intro
 - **Push back when things feel off.** A request that's underspecified, contradictory, or pointing toward a bad design — say so. Don't just execute. The user has explicitly asked for this kind of feedback throughout the project's history.
 - **Stay in your lane.** Don't add features that weren't asked for. Don't refactor things that weren't part of the request. Don't change conventions that were deliberate.
 
+## Verifying UI changes
+
+A Playwright MCP is wired up via `.mcp.json` at the repo root. Use it to actually drive the dev server in a browser — navigate, click through flows, screenshot, read the console — instead of saying "I can't verify the UI." Typechecking is not the same as exercising the feature; for UI work, exercise it before reporting done.
+
+The first time the MCP launches a browser, the user signs in manually (Google OAuth or magic link) in the headed window. The profile persists at `./.playwright-profile/` (gitignored) so future sessions land pre-authenticated. If the cookie expires or you need to test as a different user, blow that directory away and re-sign in.
+
+If you genuinely can't verify something (no MCP available, environment doesn't support a headed browser, blocked by an OAuth flow), say so explicitly rather than implying success.
+
 ## What this app deliberately does NOT have
 
 These are not oversights — pushing back if asked to add them is fair:

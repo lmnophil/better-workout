@@ -49,3 +49,12 @@ public/sw.js
 public/sw.js.map
 public/swe-worker-*.js
 public/workbox-*.js
+
+# Playwright MCP persistent browser profile. Holds the auth.js session cookie
+# after the one-time interactive login (see CLAUDE.md → "Verifying UI changes").
+# Contains live credentials — never commit.
+.playwright-profile/
+
+# Playwright MCP scratch output (page snapshots, console logs, screenshots
+# the MCP saves while Claude is verifying UI work).
+.playwright-mcp/
