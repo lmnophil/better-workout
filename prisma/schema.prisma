@@ -284,6 +284,15 @@ model UserHiddenTemplate {
 // On load, we copy these into SetLogs (one empty set per exercise) preserving
 // the ordering. If the source exercise is later deleted, this row goes with it
 // (Cascade) — the template degrades gracefully.
+//
+// plannedSets / plannedReps are the user's per-template planning numbers — how
+// many sets and reps they intend to do for this exercise *in this template*.
+// Both are nullable so existing rows and quick-pick flows can leave them
+// blank. They feed buildSeededSetLogRows: when a session is started from a
+// template (or a routine day), plannedSets becomes the seed set count when no
+// history exists, and plannedReps fills in each seeded set's rep field. They
+// are *plans*, not prescriptions: the user authored them; the app just
+// represents them back.
 model TemplateExercise {
   id         String          @id @default(cuid())
   templateId String
@@ -291,6 +300,9 @@ model TemplateExercise {
   exerciseId String
   exercise   Exercise        @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
   position   Int
+
+  plannedSets Int?
+  plannedReps Int?
 
   createdAt DateTime @default(now())
 

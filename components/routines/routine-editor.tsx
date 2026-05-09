@@ -45,6 +45,7 @@ import {
   swapInRoutineTemplate,
   updateRoutine,
   updateRoutineDay,
+  updateRoutineDayExercise,
 } from '@/lib/actions';
 import {
   MAX_ROUTINE_DAYS,
@@ -64,6 +65,8 @@ type DayExercise = {
   exerciseId: string;
   name: string;
   module: string;
+  plannedSets: number | null;
+  plannedReps: number | null;
 };
 
 type EditorDay = {
@@ -86,6 +89,10 @@ export type DayClient = {
     name: string;
     module: string;
     position: number;
+    plannedSets: number | null;
+    plannedReps: number | null;
+    primaryMuscles: string[];
+    secondaryMuscles: string[];
   }[];
 };
 
@@ -106,15 +113,31 @@ export type SeedTemplateClient = {
   exerciseNames: string[];
 };
 
+export type MuscleGroupClient = {
+  id: string;
+  label: string;
+  category: 'lower' | 'upper' | 'trunk' | 'mobility' | 'other';
+  // Effective weekly volume target — user override if any, else seed default.
+  // Null for muscles tracked only by recency (mobility/balance/cardio).
+  target: number | null;
+  isOverridden: boolean;
+};
+
 type Props = {
   routine: RoutineClient | null;
   seedTemplates: SeedTemplateClient[];
   availableExercises: ExerciseInfo[];
+  muscleGroups: MuscleGroupClient[];
 };
 
 // ============ TOP-LEVEL DISPATCH ============
 
-export function RoutineEditor({ routine, seedTemplates, availableExercises }: Props) {
+export function RoutineEditor({
+  routine,
+  seedTemplates,
+  availableExercises,
+  muscleGroups,
+}: Props) {
   return (
     <div className="px-5 pt-6 pb-24">
       <Header />
@@ -123,11 +146,13 @@ export function RoutineEditor({ routine, seedTemplates, availableExercises }: Pr
           routine={routine}
           seedTemplates={seedTemplates}
           availableExercises={availableExercises}
+          muscleGroups={muscleGroups}
         />
       ) : (
         <DraftEditor
           seedTemplates={seedTemplates}
           availableExercises={availableExercises}
+          muscleGroups={muscleGroups}
         />
       )}
     </div>
@@ -156,6 +181,12 @@ function Header() {
 
 // ============ DRAFT EDITOR ============
 
+type DraftExercise = {
+  exerciseId: string;
+  plannedSets: number | null;
+  plannedReps: number | null;
+};
+
 type DraftDay = {
   // Stable client id for React keys and dispatch. Replaced with a server id
   // once the routine is saved (then the user enters Live mode).
@@ -163,7 +194,7 @@ type DraftDay = {
   name: string;
   label: string | null;
   weekday: number | null;
-  exerciseIds: string[];
+  exercises: DraftExercise[];
 };
 
 function makeDraftDay(initial: Partial<DraftDay> = {}): DraftDay {
@@ -175,7 +206,7 @@ function makeDraftDay(initial: Partial<DraftDay> = {}): DraftDay {
     name: '',
     label: null,
     weekday: null,
-    exerciseIds: [],
+    exercises: [],
     ...initial,
   };
 }
@@ -183,9 +214,11 @@ function makeDraftDay(initial: Partial<DraftDay> = {}): DraftDay {
 function DraftEditor({
   seedTemplates,
   availableExercises,
+  muscleGroups,
 }: {
   seedTemplates: SeedTemplateClient[];
   availableExercises: ExerciseInfo[];
+  muscleGroups: MuscleGroupClient[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -216,10 +249,19 @@ function DraftEditor({
           name: d.name.trim() || fallback,
           label: d.label,
           weekday: d.weekday,
-          exercises: d.exerciseIds
-            .map((id) => exerciseById.get(id))
-            .filter((e): e is ExerciseInfo => e !== undefined)
-            .map((e) => ({ exerciseId: e.id, name: e.name, module: e.module })),
+          exercises: d.exercises
+            .map((dx) => {
+              const e = exerciseById.get(dx.exerciseId);
+              if (!e) return null;
+              return {
+                exerciseId: e.id,
+                name: e.name,
+                module: e.module,
+                plannedSets: dx.plannedSets,
+                plannedReps: dx.plannedReps,
+              };
+            })
+            .filter((x): x is DayExercise => x !== null),
         };
       }),
     [days, exerciseById],
@@ -256,17 +298,20 @@ function DraftEditor({
     // Find the matching exercise ids: templates surface exercise *names*, but
     // we need ids to populate the day. Cross-reference by name against the
     // available exercises — this is exact-match because both lists come from
-    // the same Exercise table.
+    // the same Exercise table. Planned sets/reps don't carry over from the
+    // seed (they're per-template, and the lookup is name-based, so it's not
+    // worth wiring through the projection); the user fills them in here.
     const nameToId = new Map(availableExercises.map((e) => [e.name, e.id]));
-    const ids = tpl.exerciseNames
+    const seeded: DraftExercise[] = tpl.exerciseNames
       .map((n) => nameToId.get(n))
-      .filter((id): id is string => id !== undefined);
+      .filter((id): id is string => id !== undefined)
+      .map((exerciseId) => ({ exerciseId, plannedSets: null, plannedReps: null }));
     updateDay(clientId, (d) => ({
       ...d,
       // Default the day's name to the seed's, but only if the user hasn't
       // typed something already.
       name: d.name.trim() ? d.name : tpl.name,
-      exerciseIds: ids,
+      exercises: seeded,
     }));
   }
 
@@ -276,7 +321,7 @@ function DraftEditor({
   // — that's fine because we strip weekdays in sequence mode anyway.
   const canSave = useMemo(() => {
     if (days.length === 0) return false;
-    if (days.some((d) => d.exerciseIds.length === 0)) return false;
+    if (days.some((d) => d.exercises.length === 0)) return false;
     if (scheduleStyle === 'weekday') {
       const seen = new Set<number>();
       for (const d of days) {
@@ -296,7 +341,11 @@ function DraftEditor({
           scheduleStyle,
           days: days.map((d) => ({
             name: d.name.trim() || undefined,
-            exerciseIds: d.exerciseIds,
+            exercises: d.exercises.map((e) => ({
+              exerciseId: e.exerciseId,
+              plannedSets: e.plannedSets,
+              plannedReps: e.plannedReps,
+            })),
             label: d.label?.trim() || undefined,
             weekday: scheduleStyle === 'weekday' ? d.weekday : null,
           })),
@@ -343,23 +392,37 @@ function DraftEditor({
           onRemoveExercise={(id, exerciseId) =>
             updateDay(id, (d) => ({
               ...d,
-              exerciseIds: d.exerciseIds.filter((eid) => eid !== exerciseId),
+              exercises: d.exercises.filter((e) => e.exerciseId !== exerciseId),
             }))
           }
           onReorderExercise={(id, exerciseId, direction) =>
             updateDay(id, (d) => {
-              const idx = d.exerciseIds.indexOf(exerciseId);
+              const idx = d.exercises.findIndex((e) => e.exerciseId === exerciseId);
               if (idx < 0) return d;
               const target = direction === 'up' ? idx - 1 : idx + 1;
-              if (target < 0 || target >= d.exerciseIds.length) return d;
-              const next = [...d.exerciseIds];
+              if (target < 0 || target >= d.exercises.length) return d;
+              const next = [...d.exercises];
               [next[idx], next[target]] = [next[target], next[idx]];
-              return { ...d, exerciseIds: next };
+              return { ...d, exercises: next };
             })
+          }
+          onUpdateExercisePlanned={(id, exerciseId, planned) =>
+            updateDay(id, (d) => ({
+              ...d,
+              exercises: d.exercises.map((e) =>
+                e.exerciseId === exerciseId ? { ...e, ...planned } : e,
+              ),
+            }))
           }
           onSwapExercise={null}
         />
       </div>
+
+      <CoveragePanel
+        days={editorDays}
+        availableExercises={availableExercises}
+        muscleGroups={muscleGroups}
+      />
 
       <div className="mt-6 border border-ink-800 rounded-lg p-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
@@ -388,20 +451,24 @@ function DraftEditor({
         (() => {
           const draftDay = days.find((d) => d.clientId === pickerForDayClientId);
           if (!draftDay) return null;
-          const excludeIds = new Set(draftDay.exerciseIds);
+          const excludeIds = new Set(draftDay.exercises.map((e) => e.exerciseId));
           return (
             <ExercisePicker
               availableExercises={availableExercises}
               excludeIds={excludeIds}
               onPickMany={(exerciseIds) => {
                 setPickerForDayClientId(null);
-                updateDay(draftDay.clientId, (d) => ({
-                  ...d,
-                  exerciseIds: [
-                    ...d.exerciseIds,
-                    ...exerciseIds.filter((id) => !d.exerciseIds.includes(id)),
-                  ],
-                }));
+                updateDay(draftDay.clientId, (d) => {
+                  const have = new Set(d.exercises.map((e) => e.exerciseId));
+                  const additions: DraftExercise[] = exerciseIds
+                    .filter((id) => !have.has(id))
+                    .map((exerciseId) => ({
+                      exerciseId,
+                      plannedSets: null,
+                      plannedReps: null,
+                    }));
+                  return { ...d, exercises: [...d.exercises, ...additions] };
+                });
               }}
               onClose={() => setPickerForDayClientId(null)}
               onCreateCustom={(name, primary, secondary, prescription, videoUrl, restTimerSeconds) => {
@@ -436,10 +503,12 @@ function LiveEditor({
   routine,
   seedTemplates,
   availableExercises,
+  muscleGroups,
 }: {
   routine: RoutineClient;
   seedTemplates: SeedTemplateClient[];
   availableExercises: ExerciseInfo[];
+  muscleGroups: MuscleGroupClient[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -466,6 +535,8 @@ function LiveEditor({
               exerciseId: e.exerciseId,
               name: e.name,
               module: e.module,
+              plannedSets: e.plannedSets,
+              plannedReps: e.plannedReps,
             })),
         })),
     [routine.days],
@@ -553,9 +624,24 @@ function LiveEditor({
             reorderRoutineDayExercise({ routineDayId: id, exerciseId, direction });
           });
         }}
+        onUpdateExercisePlanned={(id, exerciseId, planned) => {
+          startTransition(() => {
+            updateRoutineDayExercise({
+              routineDayId: id,
+              exerciseId,
+              ...planned,
+            }).catch(() => {});
+          });
+        }}
         onSwapExercise={(id, exerciseId) =>
           setSwapForDay({ dayId: id, outExerciseId: exerciseId })
         }
+      />
+
+      <CoveragePanel
+        days={editorDays}
+        availableExercises={availableExercises}
+        muscleGroups={muscleGroups}
       />
 
       <DangerZone
@@ -845,6 +931,11 @@ function ToggleOption({
 
 // ============ DAYS SECTION (shared by both modes) ============
 
+type PlannedPatch = {
+  plannedSets?: number | null;
+  plannedReps?: number | null;
+};
+
 type DaysSectionProps = {
   mode: 'draft' | 'live';
   scheduleStyle: ScheduleStyle;
@@ -861,6 +952,7 @@ type DaysSectionProps = {
   onSeedFromTemplate: (id: string, templateId: string) => void;
   onRemoveExercise: (id: string, exerciseId: string) => void;
   onReorderExercise: (id: string, exerciseId: string, direction: 'up' | 'down') => void;
+  onUpdateExercisePlanned: (id: string, exerciseId: string, patch: PlannedPatch) => void;
   // Null disables the swap button (e.g. in draft mode).
   onSwapExercise: ((id: string, exerciseId: string) => void) | null;
 };
@@ -1017,6 +1109,7 @@ function dispatchProps(p: DaysSectionProps) {
     onSeedFromTemplate: p.onSeedFromTemplate,
     onRemoveExercise: p.onRemoveExercise,
     onReorderExercise: p.onReorderExercise,
+    onUpdateExercisePlanned: p.onUpdateExercisePlanned,
     onSwapExercise: p.onSwapExercise,
   };
 }
@@ -1039,6 +1132,7 @@ type DayCardProps = {
   onSeedFromTemplate: (id: string, templateId: string) => void;
   onRemoveExercise: (id: string, exerciseId: string) => void;
   onReorderExercise: (id: string, exerciseId: string, direction: 'up' | 'down') => void;
+  onUpdateExercisePlanned: (id: string, exerciseId: string, patch: PlannedPatch) => void;
   onSwapExercise: ((id: string, exerciseId: string) => void) | null;
 };
 
@@ -1058,6 +1152,7 @@ function DayCard({
   onSeedFromTemplate,
   onRemoveExercise,
   onReorderExercise,
+  onUpdateExercisePlanned,
   onSwapExercise,
 }: DayCardProps) {
   const [renaming, setRenaming] = useState(false);
@@ -1164,6 +1259,9 @@ function DayCard({
                 isPending={isPending}
                 onRemove={() => onRemoveExercise(day.id, ex.exerciseId)}
                 onMove={(dir) => onReorderExercise(day.id, ex.exerciseId, dir)}
+                onUpdatePlanned={(patch) =>
+                  onUpdateExercisePlanned(day.id, ex.exerciseId, patch)
+                }
                 onSwap={
                   onSwapExercise
                     ? () => onSwapExercise(day.id, ex.exerciseId)
@@ -1291,6 +1389,7 @@ function ExerciseRow({
   onSwap,
   onRemove,
   onMove,
+  onUpdatePlanned,
 }: {
   exercise: DayExercise;
   canMoveUp: boolean;
@@ -1299,6 +1398,7 @@ function ExerciseRow({
   onSwap: (() => void) | null;
   onRemove: () => void;
   onMove: (direction: 'up' | 'down') => void;
+  onUpdatePlanned: (patch: PlannedPatch) => void;
 }) {
   return (
     <div className="bg-ink-900/40 border border-ink-900 rounded px-2.5 py-2 flex items-center gap-2">
@@ -1324,6 +1424,12 @@ function ExerciseRow({
         <div className="text-[13px] text-ink-100 truncate">{exercise.name}</div>
         <div className="text-[10px] text-ink-500 truncate">{exercise.module}</div>
       </div>
+      <PlannedInputs
+        plannedSets={exercise.plannedSets}
+        plannedReps={exercise.plannedReps}
+        disabled={isPending}
+        onChange={onUpdatePlanned}
+      />
       {onSwap && (
         <button
           onClick={onSwap}
@@ -1344,6 +1450,312 @@ function ExerciseRow({
       </button>
     </div>
   );
+}
+
+// Tiny pair of inputs for plannedSets × plannedReps. Both optional — empty
+// means "not set," which lets the seed flow fall back to history /
+// prescription / preference. We keep edits in local state and commit on blur
+// so the user can tap-and-type without each keystroke firing a server action.
+// Bounds match the action-side Zod schemas; out-of-range values are clamped
+// rather than rejected so a stray fat-finger doesn't drop the whole edit.
+function PlannedInputs({
+  plannedSets,
+  plannedReps,
+  disabled,
+  onChange,
+}: {
+  plannedSets: number | null;
+  plannedReps: number | null;
+  disabled: boolean;
+  onChange: (patch: PlannedPatch) => void;
+}) {
+  const [setsText, setSetsText] = useState(plannedSets?.toString() ?? '');
+  const [repsText, setRepsText] = useState(plannedReps?.toString() ?? '');
+
+  useEffect(() => {
+    setSetsText(plannedSets?.toString() ?? '');
+  }, [plannedSets]);
+  useEffect(() => {
+    setRepsText(plannedReps?.toString() ?? '');
+  }, [plannedReps]);
+
+  function commit(field: 'sets' | 'reps', text: string) {
+    const trimmed = text.trim();
+    if (trimmed === '') {
+      // Cleared — only fire if it actually changed.
+      if (field === 'sets' && plannedSets !== null) onChange({ plannedSets: null });
+      if (field === 'reps' && plannedReps !== null) onChange({ plannedReps: null });
+      return;
+    }
+    const n = parseInt(trimmed, 10);
+    if (Number.isNaN(n)) {
+      // Reset to last good value on garbage.
+      if (field === 'sets') setSetsText(plannedSets?.toString() ?? '');
+      else setRepsText(plannedReps?.toString() ?? '');
+      return;
+    }
+    if (field === 'sets') {
+      const clamped = Math.max(1, Math.min(20, n));
+      if (clamped !== plannedSets) onChange({ plannedSets: clamped });
+      setSetsText(clamped.toString());
+    } else {
+      const clamped = Math.max(1, Math.min(999, n));
+      if (clamped !== plannedReps) onChange({ plannedReps: clamped });
+      setRepsText(clamped.toString());
+    }
+  }
+
+  const inputClass =
+    'w-9 bg-ink-950 border border-ink-800 rounded text-[11px] text-ink-100 text-center font-mono py-1 px-1 focus:outline-none focus:border-accent/50 disabled:opacity-50';
+
+  return (
+    <div className="flex items-center gap-1 shrink-0 text-ink-500 text-[10px] font-mono">
+      <input
+        type="text"
+        inputMode="numeric"
+        value={setsText}
+        onChange={(e) => setSetsText(e.target.value)}
+        onBlur={(e) => commit('sets', e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+          if (e.key === 'Escape') {
+            setSetsText(plannedSets?.toString() ?? '');
+            e.currentTarget.blur();
+          }
+        }}
+        disabled={disabled}
+        placeholder="—"
+        aria-label="Planned sets"
+        className={inputClass}
+      />
+      <span aria-hidden="true">×</span>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={repsText}
+        onChange={(e) => setRepsText(e.target.value)}
+        onBlur={(e) => commit('reps', e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+          if (e.key === 'Escape') {
+            setRepsText(plannedReps?.toString() ?? '');
+            e.currentTarget.blur();
+          }
+        }}
+        disabled={disabled}
+        placeholder="—"
+        aria-label="Planned reps"
+        className={inputClass}
+      />
+    </div>
+  );
+}
+
+// ============ COVERAGE PANEL (shared) ============
+//
+// A *structural* coverage view: given the days you've laid out, how many
+// weighted sets per muscle does the routine deliver across one full cycle?
+// Distinct from /coverage, which shows recency from completed sessions —
+// here we're answering "is the plan I'm building balanced?", not "what have
+// I worked recently?"
+//
+// Computation mirrors getWeeklyVolume:
+//   - Each set credits primary muscles 1.0, secondary 0.5
+//   - Total sets = sum across all days of plannedSets ?? defaultSetsPerExercise (3)
+//
+// Defaults to 3 sets when plannedSets is null so the panel still shows a
+// reasonable estimate before the user has filled in numbers — the same
+// fallback the seeder uses. A tiny "?" badge marks any totals that include
+// estimated entries so the user knows where the number is firm vs. inferred.
+//
+// Volume targets come from the page (user override → seed default → null).
+// Mobility/balance/cardio entries with no target are surfaced as "covered"
+// or "not covered" without a bar.
+
+const ESTIMATED_SETS_FALLBACK = 3;
+
+function CoveragePanel({
+  days,
+  availableExercises,
+  muscleGroups,
+}: {
+  days: EditorDay[];
+  availableExercises: ExerciseInfo[];
+  muscleGroups: MuscleGroupClient[];
+}) {
+  const exerciseById = useMemo(
+    () => new Map(availableExercises.map((e) => [e.id, e])),
+    [availableExercises],
+  );
+
+  const { totals, anyEstimated } = useMemo(() => {
+    const totals = new Map<string, { sets: number; estimated: boolean }>();
+    let anyEstimated = false;
+    for (const day of days) {
+      for (const dx of day.exercises) {
+        const ex = exerciseById.get(dx.exerciseId);
+        if (!ex) continue;
+        const sets = dx.plannedSets ?? ESTIMATED_SETS_FALLBACK;
+        const estimated = dx.plannedSets === null;
+        if (estimated) anyEstimated = true;
+        for (const m of ex.primaryMuscles) {
+          const cur = totals.get(m) ?? { sets: 0, estimated: false };
+          totals.set(m, {
+            sets: cur.sets + sets,
+            estimated: cur.estimated || estimated,
+          });
+        }
+        for (const m of ex.secondaryMuscles) {
+          const cur = totals.get(m) ?? { sets: 0, estimated: false };
+          totals.set(m, {
+            sets: cur.sets + sets * 0.5,
+            estimated: cur.estimated || estimated,
+          });
+        }
+      }
+    }
+    return { totals, anyEstimated };
+  }, [days, exerciseById]);
+
+  // Group muscles into the same buckets the /coverage view uses, in display
+  // order, so the visual mapping is consistent.
+  const byCategory = useMemo(() => {
+    const groups = new Map<MuscleGroupClient['category'], MuscleGroupClient[]>();
+    for (const m of muscleGroups) {
+      if (!groups.has(m.category)) groups.set(m.category, []);
+      groups.get(m.category)!.push(m);
+    }
+    return groups;
+  }, [muscleGroups]);
+
+  // Empty days → no panel. Matches the early-empty UX of the rest of the
+  // editor; nothing to evaluate yet.
+  const hasAnything = days.some((d) => d.exercises.length > 0);
+
+  return (
+    <section className="mt-6 border border-ink-800 rounded-lg p-4">
+      <div className="flex items-baseline justify-between mb-3 gap-2">
+        <div>
+          <h2 className="text-sm text-ink-100">Coverage</h2>
+          <p className="text-[11px] text-ink-500 italic font-display mt-0.5 leading-relaxed">
+            What this routine hits across one full cycle.
+            {anyEstimated && (
+              <>
+                {' '}
+                Exercises without planned sets are estimated at{' '}
+                {ESTIMATED_SETS_FALLBACK}.
+              </>
+            )}
+          </p>
+        </div>
+      </div>
+
+      {!hasAnything && (
+        <p className="text-[11px] text-ink-500 italic font-display py-2">
+          Add some exercises and the muscle map fills in here.
+        </p>
+      )}
+
+      {hasAnything && (
+        <div className="space-y-4">
+          {Array.from(byCategory.entries()).map(([category, items]) => (
+            <CoverageCategory
+              key={category}
+              category={category}
+              items={items}
+              totals={totals}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const CATEGORY_LABEL: Record<MuscleGroupClient['category'], string> = {
+  lower: 'Lower body',
+  upper: 'Upper body',
+  trunk: 'Core & trunk',
+  mobility: 'Mobility',
+  other: 'Other',
+};
+
+function CoverageCategory({
+  category,
+  items,
+  totals,
+}: {
+  category: MuscleGroupClient['category'];
+  items: MuscleGroupClient[];
+  totals: Map<string, { sets: number; estimated: boolean }>;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5">
+        {CATEGORY_LABEL[category]}
+      </div>
+      <div className="space-y-1">
+        {items.map((m) => {
+          const total = totals.get(m.id);
+          return <CoverageRow key={m.id} muscle={m} total={total} />;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CoverageRow({
+  muscle,
+  total,
+}: {
+  muscle: MuscleGroupClient;
+  total: { sets: number; estimated: boolean } | undefined;
+}) {
+  const sets = total?.sets ?? 0;
+  const hasTarget = muscle.target !== null && muscle.target > 0;
+  const ratio = hasTarget ? Math.min(sets / muscle.target!, 1) : 0;
+  const meetsTarget = hasTarget && sets >= muscle.target!;
+  const uncovered = sets === 0;
+
+  // Bar color: green when at/over target, ink-500 otherwise; the row's left
+  // border turns warning when a target-bearing muscle is uncovered, so the
+  // gaps stand out at a glance.
+  const borderColor = uncovered && hasTarget ? 'border-l-bad/70' : 'border-l-ink-800';
+
+  return (
+    <div
+      className={`bg-ink-900/30 border border-ink-900 ${borderColor} border-l-2 rounded px-2.5 py-1.5 flex items-center gap-3`}
+    >
+      <span className="text-[12px] text-ink-100 truncate flex-1 min-w-0">
+        {muscle.label}
+      </span>
+
+      {hasTarget ? (
+        <>
+          <div className="flex-1 max-w-[120px] h-1.5 bg-ink-900 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${
+                meetsTarget ? 'accent-bg' : 'bg-ink-500'
+              }`}
+              style={{ width: `${Math.max(ratio * 100, sets > 0 ? 4 : 0)}%` }}
+            />
+          </div>
+          <span className="font-mono text-[10px] text-ink-400 shrink-0 w-16 text-right">
+            {formatSets(sets)}/{muscle.target}
+            {total?.estimated && <span className="text-ink-600 ml-0.5">?</span>}
+          </span>
+        </>
+      ) : (
+        <span className="font-mono text-[10px] text-ink-500 shrink-0">
+          {sets > 0 ? `${formatSets(sets)} sets` : '—'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function formatSets(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 // ============ DANGER ZONE (Live mode) ============

@@ -14,7 +14,7 @@ These are decisions worth knowing but where the rationale is summarizable in a s
 - **In-memory rate limiter.** Single-instance deployment. Redis-backed limiter is a future migration if/when we go multi-instance — call sites stay the same.
 - **Soft-delete for custom exercises.** `deletedAt` rather than hard delete preserves SetLog history. Built-in exercises are never deleted.
 - **`cuid()` for IDs, not UUIDs.** Sortable by creation time, shorter, Prisma's default.
-- **No prescriptive workout ranges.** Set/rep prescription is a free-text string on the Exercise. Don't try to structure it.
+- **Set/rep prescription on the Exercise stays free-text.** `Exercise.prescription` is shared across every template that uses the exercise — keep it human-readable ("3×12, 5-sec hold") rather than structured. *Per-template* planning is a different story, see "Per-template planned sets and reps" below.
 - **Sessions auto-clean when emptied.** A session with zero sets is deleted, not preserved. Avoids the "phantom in-progress workout" UX.
 - **Active session is one-at-a-time.** Enforced by the app, not the database. Convention: at most one `WorkoutSession` per user with `completedAt: null`. The schema doesn't have a partial unique constraint on this — `findFirst` ordered by date keeps it deterministic if a race ever creates two.
 - **Recency windows on coverage and last-sets queries.** 90 days for coverage, 180 for last-sets. The UI gradient maxes at 7 days neglected; older sessions render identically. Last-sets after 6 months is more confusing than helpful. Bounds memory growth.
@@ -127,3 +127,27 @@ The framing matters: a routine is a *representation* of the user's own cycle, no
 **Why it stays.** Templates were always plans; routines are the same kind of object scaled up to a cycle. The schema cost is small (3 models + 1 nullable FK), the cursor model is honest about how training really progresses (next-in-sequence, not calendar-shame), and the cap on size keeps the UI predictable.
 
 **Reverse if.** Users adopt routines and find the cap too tight (rotate to weekday mode, or revisit the cap). Or the next-in-sequence model fights actual usage — e.g. people skipping arbitrary days and wanting the cursor to track which one they actually did, not just advance — in which case the cursor probably becomes a `lastCompletedDayId` rather than a position.
+
+### Per-template planned sets and reps
+
+**Context.** The app originally kept set/rep prescription as a free-text string on `Exercise` (`"3×12, 5-sec hold"`) and explicitly resisted structuring it ("No prescriptive workout ranges"). That stance held when each exercise had one canonical prescription, and templates were just ordered lists. Once routines landed and each routine day owned its own template, users started wanting per-day planning: "squats 4×6 on Lower 1, 3×10 on Lower 2." With one shared `Exercise.prescription` per exercise, there was nowhere to put that.
+
+There was a deeper tension too: the routine editor showed no way to author the *plan* portion of a plan. You could pick which exercises went where, but not how much you intended to do. Users were filling that in only at session-start time, in a context where they couldn't see the whole week's volume balance.
+
+**Decision.** Add `plannedSets: Int?` and `plannedReps: Int?` to `TemplateExercise` (the junction row between a template and an exercise). Both nullable so existing rows and quick-pick flows can leave them blank. They feed the seeder:
+
+- Set count: history > `plannedSets` > parsed `Exercise.prescription` ("3×12" → 3) > `defaultSetsPerExercise` preference
+- Reps: history > `plannedReps` (only when no history exists) > null
+
+The `Exercise.prescription` text remains and stays free-form — it's the *cross-template* note ("ATG depth, 5s eccentric"). Per-template numbers are the *plan for this slot in this routine*.
+
+The UI shows two small "—×—" inputs next to each exercise in the routine editor's day cards. Empty means "not planned"; the seeder falls through. A structural coverage panel underneath the days projects total weighted sets per muscle across one full cycle, comparing to the user's volume targets.
+
+**Alternatives considered.**
+- *Keep the free-text-only stance.* Means the app can never reflect "here's the volume I'm planning for this muscle." The Coverage view becomes purely retrospective; users can't sanity-check a routine before running it. We considered building the panel using the prescription's parsed `N×M` and the global `defaultSetsPerExercise` only, but that's a single shared knob — it can't express "more squats on Lower 1 than Lower 2."
+- *Rep ranges (`repsLow`/`repsHigh`).* Tempting for hypertrophy programming where 8–12 is more honest than 10. But the UX cost is real: two inputs per exercise, decisions about how to seed sets ("which end of the range?"), and we'd be inventing taxonomy the rest of the app doesn't use. A single number is closer to how users currently log (one rep field per set), and the free-text `Exercise.prescription` is still there for users who want to remind themselves of a target range.
+- *Planned weight too.* No — weight is the most history-sensitive number and progressive overload is the whole point. Letting users author a target weight conflicts with "history wins" in a way sets/reps don't.
+
+**Why it stays.** Templates were always plans; this just lets users author the numerical part of the plan they were already declaring with their exercise lineup. It doesn't touch the neutral-tool stance — the user authors the numbers, the app represents them back. The seeder's history-first ordering means once you've actually done the workout, your real numbers replace the planned ones — the plan is a starting point, not a prescription.
+
+**Reverse if.** Users want rep *ranges* badly enough that the single-number model gets in the way (then `plannedReps` becomes `plannedRepsLow`/`plannedRepsHigh` with an Int alias for the common case). Or — the opposite — nobody uses the per-template numbers and they sit null forever, in which case strip the columns and revert to prescription-only.

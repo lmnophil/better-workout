@@ -344,7 +344,14 @@ export async function getTemplates(userId: string) {
         orderBy: { position: 'asc' },
         include: {
           exercise: {
-            select: { id: true, name: true, module: true, deletedAt: true },
+            select: {
+              id: true,
+              name: true,
+              module: true,
+              deletedAt: true,
+              primaryMuscles: true,
+              secondaryMuscles: true,
+            },
           },
         },
       },
@@ -375,6 +382,8 @@ export async function getRoutineForUser(userId: string) {
                       name: true,
                       module: true,
                       deletedAt: true,
+                      primaryMuscles: true,
+                      secondaryMuscles: true,
                     },
                   },
                 },

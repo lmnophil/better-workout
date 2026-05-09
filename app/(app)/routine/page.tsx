@@ -8,8 +8,10 @@ import {
   getAvailableExercises,
   getRoutineForUser,
   getTemplates,
+  getUserVolumeTargets,
 } from '@/lib/queries';
 import { isScheduleStyle } from '@/lib/routine';
+import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { RoutineEditor } from '@/components/routines/routine-editor';
 
 export const metadata = { title: 'Routine — Tracker' };
@@ -19,11 +21,24 @@ export default async function RoutinePage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const [routine, templates, availableExercises] = await Promise.all([
+  const [routine, templates, availableExercises, userTargets] = await Promise.all([
     getRoutineForUser(userId),
     getTemplates(userId),
     getAvailableExercises(userId),
+    getUserVolumeTargets(userId),
   ]);
+
+  // Project muscle groups + per-user target overrides into a flat shape the
+  // editor can use to build its structural coverage panel without re-fetching.
+  // Mobility/balance entries with no default target stay in the list — the
+  // panel surfaces them as "recency-only" so they're visible but not graded.
+  const muscleGroups = MUSCLE_GROUPS.map((g) => ({
+    id: g.id,
+    label: g.label,
+    category: g.category,
+    target: userTargets.get(g.id) ?? g.weeklyVolumeTarget ?? null,
+    isOverridden: userTargets.has(g.id),
+  }));
 
   // Project the routine into a client-friendly shape. Each day's identity is
   // its owned template's name; we surface the exercise lineup in display order
@@ -51,6 +66,10 @@ export default async function RoutinePage() {
               name: te.exercise.name,
               module: te.exercise.module,
               position: te.position,
+              plannedSets: te.plannedSets,
+              plannedReps: te.plannedReps,
+              primaryMuscles: te.exercise.primaryMuscles,
+              secondaryMuscles: te.exercise.secondaryMuscles,
             })),
         })),
       }
@@ -85,6 +104,7 @@ export default async function RoutinePage() {
         restTimerSecondsOverride: e.restTimerSecondsOverride,
         weightIncrementOverride: e.weightIncrementOverride,
       }))}
+      muscleGroups={muscleGroups}
     />
   );
 }

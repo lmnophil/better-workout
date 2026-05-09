@@ -69,15 +69,22 @@ async function getOrCreateActiveSession(userId: string) {
  * Build the seed SetLog rows for a list of exercises being added to a session.
  *
  * Set-count source order (history wins because it represents what the user
- * actually does, not what was prescribed):
+ * actually does, not what was planned):
  *   1. Most recent completed session for that exercise (180-day window)
- *   2. Leading "N×" in the prescription string ("3×12" → 3)
- *   3. The user's `defaultSetsPerExercise` preference
+ *   2. The optional `plannedSets` hint from the source TemplateExercise
+ *   3. Leading "N×" in the Exercise.prescription string ("3×12" → 3)
+ *   4. The user's `defaultSetsPerExercise` preference
  *
- * Reps/weight on each seeded set come from the corresponding set in last-time
- * (set 1 from set 1, set 2 from set 2, ...). Sets beyond what last-time had
- * inherit from last-time's final set so progressive-overload typing is one
- * tap away. With no history, the rows are empty.
+ * Reps on each seeded set: history wins (set 1 from last-time's set 1, etc.,
+ * with the final set repeated to fill any extra slots so progressive-overload
+ * typing is one tap away). When there's no history but a `plannedReps` hint
+ * exists, every seeded set gets that rep count. Otherwise reps are null.
+ *
+ * Weight always comes from history (or null) — planned weight isn't a thing.
+ *
+ * The optional `hints` map (keyed by exerciseId) carries plannedSets/plannedReps
+ * from the source TemplateExercise. Callers that don't have a template (e.g.
+ * picker-driven adds) just omit it.
  *
  * Returns rows ready for createMany; setNumber is 1-indexed and contiguous.
  */
@@ -85,6 +92,7 @@ async function buildSeededSetLogRows(
   userId: string,
   entries: { exerciseId: string; sessionId: string; position: number }[],
   excludeSessionId?: string,
+  hints?: Map<string, { plannedSets: number | null; plannedReps: number | null }>,
 ) {
   if (entries.length === 0) return [];
 
@@ -118,25 +126,32 @@ async function buildSeededSetLogRows(
   for (const entry of entries) {
     const last = lastByExercise.get(entry.exerciseId);
     const fromHistory = last?.sets.length ?? 0;
+    const hint = hints?.get(entry.exerciseId);
+    const fromPlanned = hint?.plannedSets ?? null;
     const fromPrescription =
-      fromHistory === 0
+      fromHistory === 0 && fromPlanned === null
         ? parsePrescriptionSetCount(prescriptionById.get(entry.exerciseId) ?? null)
         : null;
     const setCount = Math.max(
       1,
-      fromHistory > 0 ? fromHistory : (fromPrescription ?? defaultSets),
+      fromHistory > 0
+        ? fromHistory
+        : (fromPlanned ?? fromPrescription ?? defaultSets),
     );
 
     for (let i = 0; i < setCount; i++) {
       // Reach for the same set index from last time, or fall back to the last
-      // set we have history for. Empty when no history exists at all.
+      // set we have history for. Without history, fall through to the planned
+      // reps hint (if present); otherwise leave reps blank.
       const fromSet = last?.sets[i] ?? last?.sets[last.sets.length - 1];
+      const reps =
+        fromSet?.reps ?? (fromHistory === 0 ? (hint?.plannedReps ?? null) : null);
       rows.push({
         sessionId: entry.sessionId,
         exerciseId: entry.exerciseId,
         setNumber: i + 1,
         position: entry.position,
-        reps: fromSet?.reps ?? null,
+        reps,
         weight: fromSet?.weight ?? null,
       });
     }
@@ -1054,6 +1069,12 @@ export const startFromTemplate = withLogging('startFromTemplate', async (input: 
   const newSession = await db.workoutSession.create({
     data: { userId, date: new Date() },
   });
+  const hints = new Map(
+    usable.map((te) => [
+      te.exerciseId,
+      { plannedSets: te.plannedSets, plannedReps: te.plannedReps },
+    ]),
+  );
   const rows = await buildSeededSetLogRows(
     userId,
     usable.map((te, idx) => ({
@@ -1062,6 +1083,7 @@ export const startFromTemplate = withLogging('startFromTemplate', async (input: 
       position: idx,
     })),
     newSession.id,
+    hints,
   );
   await db.setLog.createMany({ data: rows });
 
@@ -1244,6 +1266,8 @@ async function cloneTemplateForUser(
         create: lineup.map((te, position) => ({
           exerciseId: te.exerciseId,
           position,
+          plannedSets: te.plannedSets,
+          plannedReps: te.plannedReps,
         })),
       },
     },
@@ -1256,12 +1280,19 @@ async function cloneTemplateForUser(
  * explicit list of exercise ids (in array order). Used when the user builds a
  * day from scratch. Validates exercise access; refuses dup ids.
  */
+type FreshTemplateExerciseInput = {
+  exerciseId: string;
+  plannedSets?: number | null;
+  plannedReps?: number | null;
+};
+
 async function freshTemplateForUser(
   tx: Tx,
   userId: string,
   desiredName: string,
-  exerciseIds: string[],
+  exercises: FreshTemplateExerciseInput[],
 ): Promise<string> {
+  const exerciseIds = exercises.map((e) => e.exerciseId);
   if (new Set(exerciseIds).size !== exerciseIds.length) {
     throw new Error("A day can't list the same exercise twice.");
   }
@@ -1286,7 +1317,12 @@ async function freshTemplateForUser(
       isBuiltin: false,
       name,
       exercises: {
-        create: exerciseIds.map((exerciseId, position) => ({ exerciseId, position })),
+        create: exercises.map((e, position) => ({
+          exerciseId: e.exerciseId,
+          position,
+          plannedSets: e.plannedSets ?? null,
+          plannedReps: e.plannedReps ?? null,
+        })),
       },
     },
   });
@@ -1490,7 +1526,12 @@ export const addRoutineDay = withLogging('addRoutineDay', async (
 
     const templateId = seedTemplateId
       ? await cloneTemplateForUser(tx, userId, seedTemplateId, templateBaseName)
-      : await freshTemplateForUser(tx, userId, templateBaseName, exerciseIds ?? []);
+      : await freshTemplateForUser(
+          tx,
+          userId,
+          templateBaseName,
+          (exerciseIds ?? []).map((id) => ({ exerciseId: id })),
+        );
 
     await tx.routineDay.create({
       data: {
@@ -1661,16 +1702,25 @@ export const removeRoutineDay = withLogging('removeRoutineDay', async (
 // Editing a routine day's exercises (operates on the day's owned template)
 // ============================================================
 
+// Sane bounds for planned numbers. plannedSets caps at 20 to mirror the
+// defaultSetsPerExercise schema; plannedReps at 999 to allow long timed-set
+// counts (think 60-second carries logged as "60 reps") without being silly.
+const PlannedSetsSchema = z.number().int().min(1).max(20).nullable().optional();
+const PlannedRepsSchema = z.number().int().min(1).max(999).nullable().optional();
+
 const AddExerciseToRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
   exerciseId: z.string().min(1),
+  plannedSets: PlannedSetsSchema,
+  plannedReps: PlannedRepsSchema,
 });
 
 export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', async (
   input: z.infer<typeof AddExerciseToRoutineDaySchema>,
 ) => {
   const userId = await requireUser();
-  const { routineDayId, exerciseId } = AddExerciseToRoutineDaySchema.parse(input);
+  const { routineDayId, exerciseId, plannedSets, plannedReps } =
+    AddExerciseToRoutineDaySchema.parse(input);
 
   const day = await db.routineDay.findFirst({
     where: { id: routineDayId, routine: { userId } },
@@ -1694,7 +1744,55 @@ export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', as
   const nextPos = (last?.position ?? -1) + 1;
 
   await db.templateExercise.create({
-    data: { templateId: day.templateId, exerciseId, position: nextPos },
+    data: {
+      templateId: day.templateId,
+      exerciseId,
+      position: nextPos,
+      plannedSets: plannedSets ?? null,
+      plannedReps: plannedReps ?? null,
+    },
+  });
+
+  revalidatePath('/');
+  revalidatePath('/routine');
+});
+
+const UpdateRoutineDayExerciseSchema = z.object({
+  routineDayId: z.string().min(1),
+  exerciseId: z.string().min(1),
+  plannedSets: PlannedSetsSchema,
+  plannedReps: PlannedRepsSchema,
+});
+
+/**
+ * Edit a routine-day exercise's planned set/rep numbers. Pass null to clear a
+ * field; omit to leave it untouched. Operates on the day's owned template.
+ */
+export const updateRoutineDayExercise = withLogging('updateRoutineDayExercise', async (
+  input: z.infer<typeof UpdateRoutineDayExerciseSchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId, exerciseId, plannedSets, plannedReps } =
+    UpdateRoutineDayExerciseSchema.parse(input);
+
+  const day = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    select: { templateId: true },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  const target = await db.templateExercise.findFirst({
+    where: { templateId: day.templateId, exerciseId },
+    select: { id: true },
+  });
+  if (!target) throw new Error("That exercise isn't in this day.");
+
+  await db.templateExercise.update({
+    where: { id: target.id },
+    data: {
+      ...(plannedSets !== undefined ? { plannedSets } : {}),
+      ...(plannedReps !== undefined ? { plannedReps } : {}),
+    },
   });
 
   revalidatePath('/');
@@ -2012,20 +2110,27 @@ export const swapInRoutineTemplate = withLogging('swapInRoutineTemplate', async 
 // exercise list). All-or-nothing: a failure mid-build rolls everything back,
 // so a bailed wizard never leaves orphan rows.
 
+const DraftExerciseSchema = z.object({
+  exerciseId: z.string().min(1),
+  plannedSets: PlannedSetsSchema,
+  plannedReps: PlannedRepsSchema,
+});
+
 const DraftDaySchema = z
   .object({
     // The day's display name — becomes the day's owned template name. Optional;
     // server fills in a positional fallback ("Day N" / weekday) when omitted.
     name: z.string().trim().min(1).max(80).optional(),
     // Pick one: either seed from an existing template (clones its exercises)
-    // or supply a list of exercises (in array order). Both empty = blank day.
+    // or supply a list of exercises (in array order, with optional planned
+    // sets/reps per exercise). Both empty = blank day.
     seedTemplateId: z.string().min(1).optional(),
-    exerciseIds: z.array(z.string().min(1)).max(50).optional(),
+    exercises: z.array(DraftExerciseSchema).max(50).optional(),
     label: z.string().trim().max(60).optional(),
     weekday: z.number().int().min(0).max(6).nullable().optional(),
   })
-  .refine((d) => !(d.seedTemplateId && d.exerciseIds && d.exerciseIds.length > 0), {
-    message: 'Pass either seedTemplateId or exerciseIds, not both.',
+  .refine((d) => !(d.seedTemplateId && d.exercises && d.exercises.length > 0), {
+    message: 'Pass either seedTemplateId or exercises, not both.',
   });
 
 const CreateRoutineFromDraftSchema = z.object({
@@ -2097,7 +2202,16 @@ export const createRoutineFromDraft = withLogging('createRoutineFromDraft', asyn
 
       const templateId = day.seedTemplateId
         ? await cloneTemplateForUser(tx, userId, day.seedTemplateId, baseName)
-        : await freshTemplateForUser(tx, userId, baseName, day.exerciseIds ?? []);
+        : await freshTemplateForUser(
+            tx,
+            userId,
+            baseName,
+            (day.exercises ?? []).map((e) => ({
+              exerciseId: e.exerciseId,
+              plannedSets: e.plannedSets ?? null,
+              plannedReps: e.plannedReps ?? null,
+            })),
+          );
 
       await tx.routineDay.create({
         data: {
@@ -2181,14 +2295,28 @@ export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
   );
 
   // Walk template exercises, substitute via pending swaps, drop unusable.
-  const lineup: string[] = [];
+  // The slot's plannedSets/plannedReps stay with the slot — a one-shot swap
+  // is "do exercise B in this slot today," not "import B's planning."
+  const lineup: {
+    exerciseId: string;
+    plannedSets: number | null;
+    plannedReps: number | null;
+  }[] = [];
   for (const te of day.template.exercises) {
     const ex = te.exercise;
     const replacement = swapsByOutId.get(te.exerciseId);
     if (replacement !== undefined) {
-      lineup.push(replacement);
+      lineup.push({
+        exerciseId: replacement,
+        plannedSets: te.plannedSets,
+        plannedReps: te.plannedReps,
+      });
     } else if (ex.deletedAt === null && (ex.ownerId === null || ex.ownerId === userId)) {
-      lineup.push(te.exerciseId);
+      lineup.push({
+        exerciseId: te.exerciseId,
+        plannedSets: te.plannedSets,
+        plannedReps: te.plannedReps,
+      });
     }
   }
 
@@ -2196,29 +2324,38 @@ export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
     throw new Error('This day has no usable exercises right now.');
   }
 
-  await db.$transaction(async (tx) => {
-    const newSession = await tx.workoutSession.create({
-      data: {
-        userId,
-        date: new Date(),
-        startedFromRoutineDayId: day.id,
-      },
-    });
-    await tx.setLog.createMany({
-      data: lineup.map((exerciseId, idx) => ({
-        sessionId: newSession.id,
-        exerciseId,
-        setNumber: 1,
-        position: idx,
-        reps: null,
-        weight: null,
-      })),
-    });
-    // Pending swaps consumed.
-    await tx.routineDayPendingSwap.deleteMany({
-      where: { routineDayId: day.id },
-    });
+  // Create the session, then seed SetLogs from history + planned + prefs.
+  // Same shape as startFromTemplate — split the create from the seed so the
+  // exclude-self guard works cleanly.
+  const newSession = await db.workoutSession.create({
+    data: {
+      userId,
+      date: new Date(),
+      startedFromRoutineDayId: day.id,
+    },
   });
+  const hints = new Map(
+    lineup.map((l) => [
+      l.exerciseId,
+      { plannedSets: l.plannedSets, plannedReps: l.plannedReps },
+    ]),
+  );
+  const rows = await buildSeededSetLogRows(
+    userId,
+    lineup.map((l, idx) => ({
+      exerciseId: l.exerciseId,
+      sessionId: newSession.id,
+      position: idx,
+    })),
+    newSession.id,
+    hints,
+  );
+  await db.$transaction([
+    db.setLog.createMany({ data: rows }),
+    db.routineDayPendingSwap.deleteMany({
+      where: { routineDayId: day.id },
+    }),
+  ]);
 
   metrics.templatesUsed.inc();
   revalidatePath('/');

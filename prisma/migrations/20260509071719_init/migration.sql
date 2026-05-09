@@ -145,6 +145,8 @@ CREATE TABLE "TemplateExercise" (
     "templateId" TEXT NOT NULL,
     "exerciseId" TEXT NOT NULL,
     "position" INTEGER NOT NULL,
+    "plannedSets" INTEGER,
+    "plannedReps" INTEGER,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "TemplateExercise_pkey" PRIMARY KEY ("id")
