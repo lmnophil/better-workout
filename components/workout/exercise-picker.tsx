@@ -41,6 +41,12 @@ type Props = {
   // state with chips already selected. Optional; defaults to no filter.
   initialRegionIds?: string[];
   initialMuscleChipIds?: string[];
+  // Optional: muscle ids the *containing surface* considers undercovered. The
+  // picker doesn't compute this — the routine editor passes it through so
+  // exercises whose primary muscles include any of these surface a "fills a
+  // gap" hint. Empty/undefined = no gap signal (use everywhere this prop is
+  // unset, e.g. mid-session adds).
+  gapMuscles?: Set<string>;
   onPickMany: (exerciseIds: string[]) => void;
   onClose: () => void;
   onCreateCustom: (
@@ -67,6 +73,7 @@ export function ExercisePicker({
   excludeIds,
   initialRegionIds = [],
   initialMuscleChipIds = [],
+  gapMuscles,
   onPickMany,
   onClose,
   onCreateCustom,
@@ -136,6 +143,7 @@ export function ExercisePicker({
             excludeIds={excludeIds}
             initialRegionIds={initialRegionIds}
             initialMuscleChipIds={initialMuscleChipIds}
+            gapMuscles={gapMuscles}
             onPickMany={(ids) => {
               onPickMany(ids);
               // Picker closes on successful add — workout-view's onPickMany
@@ -198,6 +206,7 @@ function BrowseTab({
   excludeIds,
   initialRegionIds,
   initialMuscleChipIds,
+  gapMuscles,
   onPickMany,
   onDeleteCustom,
   swapMode,
@@ -206,6 +215,7 @@ function BrowseTab({
   excludeIds: Set<string>;
   initialRegionIds: string[];
   initialMuscleChipIds: string[];
+  gapMuscles?: Set<string>;
   onPickMany: (ids: string[]) => void;
   onDeleteCustom: (id: string) => void;
   // When set, tapping any row commits immediately and the parent closes the
@@ -217,6 +227,10 @@ function BrowseTab({
   const [regionIds, setRegionIds] = useState<string[]>(initialRegionIds);
   const [muscleChipIds, setMuscleChipIds] = useState<string[]>(initialMuscleChipIds);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // "Show only gap-filling exercises" toggle. Only meaningful when the parent
+  // surface actually has a gap signal — collapsed otherwise.
+  const [gapsOnly, setGapsOnly] = useState(false);
+  const hasGapSignal = gapMuscles !== undefined && gapMuscles.size > 0;
 
   function toggleRegion(id: string) {
     setRegionIds((prev) => {
@@ -240,9 +254,25 @@ function BrowseTab({
     setMuscleChipIds([]);
   }
 
+  // Per-exercise gap derivation. An exercise "fills a gap" when one of its
+  // *primary* muscles is in the gap set — secondary credit is too diffuse to
+  // hang a recommendation on. Map keyed by exercise id, value is the list of
+  // gap-muscle ids it hits (preserves the source order so the chip text
+  // reads naturally).
+  const gapHitsById = useMemo(() => {
+    const out = new Map<string, string[]>();
+    if (!gapMuscles || gapMuscles.size === 0) return out;
+    for (const e of availableExercises) {
+      const hits = e.primaryMuscles.filter((m) => gapMuscles.has(m));
+      if (hits.length > 0) out.set(e.id, hits);
+    }
+    return out;
+  }, [availableExercises, gapMuscles]);
+
   const groupedByModule = useMemo(() => {
     const filtered = availableExercises.filter((e) => {
       if (excludeIds.has(e.id)) return false;
+      if (gapsOnly && hasGapSignal && !gapHitsById.has(e.id)) return false;
       if (!matchesArea(e, regionIds, muscleChipIds)) return false;
       if (!query.trim()) return true;
       const q = query.toLowerCase();
@@ -258,7 +288,16 @@ function BrowseTab({
       groups.get(ex.module)!.push(ex);
     }
     return groups;
-  }, [availableExercises, excludeIds, regionIds, muscleChipIds, query]);
+  }, [
+    availableExercises,
+    excludeIds,
+    regionIds,
+    muscleChipIds,
+    query,
+    gapsOnly,
+    hasGapSignal,
+    gapHitsById,
+  ]);
 
   // Order derives from EXERCISE_MODULES (the natural session flow) with 'Custom'
   // appended so user-created exercises sort last. Single source of truth — if
@@ -332,6 +371,13 @@ function BrowseTab({
               </button>
             )}
           </div>
+          {hasGapSignal && (
+            <GapToggle
+              active={gapsOnly}
+              gapCount={gapMuscles!.size}
+              onClick={() => setGapsOnly((v) => !v)}
+            />
+          )}
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-500" />
             <input
@@ -360,14 +406,21 @@ function BrowseTab({
                   <div className="space-y-1.5">
                     {exercises.map((ex) => {
                       const isSelected = selected.has(ex.id);
+                      const gapHits = gapHitsById.get(ex.id);
+                      const fillsGap = !isSelected && gapHits !== undefined;
+                      // Selection trumps gap visual — once chosen, the user
+                      // doesn't need the recommendation. Otherwise: solid
+                      // accent-tinted border that visibly differs from the
+                      // default ink line and the dashed selection state.
+                      const rowClass = isSelected
+                        ? 'accent-border bg-accent/5'
+                        : fillsGap
+                          ? 'border-accent/45 bg-accent/[0.04] hover:border-accent/70'
+                          : 'border-ink-800 hover:border-accent/40';
                       return (
                         <div
                           key={ex.id}
-                          className={`border transition rounded-lg flex items-stretch ${
-                            isSelected
-                              ? 'accent-border bg-accent/5'
-                              : 'border-ink-800 hover:border-accent/40'
-                          }`}
+                          className={`border transition rounded-lg flex items-stretch ${rowClass}`}
                         >
                           <button
                             onClick={() => toggleSelection(ex.id)}
@@ -391,7 +444,11 @@ function BrowseTab({
                             )}
                             <span className="flex-1 min-w-0">
                               <span className="text-sm text-ink-100 flex items-center gap-1.5">
-                                <span className="truncate">{ex.name}</span>
+                                <span
+                                  className={`truncate ${fillsGap ? 'font-semibold' : ''}`}
+                                >
+                                  {ex.name}
+                                </span>
                                 {ex.videoUrl && (
                                   <PlayCircle
                                     size={11}
@@ -400,7 +457,7 @@ function BrowseTab({
                                   />
                                 )}
                               </span>
-                              <span className="flex items-center gap-2 mt-0.5">
+                              <span className="flex items-center gap-2 mt-0.5 flex-wrap">
                                 {ex.prescription && (
                                   <span className="text-[10px] text-ink-500 font-mono">
                                     {ex.prescription}
@@ -411,6 +468,9 @@ function BrowseTab({
                                     · {ex.primaryMuscles.slice(0, 3).join(', ')}
                                     {ex.primaryMuscles.length > 3 ? '…' : ''}
                                   </span>
+                                )}
+                                {fillsGap && (
+                                  <GapBadge muscleIds={gapHits!} />
                                 )}
                               </span>
                             </span>
@@ -447,6 +507,68 @@ function BrowseTab({
         />
       )}
     </>
+  );
+}
+
+// Small accent chip that names the muscle gaps an exercise would help close.
+// Pulled into a dedicated component so the row-render stays readable. Caps
+// at two muscles + an overflow indicator so the row doesn't grow tall.
+function GapBadge({ muscleIds }: { muscleIds: string[] }) {
+  const labels = muscleIds.map(
+    (id) => MUSCLE_GROUPS.find((m: MuscleGroup) => m.id === id)?.label ?? id,
+  );
+  const visible = labels.slice(0, 2);
+  const extra = labels.length - visible.length;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[10px] accent-text bg-accent/10 border accent-border rounded-full px-2 py-[2px] leading-none"
+      title={
+        labels.length > 0
+          ? `Fills coverage gap: ${labels.join(', ')}`
+          : 'Fills a coverage gap'
+      }
+    >
+      <span aria-hidden="true">↗</span>
+      <span>{visible.join(', ')}</span>
+      {extra > 0 && <span className="text-ink-400">+{extra}</span>}
+    </span>
+  );
+}
+
+// "Show only gap-filling" filter row. Sits between the muscle chip row and
+// the search box so it doesn't crowd the chip filters but stays sticky-visible
+// alongside them.
+function GapToggle({
+  active,
+  gapCount,
+  onClick,
+}: {
+  active: boolean;
+  gapCount: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`mb-2 w-full text-left text-[11px] rounded-lg border px-3 py-1.5 transition flex items-center justify-between gap-2 ${
+        active
+          ? 'accent-border bg-accent/10 accent-text'
+          : 'border-ink-800 text-ink-300 hover:border-accent/40'
+      }`}
+    >
+      <span className="flex items-center gap-2">
+        <span aria-hidden="true">↗</span>
+        <span>
+          {active ? 'Showing only' : 'Show only'} exercises that close a gap
+        </span>
+      </span>
+      <span
+        className={`font-mono text-[10px] ${active ? 'accent-text' : 'text-ink-500'}`}
+      >
+        {gapCount} muscle{gapCount === 1 ? '' : 's'} short
+      </span>
+    </button>
   );
 }
 

@@ -267,6 +267,20 @@ function DraftEditor({
     [days, exerciseById],
   );
 
+  // Structural coverage totals — computed once per render. Drives both the
+  // panel below the days and the gap-aware picker highlight: derive the set
+  // of below-target muscles here so the picker can flag exercises that hit
+  // them. Keeping the computation at the editor level (not inside the panel)
+  // means the picker doesn't need to re-walk the day structure.
+  const { totals, anyEstimated } = useMemo(
+    () => computeMuscleTotals(editorDays, exerciseById),
+    [editorDays, exerciseById],
+  );
+  const gapMuscles = useMemo(
+    () => gapMusclesFromTotals(totals, muscleGroups),
+    [totals, muscleGroups],
+  );
+
   function updateDay(clientId: string, patch: (d: DraftDay) => DraftDay) {
     setDays((prev) => prev.map((d) => (d.clientId === clientId ? patch(d) : d)));
   }
@@ -419,8 +433,8 @@ function DraftEditor({
       </div>
 
       <CoveragePanel
-        days={editorDays}
-        availableExercises={availableExercises}
+        totals={totals}
+        anyEstimated={anyEstimated}
         muscleGroups={muscleGroups}
       />
 
@@ -456,6 +470,7 @@ function DraftEditor({
             <ExercisePicker
               availableExercises={availableExercises}
               excludeIds={excludeIds}
+              gapMuscles={gapMuscles}
               onPickMany={(exerciseIds) => {
                 setPickerForDayClientId(null);
                 updateDay(draftDay.clientId, (d) => {
@@ -540,6 +555,22 @@ function LiveEditor({
             })),
         })),
     [routine.days],
+  );
+
+  // Same totals derivation as DraftEditor — see the comment there. Live mode
+  // is server-authoritative so the dependencies are routine.days +
+  // availableExercises.
+  const exerciseById = useMemo(
+    () => new Map(availableExercises.map((e) => [e.id, e])),
+    [availableExercises],
+  );
+  const { totals, anyEstimated } = useMemo(
+    () => computeMuscleTotals(editorDays, exerciseById),
+    [editorDays, exerciseById],
+  );
+  const gapMuscles = useMemo(
+    () => gapMusclesFromTotals(totals, muscleGroups),
+    [totals, muscleGroups],
   );
 
   return (
@@ -639,8 +670,8 @@ function LiveEditor({
       />
 
       <CoveragePanel
-        days={editorDays}
-        availableExercises={availableExercises}
+        totals={totals}
+        anyEstimated={anyEstimated}
         muscleGroups={muscleGroups}
       />
 
@@ -660,6 +691,7 @@ function LiveEditor({
             <ExercisePicker
               availableExercises={availableExercises}
               excludeIds={excludeIds}
+              gapMuscles={gapMuscles}
               onPickMany={(exerciseIds) => {
                 setPickerForDayId(null);
                 startTransition(async () => {
@@ -702,6 +734,7 @@ function LiveEditor({
             <ExercisePicker
               availableExercises={availableExercises}
               excludeIds={excludeIds}
+              gapMuscles={gapMuscles}
               onPickMany={(exerciseIds) => {
                 const inExerciseId = exerciseIds[0];
                 const target = swapForDay;
@@ -1551,7 +1584,7 @@ function PlannedInputs({
   );
 }
 
-// ============ COVERAGE PANEL (shared) ============
+// ============ STRUCTURAL COVERAGE COMPUTATION ============
 //
 // A *structural* coverage view: given the days you've laid out, how many
 // weighted sets per muscle does the routine deliver across one full cycle?
@@ -1561,62 +1594,125 @@ function PlannedInputs({
 //
 // Computation mirrors getWeeklyVolume:
 //   - Each set credits primary muscles 1.0, secondary 0.5
-//   - Total sets = sum across all days of plannedSets ?? defaultSetsPerExercise (3)
+//   - Total sets = sum across all days of plannedSets ?? ESTIMATED_SETS_FALLBACK
 //
 // Defaults to 3 sets when plannedSets is null so the panel still shows a
 // reasonable estimate before the user has filled in numbers — the same
 // fallback the seeder uses. A tiny "?" badge marks any totals that include
 // estimated entries so the user knows where the number is firm vs. inferred.
-//
-// Volume targets come from the page (user override → seed default → null).
-// Mobility/balance/cardio entries with no target are surfaced as "covered"
-// or "not covered" without a bar.
 
 const ESTIMATED_SETS_FALLBACK = 3;
 
-function CoveragePanel({
-  days,
-  availableExercises,
-  muscleGroups,
-}: {
-  days: EditorDay[];
-  availableExercises: ExerciseInfo[];
-  muscleGroups: MuscleGroupClient[];
-}) {
-  const exerciseById = useMemo(
-    () => new Map(availableExercises.map((e) => [e.id, e])),
-    [availableExercises],
-  );
+type MuscleTotal = { sets: number; estimated: boolean };
+type MuscleTotals = Map<string, MuscleTotal>;
 
-  const { totals, anyEstimated } = useMemo(() => {
-    const totals = new Map<string, { sets: number; estimated: boolean }>();
-    let anyEstimated = false;
-    for (const day of days) {
-      for (const dx of day.exercises) {
-        const ex = exerciseById.get(dx.exerciseId);
-        if (!ex) continue;
-        const sets = dx.plannedSets ?? ESTIMATED_SETS_FALLBACK;
-        const estimated = dx.plannedSets === null;
-        if (estimated) anyEstimated = true;
-        for (const m of ex.primaryMuscles) {
-          const cur = totals.get(m) ?? { sets: 0, estimated: false };
-          totals.set(m, {
-            sets: cur.sets + sets,
-            estimated: cur.estimated || estimated,
-          });
-        }
-        for (const m of ex.secondaryMuscles) {
-          const cur = totals.get(m) ?? { sets: 0, estimated: false };
-          totals.set(m, {
-            sets: cur.sets + sets * 0.5,
-            estimated: cur.estimated || estimated,
-          });
-        }
+function computeMuscleTotals(
+  days: EditorDay[],
+  exerciseById: Map<string, ExerciseInfo>,
+): { totals: MuscleTotals; anyEstimated: boolean } {
+  const totals: MuscleTotals = new Map();
+  let anyEstimated = false;
+  for (const day of days) {
+    for (const dx of day.exercises) {
+      const ex = exerciseById.get(dx.exerciseId);
+      if (!ex) continue;
+      const sets = dx.plannedSets ?? ESTIMATED_SETS_FALLBACK;
+      const estimated = dx.plannedSets === null;
+      if (estimated) anyEstimated = true;
+      for (const m of ex.primaryMuscles) {
+        const cur = totals.get(m) ?? { sets: 0, estimated: false };
+        totals.set(m, {
+          sets: cur.sets + sets,
+          estimated: cur.estimated || estimated,
+        });
+      }
+      for (const m of ex.secondaryMuscles) {
+        const cur = totals.get(m) ?? { sets: 0, estimated: false };
+        totals.set(m, {
+          sets: cur.sets + sets * 0.5,
+          estimated: cur.estimated || estimated,
+        });
       }
     }
-    return { totals, anyEstimated };
-  }, [days, exerciseById]);
+  }
+  return { totals, anyEstimated };
+}
 
+// Coverage tier for a single muscle's structural total. Mirrors the language
+// of /coverage's recency tiers but speaks volume instead: at/over target,
+// partial, none-with-target, or untracked entirely.
+type CoverageTier = 'meets' | 'under' | 'gap' | 'untracked';
+
+function tierFor(sets: number, target: number | null): CoverageTier {
+  if (target === null || target === 0) return 'untracked';
+  if (sets >= target) return 'meets';
+  if (sets > 0) return 'under';
+  return 'gap';
+}
+
+// Tier palette — we use rgba inline rather than introducing new tailwind
+// tokens so the visuals stay consistent with /coverage's existing palette.
+// `bg` tints the row, `bar` colors the volume bar, `dot` is the small
+// indicator. Lifted greens/reds match the coverage view's "fresh"/"neglected"
+// hexes deliberately so the two surfaces speak the same color language.
+const TIER_TOKENS: Record<
+  CoverageTier,
+  { bg: string; border: string; bar: string; dot: string }
+> = {
+  meets: {
+    bg: 'rgba(132, 204, 22, 0.10)',
+    border: 'rgba(132, 204, 22, 0.55)',
+    bar: '#84cc16',
+    dot: '#84cc16',
+  },
+  under: {
+    bg: 'rgba(180, 100, 70, 0.10)',
+    border: 'rgba(180, 100, 70, 0.5)',
+    bar: '#b46446',
+    dot: '#b46446',
+  },
+  gap: {
+    bg: 'rgba(220, 80, 60, 0.12)',
+    border: 'rgba(220, 80, 60, 0.6)',
+    bar: '#dc503c',
+    dot: '#dc503c',
+  },
+  untracked: {
+    bg: 'rgba(60, 50, 45, 0.20)',
+    border: 'rgba(60, 50, 45, 0.4)',
+    bar: '#3a2f25',
+    dot: '#3a2f25',
+  },
+};
+
+// The set of muscle ids the routine is currently *short* on — has a target,
+// and the planned sets are below it. Drives the picker's gap-filling
+// highlight. "Untracked" muscles never enter this set: there's no target to
+// be short of.
+function gapMusclesFromTotals(
+  totals: MuscleTotals,
+  muscleGroups: MuscleGroupClient[],
+): Set<string> {
+  const out = new Set<string>();
+  for (const m of muscleGroups) {
+    if (m.target === null || m.target === 0) continue;
+    const sets = totals.get(m.id)?.sets ?? 0;
+    if (sets < m.target) out.add(m.id);
+  }
+  return out;
+}
+
+// ============ COVERAGE PANEL ============
+
+function CoveragePanel({
+  totals,
+  anyEstimated,
+  muscleGroups,
+}: {
+  totals: MuscleTotals;
+  anyEstimated: boolean;
+  muscleGroups: MuscleGroupClient[];
+}) {
   // Group muscles into the same buckets the /coverage view uses, in display
   // order, so the visual mapping is consistent.
   const byCategory = useMemo(() => {
@@ -1628,9 +1724,26 @@ function CoveragePanel({
     return groups;
   }, [muscleGroups]);
 
-  // Empty days → no panel. Matches the early-empty UX of the rest of the
-  // editor; nothing to evaluate yet.
-  const hasAnything = days.some((d) => d.exercises.length > 0);
+  // Headline counts for the summary line. Untracked muscles are excluded
+  // from the denominator — they aren't graded.
+  const summary = useMemo(() => {
+    let meets = 0;
+    let under = 0;
+    let gap = 0;
+    let trackedTotal = 0;
+    for (const m of muscleGroups) {
+      if (m.target === null || m.target === 0) continue;
+      trackedTotal++;
+      const sets = totals.get(m.id)?.sets ?? 0;
+      const t = tierFor(sets, m.target);
+      if (t === 'meets') meets++;
+      else if (t === 'under') under++;
+      else if (t === 'gap') gap++;
+    }
+    return { meets, under, gap, trackedTotal };
+  }, [totals, muscleGroups]);
+
+  const hasAnything = totals.size > 0;
 
   return (
     <section className="mt-6 border border-ink-800 rounded-lg p-4">
@@ -1657,18 +1770,61 @@ function CoveragePanel({
       )}
 
       {hasAnything && (
-        <div className="space-y-4">
-          {Array.from(byCategory.entries()).map(([category, items]) => (
-            <CoverageCategory
-              key={category}
-              category={category}
-              items={items}
-              totals={totals}
-            />
-          ))}
-        </div>
+        <>
+          <SummaryStrip summary={summary} />
+          <div className="space-y-4 mt-3">
+            {Array.from(byCategory.entries()).map(([category, items]) => (
+              <CoverageCategory
+                key={category}
+                category={category}
+                items={items}
+                totals={totals}
+              />
+            ))}
+          </div>
+        </>
       )}
     </section>
+  );
+}
+
+function SummaryStrip({
+  summary,
+}: {
+  summary: { meets: number; under: number; gap: number; trackedTotal: number };
+}) {
+  // Three small chips. Hidden when nothing falls into that tier, so the strip
+  // collapses cleanly when the routine is fully built or fully empty.
+  const items = (
+    [
+      { tier: 'meets', label: 'on target', count: summary.meets },
+      { tier: 'under', label: 'below', count: summary.under },
+      { tier: 'gap', label: 'gap', count: summary.gap },
+    ] satisfies { tier: CoverageTier; label: string; count: number }[]
+  ).filter((i) => i.count > 0);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {items.map((i) => {
+        const tok = TIER_TOKENS[i.tier];
+        return (
+          <span
+            key={i.tier}
+            className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded-full border"
+            style={{ background: tok.bg, borderColor: tok.border }}
+          >
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ background: tok.dot }}
+            />
+            <span className="text-ink-200">{i.count}</span>
+            <span className="text-ink-400">{i.label}</span>
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1687,11 +1843,35 @@ function CoverageCategory({
 }: {
   category: MuscleGroupClient['category'];
   items: MuscleGroupClient[];
-  totals: Map<string, { sets: number; estimated: boolean }>;
+  totals: MuscleTotals;
 }) {
+  // Category-level rollup: dominant tier wins, with gap > under > meets >
+  // untracked precedence. Surfaces an at-a-glance dot next to the heading so
+  // the user can scan categories before reading rows.
+  const heading = useMemo(() => {
+    let dominant: CoverageTier = 'untracked';
+    const order: Record<CoverageTier, number> = {
+      gap: 3,
+      under: 2,
+      meets: 1,
+      untracked: 0,
+    };
+    for (const m of items) {
+      const sets = totals.get(m.id)?.sets ?? 0;
+      const t = tierFor(sets, m.target);
+      if (order[t] > order[dominant]) dominant = t;
+    }
+    return dominant;
+  }, [items, totals]);
+
   return (
     <div>
-      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5">
+      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5 flex items-center gap-2">
+        <span
+          className="w-1.5 h-1.5 rounded-full shrink-0"
+          style={{ background: TIER_TOKENS[heading].dot }}
+          aria-hidden="true"
+        />
         {CATEGORY_LABEL[category]}
       </div>
       <div className="space-y-1">
@@ -1709,23 +1889,24 @@ function CoverageRow({
   total,
 }: {
   muscle: MuscleGroupClient;
-  total: { sets: number; estimated: boolean } | undefined;
+  total: MuscleTotal | undefined;
 }) {
   const sets = total?.sets ?? 0;
   const hasTarget = muscle.target !== null && muscle.target > 0;
   const ratio = hasTarget ? Math.min(sets / muscle.target!, 1) : 0;
-  const meetsTarget = hasTarget && sets >= muscle.target!;
-  const uncovered = sets === 0;
-
-  // Bar color: green when at/over target, ink-500 otherwise; the row's left
-  // border turns warning when a target-bearing muscle is uncovered, so the
-  // gaps stand out at a glance.
-  const borderColor = uncovered && hasTarget ? 'border-l-bad/70' : 'border-l-ink-800';
+  const tier = tierFor(sets, muscle.target);
+  const tok = TIER_TOKENS[tier];
 
   return (
     <div
-      className={`bg-ink-900/30 border border-ink-900 ${borderColor} border-l-2 rounded px-2.5 py-1.5 flex items-center gap-3`}
+      className="border rounded px-2.5 py-1.5 flex items-center gap-3"
+      style={{ background: tok.bg, borderColor: tok.border }}
     >
+      <span
+        className="w-1.5 h-1.5 rounded-full shrink-0"
+        style={{ background: tok.dot }}
+        aria-hidden="true"
+      />
       <span className="text-[12px] text-ink-100 truncate flex-1 min-w-0">
         {muscle.label}
       </span>
@@ -1734,10 +1915,11 @@ function CoverageRow({
         <>
           <div className="flex-1 max-w-[120px] h-1.5 bg-ink-900 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
-                meetsTarget ? 'accent-bg' : 'bg-ink-500'
-              }`}
-              style={{ width: `${Math.max(ratio * 100, sets > 0 ? 4 : 0)}%` }}
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${Math.max(ratio * 100, sets > 0 ? 4 : 0)}%`,
+                background: tok.bar,
+              }}
             />
           </div>
           <span className="font-mono text-[10px] text-ink-400 shrink-0 w-16 text-right">
