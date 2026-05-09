@@ -36,6 +36,7 @@ import { useConfirm } from '@/components/ui/use-confirm';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { groupBy, relativeDay } from '@/lib/utils';
 import { muscleIdsToChipIds } from '@/lib/area-filter';
+import { moduleDescription } from '@/lib/exercises-data';
 import {
   RoutineTimeline,
   type RoutineTimelineProps,
@@ -452,12 +453,17 @@ export function WorkoutView({
               const sets = setLogsByExercise.get(exerciseId) ?? [];
               const last = lastByExercise.get(exerciseId);
               if (exercise.module !== lastModule) {
+                const description = moduleDescription(exercise.module);
                 elements.push(
-                  <div
-                    key={`module-${idx}`}
-                    className="text-[10px] tracking-[0.25em] uppercase text-ink-500 pt-2 pb-1 first:pt-0"
-                  >
-                    {exercise.module}
+                  <div key={`module-${idx}`} className="pt-2 pb-1 first:pt-0">
+                    <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
+                      {exercise.module}
+                    </div>
+                    {description && (
+                      <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
+                        {description}
+                      </div>
+                    )}
                   </div>,
                 );
                 lastModule = exercise.module;

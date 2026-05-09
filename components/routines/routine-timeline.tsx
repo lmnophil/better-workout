@@ -19,6 +19,7 @@ import {
   type ScheduleStyle,
 } from '@/lib/routine';
 import type { ExerciseInfo } from '@/components/workout/workout-view';
+import { moduleDescription } from '@/lib/exercises-data';
 
 export type RoutineDayExerciseClient = {
   exerciseId: string;
@@ -471,12 +472,17 @@ function ExerciseList({
   let lastModule: string | null = null;
   exercises.forEach((ex, idx) => {
     if (ex.module !== lastModule) {
+      const description = moduleDescription(ex.module);
       elements.push(
-        <div
-          key={`hdr-${idx}`}
-          className="text-[10px] tracking-[0.25em] uppercase text-ink-500 pt-2 first:pt-0"
-        >
-          {ex.module}
+        <div key={`hdr-${idx}`} className="pt-2 first:pt-0">
+          <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
+            {ex.module}
+          </div>
+          {description && (
+            <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
+              {description}
+            </div>
+          )}
         </div>,
       );
       lastModule = ex.module;

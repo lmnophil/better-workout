@@ -24,6 +24,7 @@ import {
   EXERCISE_MODULES,
   MUSCLE_GROUPS,
   MuscleGroup,
+  moduleDescription,
 } from '@/lib/exercises-data';
 import {
   REGIONS,
@@ -398,29 +399,40 @@ function BrowseTab({
           ) : (
             orderedModules.map((module) => {
               const exercises = groupedByModule.get(module)!;
+              const description = moduleDescription(module);
               return (
                 <div key={module} className="mb-5">
-                  <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-2">
-                    {module}
+                  <div className="mb-2">
+                    <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
+                      {module}
+                    </div>
+                    {description && (
+                      <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
+                        {description}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     {exercises.map((ex) => {
                       const isSelected = selected.has(ex.id);
                       const gapHits = gapHitsById.get(ex.id);
                       const fillsGap = !isSelected && gapHits !== undefined;
-                      // Selection trumps gap visual — once chosen, the user
-                      // doesn't need the recommendation. Otherwise: solid
-                      // accent-tinted border that visibly differs from the
-                      // default ink line and the dashed selection state.
+                      // Highlight is intentionally quiet: a left-edge accent
+                      // stripe (like a bookmark) + the chip badge below. The
+                      // row's other three borders stay ink so unselected
+                      // gap-fillers don't shout next to the muscle chip row
+                      // above them. Selected wins visually with the full
+                      // accent border.
+                      const baseBorder = 'border border-ink-800';
                       const rowClass = isSelected
-                        ? 'accent-border bg-accent/5'
+                        ? 'border accent-border bg-accent/5'
                         : fillsGap
-                          ? 'border-accent/45 bg-accent/[0.04] hover:border-accent/70'
-                          : 'border-ink-800 hover:border-accent/40';
+                          ? `${baseBorder} border-l-2 border-l-accent/60 hover:border-accent/40`
+                          : `${baseBorder} hover:border-accent/40`;
                       return (
                         <div
                           key={ex.id}
-                          className={`border transition rounded-lg flex items-stretch ${rowClass}`}
+                          className={`transition rounded-lg flex items-stretch ${rowClass}`}
                         >
                           <button
                             onClick={() => toggleSelection(ex.id)}
@@ -444,11 +456,7 @@ function BrowseTab({
                             )}
                             <span className="flex-1 min-w-0">
                               <span className="text-sm text-ink-100 flex items-center gap-1.5">
-                                <span
-                                  className={`truncate ${fillsGap ? 'font-semibold' : ''}`}
-                                >
-                                  {ex.name}
-                                </span>
+                                <span className="truncate">{ex.name}</span>
                                 {ex.videoUrl && (
                                   <PlayCircle
                                     size={11}
@@ -510,9 +518,11 @@ function BrowseTab({
   );
 }
 
-// Small accent chip that names the muscle gaps an exercise would help close.
-// Pulled into a dedicated component so the row-render stays readable. Caps
-// at two muscles + an overflow indicator so the row doesn't grow tall.
+// Small text-only chip that names the muscle gaps an exercise would help
+// close. The whole gap signal hangs on this label and a left-edge stripe on
+// the row — there's no tinted background or border so the surrounding chip
+// filters and search field still hold the eye. Caps at two muscles + an
+// overflow indicator.
 function GapBadge({ muscleIds }: { muscleIds: string[] }) {
   const labels = muscleIds.map(
     (id) => MUSCLE_GROUPS.find((m: MuscleGroup) => m.id === id)?.label ?? id,
@@ -521,7 +531,7 @@ function GapBadge({ muscleIds }: { muscleIds: string[] }) {
   const extra = labels.length - visible.length;
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] accent-text bg-accent/10 border accent-border rounded-full px-2 py-[2px] leading-none"
+      className="inline-flex items-center gap-1 text-[10px] accent-text leading-none"
       title={
         labels.length > 0
           ? `Fills coverage gap: ${labels.join(', ')}`
@@ -529,15 +539,16 @@ function GapBadge({ muscleIds }: { muscleIds: string[] }) {
       }
     >
       <span aria-hidden="true">↗</span>
-      <span>{visible.join(', ')}</span>
-      {extra > 0 && <span className="text-ink-400">+{extra}</span>}
+      <span>fills {visible.join(', ')}</span>
+      {extra > 0 && <span className="text-ink-500">+{extra}</span>}
     </span>
   );
 }
 
-// "Show only gap-filling" filter row. Sits between the muscle chip row and
-// the search box so it doesn't crowd the chip filters but stays sticky-visible
-// alongside them.
+// Filter-only toggle. The highlight on gap-filling rows is always on; this
+// just hides exercises that don't close a current gap so the user can browse
+// only the ones that would. Sized like a chip rather than a banner so it sits
+// among the existing chip filters without out-shouting them.
 function GapToggle({
   active,
   gapCount,
@@ -548,27 +559,31 @@ function GapToggle({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`mb-2 w-full text-left text-[11px] rounded-lg border px-3 py-1.5 transition flex items-center justify-between gap-2 ${
-        active
-          ? 'accent-border bg-accent/10 accent-text'
-          : 'border-ink-800 text-ink-300 hover:border-accent/40'
-      }`}
-    >
-      <span className="flex items-center gap-2">
-        <span aria-hidden="true">↗</span>
-        <span>
-          {active ? 'Showing only' : 'Show only'} exercises that close a gap
-        </span>
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <span className="text-[10px] text-ink-500 italic font-display leading-tight">
+        {gapCount} muscle{gapCount === 1 ? '' : 's'} short of target — exercises
+        that fill those are flagged below.
       </span>
-      <span
-        className={`font-mono text-[10px] ${active ? 'accent-text' : 'text-ink-500'}`}
+      <button
+        type="button"
+        onClick={onClick}
+        aria-pressed={active}
+        className={`shrink-0 text-[10px] inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition ${
+          active
+            ? 'accent-bg text-ink-950 border-transparent'
+            : 'border-ink-700 text-ink-400 hover:border-accent/50 hover:accent-text'
+        }`}
       >
-        {gapCount} muscle{gapCount === 1 ? '' : 's'} short
-      </span>
-    </button>
+        {active ? (
+          <>
+            <Check size={10} strokeWidth={3} aria-hidden="true" />
+            <span>only gaps</span>
+          </>
+        ) : (
+          <span>hide non-gaps</span>
+        )}
+      </button>
+    </div>
   );
 }
 

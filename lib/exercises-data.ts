@@ -25,6 +25,77 @@ export const EXERCISE_MODULES = [
 
 export type ExerciseModule = (typeof EXERCISE_MODULES)[number];
 
+// Short, plain-language explanation for each module. Surfaces under module
+// headings (in the picker, the active session, and the routine timeline) so
+// users new to terms like SMR or Activation aren't left guessing. Keep these
+// to one line — they sit directly under the heading and shouldn't crowd the
+// list. The phase ordering ("prep → load → finish") is implicit in the
+// EXERCISE_MODULES array order; the descriptions reinforce that arc.
+//
+// "Custom" is included because user-created exercises share the picker's
+// module-grouped layout; falling back gracefully here is simpler than
+// guarding every render site.
+export const MODULE_INFO: Record<ExerciseModule | 'Custom', { description: string }> = {
+  'SMR Lower': {
+    description:
+      'Self-myofascial release — foam rolling and soft-tissue prep for legs, hips, glutes.',
+  },
+  'SMR Upper': {
+    description:
+      'Self-myofascial release — foam rolling and soft-tissue prep for chest, back, arms.',
+  },
+  'SMR Trunk': {
+    description:
+      'Self-myofascial release — foam rolling and soft-tissue prep for the torso.',
+  },
+  'Mobility Lower': {
+    description: 'Joint range and dynamic stretches for legs and hips.',
+  },
+  'Mobility Upper': {
+    description: 'Joint range and dynamic stretches for shoulders, neck, and arms.',
+  },
+  'Mobility Trunk': {
+    description: 'Joint range and dynamic stretches for the spine and ribcage.',
+  },
+  'Activation Lower': {
+    description:
+      'Light targeted work to wake up glutes and legs before loading them.',
+  },
+  'Activation Upper': {
+    description:
+      'Light targeted work to wake up shoulders and back before loading them.',
+  },
+  'Activation Trunk': {
+    description: 'Light targeted work to wake up the core before loading it.',
+  },
+  'Strength Barbell': {
+    description: 'Main loaded lifts — squats, deadlifts, presses, hinges.',
+  },
+  'Strength Accessory': {
+    description: 'Supporting variants and isolation work that backs up the main lifts.',
+  },
+  'Strength Thoracic': {
+    description:
+      'Upper-back and postural strength — rows, pulls, scapular work.',
+  },
+  Balance: {
+    description: 'Single-leg and proprioception drills.',
+  },
+  'Rev Up': {
+    description: 'Higher-intensity finishers — sprints, carries, conditioning.',
+  },
+  Custom: {
+    description: 'Exercises you added yourself.',
+  },
+};
+
+// Helper for the cases where the consumer has a module string that may or
+// may not be one of the canonical ones (e.g. legacy data, future custom
+// modules). Falls back to an empty description rather than throwing.
+export function moduleDescription(module: string): string {
+  return (MODULE_INFO as Record<string, { description: string }>)[module]?.description ?? '';
+}
+
 export type SeedExercise = {
   name: string;
   module: ExerciseModule;

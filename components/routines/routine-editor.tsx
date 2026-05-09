@@ -53,6 +53,7 @@ import {
   WEEKDAY_LABELS,
   type ScheduleStyle,
 } from '@/lib/routine';
+import { moduleDescription } from '@/lib/exercises-data';
 import { ExercisePicker } from '@/components/workout/exercise-picker';
 import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { useConfirm } from '@/components/ui/use-confirm';
@@ -1455,7 +1456,12 @@ function ExerciseRow({
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-[13px] text-ink-100 truncate">{exercise.name}</div>
-        <div className="text-[10px] text-ink-500 truncate">{exercise.module}</div>
+        <div
+          className="text-[10px] text-ink-500 truncate cursor-help"
+          title={moduleDescription(exercise.module) || exercise.module}
+        >
+          {exercise.module}
+        </div>
       </div>
       <PlannedInputs
         plannedSets={exercise.plannedSets}
