@@ -62,6 +62,9 @@ const EXPECTED_MESSAGES = [
   'That exercise is already in the template',
   'This day uses a default template',
   'This day has no usable exercises',
+  "Two days can't share",
+  'Two new templates named',
+  "A template can't list",
 ];
 
 function isExpectedError(err: unknown): boolean {

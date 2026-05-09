@@ -6,7 +6,8 @@
 // (prevents double-submit) and useConfirm for on-brand confirmation dialogs.
 
 import { useState, useTransition, useEffect } from 'react';
-import { Plus, Check, Calendar, Trash2, BookmarkPlus } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, Check, Calendar, Trash2, BookmarkPlus, ArrowRight } from 'lucide-react';
 import {
   addExercisesToActiveSession,
   removeExerciseFromActiveSession,
@@ -599,6 +600,8 @@ function EmptyState({
         />
       )}
 
+      {!routine && <BuildRoutineCTA />}
+
       {templates.length > 0 && (
         <div>
           <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-3">
@@ -634,6 +637,39 @@ function EmptyState({
           Browse exercises
         </button>
       </div>
+    </div>
+  );
+}
+
+function BuildRoutineCTA() {
+  return (
+    <div>
+      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-3">
+        Set up a routine
+      </div>
+      <Link
+        href="/routine/build"
+        className="block border border-ink-800 hover:border-accent/50 transition rounded-lg px-4 py-3 group"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-ink-100 flex items-center gap-2">
+              Build a routine
+              <span className="text-[9px] tracking-[0.2em] uppercase text-ink-500 border border-ink-800 rounded px-1.5 py-0.5">
+                Optional
+              </span>
+            </div>
+            <div className="text-[11px] text-ink-500 italic font-display mt-0.5 leading-relaxed">
+              Pick or assemble the cycle of templates you rotate through. We&apos;ll
+              flag any muscle groups your routine misses.
+            </div>
+          </div>
+          <ArrowRight
+            size={16}
+            className="text-ink-500 group-hover:text-ink-100 group-hover:translate-x-0.5 transition shrink-0"
+          />
+        </div>
+      </Link>
     </div>
   );
 }
