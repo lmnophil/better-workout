@@ -16,7 +16,7 @@
 import 'dotenv/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from './generated/prisma/client';
-import { SEED_EXERCISES, STARTER_TEMPLATES } from '../lib/exercises-data';
+import { SEED_EXERCISES } from '../lib/exercises-data';
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
@@ -43,6 +43,8 @@ async function main() {
           primaryMuscles: ex.primaryMuscles,
           secondaryMuscles: ex.secondaryMuscles ?? [],
           videoUrl: ex.videoUrl ?? null,
+          metric: ex.metric ?? 'reps',
+          equipment: ex.equipment ?? [],
           deletedAt: null, // Restore if previously soft-deleted
         },
       });
@@ -56,6 +58,8 @@ async function main() {
           primaryMuscles: ex.primaryMuscles,
           secondaryMuscles: ex.secondaryMuscles ?? [],
           videoUrl: ex.videoUrl ?? null,
+          metric: ex.metric ?? 'reps',
+          equipment: ex.equipment ?? [],
           isCustom: false,
           ownerId: null,
         },
@@ -65,93 +69,6 @@ async function main() {
   }
 
   console.log(`Exercises — created: ${created}, updated: ${updated}`);
-
-  console.log(`Seeding ${STARTER_TEMPLATES.length} built-in templates...`);
-  await seedStarterTemplates();
-}
-
-/**
- * Built-in templates live with userId = null, isBuiltin = true. They're
- * shared across all users; per-user hiding is handled by UserHiddenTemplate.
- *
- * The seed is the source of truth: on every run, each starter template's
- * exercise list is rebuilt from STARTER_TEMPLATES. Exercises referenced by
- * name that don't exist in SEED_EXERCISES are skipped with a warning, not
- * an error — that way a typo in STARTER_TEMPLATES doesn't fail the whole
- * seed run.
- *
- * No revision history: re-seeding wipes and recreates the TemplateExercise
- * rows. The user explicitly chose this trade-off when scoping the feature.
- */
-async function seedStarterTemplates() {
-  // Build a name → id lookup once. Only built-in (ownerId: null) exercises
-  // are eligible — starter templates can't reference user customs.
-  const builtinExercises = await prisma.exercise.findMany({
-    where: { ownerId: null, deletedAt: null },
-    select: { id: true, name: true },
-  });
-  const idByName = new Map(builtinExercises.map((e) => [e.name, e.id]));
-
-  let created = 0;
-  let updated = 0;
-  const missing: string[] = [];
-
-  for (const tpl of STARTER_TEMPLATES) {
-    const exerciseIds: string[] = [];
-    for (const exName of tpl.exerciseNames) {
-      const id = idByName.get(exName);
-      if (!id) {
-        missing.push(`${tpl.name} → ${exName}`);
-        continue;
-      }
-      exerciseIds.push(id);
-    }
-    if (exerciseIds.length === 0) {
-      console.warn(`Skipping starter template "${tpl.name}" — no exercises resolved.`);
-      continue;
-    }
-
-    const existing = await prisma.workoutTemplate.findFirst({
-      where: { userId: null, isBuiltin: true, name: tpl.name },
-    });
-
-    if (existing) {
-      // Replace the exercise list from scratch — simpler than a diff and
-      // matches the no-revision-history contract.
-      await prisma.$transaction([
-        prisma.templateExercise.deleteMany({ where: { templateId: existing.id } }),
-        prisma.workoutTemplate.update({
-          where: { id: existing.id },
-          data: {
-            description: tpl.description,
-            exercises: {
-              create: exerciseIds.map((exId, idx) => ({ exerciseId: exId, position: idx })),
-            },
-          },
-        }),
-      ]);
-      updated++;
-    } else {
-      await prisma.workoutTemplate.create({
-        data: {
-          userId: null,
-          isBuiltin: true,
-          name: tpl.name,
-          description: tpl.description,
-          exercises: {
-            create: exerciseIds.map((exId, idx) => ({ exerciseId: exId, position: idx })),
-          },
-        },
-      });
-      created++;
-    }
-  }
-
-  console.log(`Templates — created: ${created}, updated: ${updated}`);
-  if (missing.length > 0) {
-    console.warn('Unresolved exercise references in STARTER_TEMPLATES:');
-    for (const m of missing) console.warn(`  ${m}`);
-  }
 }
 
 main()

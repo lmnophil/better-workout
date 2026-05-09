@@ -99,6 +99,7 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
         setNumber: number;
         reps: number | null;
         weight: number | null;
+        seconds: number | null;
         notes: string | null;
       }[];
     }
@@ -120,6 +121,7 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
             setNumber: s.setNumber,
             reps: s.reps,
             weight: s.weight,
+            seconds: s.seconds,
             notes: s.notes,
           })),
         });
@@ -149,7 +151,7 @@ export async function getLastSetsForExerciseIds(
   if (exerciseIds.length === 0) {
     return new Map<
       string,
-      { sets: { reps: number | null; weight: number | null }[] }
+      { sets: { reps: number | null; weight: number | null; seconds: number | null }[] }
     >();
   }
   const since = new Date();
@@ -174,7 +176,7 @@ export async function getLastSetsForExerciseIds(
 
   const result = new Map<
     string,
-    { sets: { reps: number | null; weight: number | null }[] }
+    { sets: { reps: number | null; weight: number | null; seconds: number | null }[] }
   >();
   for (const session of sessions) {
     for (const set of session.setLogs) {
@@ -182,7 +184,7 @@ export async function getLastSetsForExerciseIds(
       // Collect every set for this exerciseId in this session, in order.
       const sets = session.setLogs
         .filter((s) => s.exerciseId === set.exerciseId)
-        .map((s) => ({ reps: s.reps, weight: s.weight }));
+        .map((s) => ({ reps: s.reps, weight: s.weight, seconds: s.seconds }));
       result.set(set.exerciseId, { sets });
     }
     if (result.size === exerciseIds.length) break;
@@ -381,6 +383,7 @@ export async function getRoutineForUser(userId: string) {
                       id: true,
                       name: true,
                       module: true,
+                      metric: true,
                       deletedAt: true,
                       primaryMuscles: true,
                       secondaryMuscles: true,

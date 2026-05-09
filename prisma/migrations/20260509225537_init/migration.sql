@@ -52,6 +52,8 @@ CREATE TABLE "Exercise" (
     "name" TEXT NOT NULL,
     "module" TEXT NOT NULL,
     "prescription" TEXT,
+    "metric" TEXT NOT NULL DEFAULT 'reps',
+    "equipment" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "primaryMuscles" TEXT[],
     "secondaryMuscles" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "videoUrl" TEXT,
@@ -147,6 +149,7 @@ CREATE TABLE "TemplateExercise" (
     "position" INTEGER NOT NULL,
     "plannedSets" INTEGER,
     "plannedReps" INTEGER,
+    "plannedSeconds" INTEGER,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "TemplateExercise_pkey" PRIMARY KEY ("id")
@@ -161,6 +164,7 @@ CREATE TABLE "SetLog" (
     "position" INTEGER NOT NULL DEFAULT 0,
     "reps" INTEGER,
     "weight" DOUBLE PRECISION,
+    "seconds" INTEGER,
     "notes" TEXT,
 
     CONSTRAINT "SetLog_pkey" PRIMARY KEY ("id")

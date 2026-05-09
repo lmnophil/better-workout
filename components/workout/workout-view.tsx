@@ -53,6 +53,11 @@ export type ExerciseInfo = {
   secondaryMuscles: string[];
   videoUrl: string | null;
   isCustom: boolean;
+  // 'reps' (the default) or 'time'. Determines which input the set row renders.
+  metric: string;
+  // Equipment tokens. Used by the routine preset picker; the active session UI
+  // doesn't filter on it.
+  equipment: string[];
   // Per-user rest timer override; null = use the global default from preferences
   restTimerSecondsOverride: number | null;
   // Per-user weight stepper override; null = use the global default
@@ -65,6 +70,9 @@ export type SetLogClient = {
   setNumber: number;
   reps: number | null;
   weight: number | null;
+  // Populated when the source Exercise.metric is 'time'. Mutually exclusive
+  // with reps in normal use, but the schema doesn't enforce that.
+  seconds: number | null;
   notes: string | null;
 };
 
@@ -81,6 +89,7 @@ export type LastSetsForExercise = {
     setNumber: number;
     reps: number | null;
     weight: number | null;
+    seconds: number | null;
     notes: string | null;
   }[];
 };
@@ -210,19 +219,29 @@ export function WorkoutView({
     });
   };
 
+  // Patch-shaped update so the row can send only the fields it actually touched
+  // (reps + weight for metric='reps' exercises; seconds + weight for metric=
+  // 'time'). `undefined` means "leave unchanged"; `null` means "clear."
   const handleUpdateSet = (
     setLogId: string,
-    reps: number | null,
-    weight: number | null,
+    patch: {
+      reps?: number | null;
+      weight?: number | null;
+      seconds?: number | null;
+    },
   ) => {
     startTransition(() => {
-      updateSet({ setLogId, reps, weight });
+      updateSet({ setLogId, ...patch });
     });
     // Auto-start rest timer when a set is committed with meaningful values.
-    // We define "committed" as having at least reps logged (weight may legitimately
-    // be null for bodyweight or band exercises). The user's preference toggle
-    // gates whether we actually start.
-    if (prefs.restTimerEnabled && reps !== null && reps > 0) {
+    // "Meaningful" = at least reps (for reps-metric) or seconds (for time-
+    // metric) committed positive. Weight alone doesn't trigger — bodyweight
+    // and band rows legitimately have null weight. The user's preference
+    // toggle gates whether we actually start.
+    const triggered =
+      (patch.reps !== undefined && patch.reps !== null && patch.reps > 0) ||
+      (patch.seconds !== undefined && patch.seconds !== null && patch.seconds > 0);
+    if (prefs.restTimerEnabled && triggered) {
       // Look up the exercise's per-user override; fall back to the global default.
       const setLog = activeSession?.setLogs.find((s) => s.id === setLogId);
       const exercise = setLog

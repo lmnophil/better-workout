@@ -75,16 +75,18 @@ async function getOrCreateActiveSession(userId: string) {
  *   3. Leading "N×" in the Exercise.prescription string ("3×12" → 3)
  *   4. The user's `defaultSetsPerExercise` preference
  *
- * Reps on each seeded set: history wins (set 1 from last-time's set 1, etc.,
- * with the final set repeated to fill any extra slots so progressive-overload
- * typing is one tap away). When there's no history but a `plannedReps` hint
- * exists, every seeded set gets that rep count. Otherwise reps are null.
+ * Per-set values: history wins (set 1 from last-time's set 1, etc., with the
+ * final set repeated to fill any extra slots so progressive-overload typing is
+ * one tap away). With no history, fall back to the planning hints: plannedReps
+ * for metric='reps' exercises, plannedSeconds for metric='time' exercises.
  *
  * Weight always comes from history (or null) — planned weight isn't a thing.
+ * For metric='time' exercises, the seeded reps are null and seconds carries
+ * the planned hint.
  *
- * The optional `hints` map (keyed by exerciseId) carries plannedSets/plannedReps
- * from the source TemplateExercise. Callers that don't have a template (e.g.
- * picker-driven adds) just omit it.
+ * The optional `hints` map (keyed by exerciseId) carries plannedSets/plannedReps/
+ * plannedSeconds from the source TemplateExercise. Callers that don't have a
+ * template (e.g. picker-driven adds) just omit it.
  *
  * Returns rows ready for createMany; setNumber is 1-indexed and contiguous.
  */
@@ -92,7 +94,10 @@ async function buildSeededSetLogRows(
   userId: string,
   entries: { exerciseId: string; sessionId: string; position: number }[],
   excludeSessionId?: string,
-  hints?: Map<string, { plannedSets: number | null; plannedReps: number | null }>,
+  hints?: Map<
+    string,
+    { plannedSets: number | null; plannedReps: number | null; plannedSeconds: number | null }
+  >,
 ) {
   if (entries.length === 0) return [];
 
@@ -102,7 +107,7 @@ async function buildSeededSetLogRows(
     getLastSetsForExerciseIds(userId, exerciseIds, excludeSessionId),
     db.exercise.findMany({
       where: { id: { in: exerciseIds } },
-      select: { id: true, prescription: true },
+      select: { id: true, prescription: true, metric: true },
     }),
     db.userPreferences.findUnique({
       where: { userId },
@@ -110,7 +115,7 @@ async function buildSeededSetLogRows(
     }),
   ]);
 
-  const prescriptionById = new Map(exercisesMeta.map((e) => [e.id, e.prescription]));
+  const metaById = new Map(exercisesMeta.map((e) => [e.id, e]));
   const defaultSets =
     prefRow?.defaultSetsPerExercise ?? PREFS_DEFAULTS.defaultSetsPerExercise;
 
@@ -121,6 +126,7 @@ async function buildSeededSetLogRows(
     position: number;
     reps: number | null;
     weight: number | null;
+    seconds: number | null;
   }[] = [];
 
   for (const entry of entries) {
@@ -128,9 +134,11 @@ async function buildSeededSetLogRows(
     const fromHistory = last?.sets.length ?? 0;
     const hint = hints?.get(entry.exerciseId);
     const fromPlanned = hint?.plannedSets ?? null;
+    const meta = metaById.get(entry.exerciseId);
+    const isTime = meta?.metric === 'time';
     const fromPrescription =
       fromHistory === 0 && fromPlanned === null
-        ? parsePrescriptionSetCount(prescriptionById.get(entry.exerciseId) ?? null)
+        ? parsePrescriptionSetCount(meta?.prescription ?? null)
         : null;
     const setCount = Math.max(
       1,
@@ -142,10 +150,14 @@ async function buildSeededSetLogRows(
     for (let i = 0; i < setCount; i++) {
       // Reach for the same set index from last time, or fall back to the last
       // set we have history for. Without history, fall through to the planned
-      // reps hint (if present); otherwise leave reps blank.
+      // hint matching the exercise's metric.
       const fromSet = last?.sets[i] ?? last?.sets[last.sets.length - 1];
-      const reps =
-        fromSet?.reps ?? (fromHistory === 0 ? (hint?.plannedReps ?? null) : null);
+      const reps = isTime
+        ? null
+        : (fromSet?.reps ?? (fromHistory === 0 ? (hint?.plannedReps ?? null) : null));
+      const seconds = isTime
+        ? (fromSet?.seconds ?? (fromHistory === 0 ? (hint?.plannedSeconds ?? null) : null))
+        : null;
       rows.push({
         sessionId: entry.sessionId,
         exerciseId: entry.exerciseId,
@@ -153,6 +165,7 @@ async function buildSeededSetLogRows(
         position: entry.position,
         reps,
         weight: fromSet?.weight ?? null,
+        seconds,
       });
     }
   }
@@ -297,9 +310,12 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
       setNumber: lastSet.setNumber + 1,
       // Inherit the exercise's existing position so all sets stay grouped
       position: lastSet.position,
-      // Pre-fill from the previous set so progressive overload is one tap away
+      // Pre-fill from the previous set so progressive overload is one tap away.
+      // For time-metric exercises, seconds carries forward; for reps-metric,
+      // reps + weight. Whichever isn't relevant just stays null on both rows.
       reps: lastSet.reps,
       weight: lastSet.weight,
+      seconds: lastSet.seconds,
     },
   });
 
@@ -307,15 +323,21 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
   revalidatePath('/');
 });
 
+// Each field is optional + nullable: callers send only the fields they actually
+// edited. The UI dispatches reps/weight for metric='reps' exercises and seconds
+// (plus optional weight, e.g. weighted carries) for metric='time' exercises. We
+// don't mutex at the action level — the worst case is a stale client writes
+// both, which is harmless since the metric dictates which field is read.
 const UpdateSetSchema = z.object({
   setLogId: z.string().min(1),
-  reps: z.number().int().min(0).max(1000).nullable(),
-  weight: z.number().min(0).max(10000).nullable(),
+  reps: z.number().int().min(0).max(1000).nullable().optional(),
+  weight: z.number().min(0).max(10000).nullable().optional(),
+  seconds: z.number().int().min(0).max(3600).nullable().optional(),
 });
 
 export const updateSet = withLogging('updateSet', async (input: z.infer<typeof UpdateSetSchema>) => {
   const userId = await requireUser();
-  const { setLogId, reps, weight } = UpdateSetSchema.parse(input);
+  const { setLogId, reps, weight, seconds } = UpdateSetSchema.parse(input);
 
   // Verify the set belongs to a session owned by this user
   const setLog = await db.setLog.findUnique({
@@ -331,7 +353,11 @@ export const updateSet = withLogging('updateSet', async (input: z.infer<typeof U
 
   await db.setLog.update({
     where: { id: setLogId },
-    data: { reps, weight },
+    data: {
+      ...(reps !== undefined ? { reps } : {}),
+      ...(weight !== undefined ? { weight } : {}),
+      ...(seconds !== undefined ? { seconds } : {}),
+    },
   });
 
   revalidatePath('/');
@@ -382,15 +408,19 @@ export const repeatLastForExercise = withLogging('repeatLastForExercise', async 
       const toDrop = current.slice(targetCount).map((s) => s.id);
       await tx.setLog.deleteMany({ where: { id: { in: toDrop } } });
     }
-    // Update the rows we keep, copying reps/weight from last-time.
+    // Update the rows we keep, copying reps/weight/seconds from last-time.
     const toKeep = current.slice(0, targetCount);
     for (let i = 0; i < toKeep.length; i++) {
       const row = toKeep[i];
       const src = last.sets[i];
-      if (row.reps !== src.reps || row.weight !== src.weight) {
+      if (
+        row.reps !== src.reps ||
+        row.weight !== src.weight ||
+        row.seconds !== src.seconds
+      ) {
         await tx.setLog.update({
           where: { id: row.id },
-          data: { reps: src.reps, weight: src.weight },
+          data: { reps: src.reps, weight: src.weight, seconds: src.seconds },
         });
       }
     }
@@ -403,6 +433,7 @@ export const repeatLastForExercise = withLogging('repeatLastForExercise', async 
         position,
         reps: src.reps,
         weight: src.weight,
+        seconds: src.seconds,
       }));
       await tx.setLog.createMany({ data: toCreate });
     }
@@ -649,6 +680,12 @@ const CreateCustomExerciseSchema = z.object({
     .or(z.literal('').transform(() => undefined)),
   // Optional per-exercise rest override. Stored on ExerciseUserSettings, not Exercise.
   restTimerSeconds: z.number().int().min(5).max(600).optional(),
+  // 'reps' (default) or 'time'. Determines which input the set row renders.
+  metric: z.enum(['reps', 'time']).optional(),
+  // Optional equipment tags (see Exercise.equipment in schema.prisma). Empty
+  // when omitted; the routine preset filter treats unknown equipment as
+  // "always available," which is the right fallback for user-created customs.
+  equipment: z.array(z.string().trim().max(40)).max(20).optional(),
 });
 
 export const createCustomExercise = withLogging('createCustomExercise', async (
@@ -662,6 +699,8 @@ export const createCustomExercise = withLogging('createCustomExercise', async (
     prescription,
     videoUrl,
     restTimerSeconds,
+    metric,
+    equipment,
   } = CreateCustomExerciseSchema.parse(input);
 
   // Check for collision with the user's existing customs
@@ -685,6 +724,8 @@ export const createCustomExercise = withLogging('createCustomExercise', async (
         videoUrl: videoUrl ?? null,
         isCustom: true,
         ownerId: userId,
+        metric: metric ?? 'reps',
+        equipment: equipment ?? [],
       },
     });
 
@@ -1072,7 +1113,11 @@ export const startFromTemplate = withLogging('startFromTemplate', async (input: 
   const hints = new Map(
     usable.map((te) => [
       te.exerciseId,
-      { plannedSets: te.plannedSets, plannedReps: te.plannedReps },
+      {
+        plannedSets: te.plannedSets,
+        plannedReps: te.plannedReps,
+        plannedSeconds: te.plannedSeconds,
+      },
     ]),
   );
   const rows = await buildSeededSetLogRows(
@@ -1268,6 +1313,7 @@ async function cloneTemplateForUser(
           position,
           plannedSets: te.plannedSets,
           plannedReps: te.plannedReps,
+          plannedSeconds: te.plannedSeconds,
         })),
       },
     },
@@ -1284,6 +1330,7 @@ type FreshTemplateExerciseInput = {
   exerciseId: string;
   plannedSets?: number | null;
   plannedReps?: number | null;
+  plannedSeconds?: number | null;
 };
 
 async function freshTemplateForUser(
@@ -1322,6 +1369,7 @@ async function freshTemplateForUser(
           position,
           plannedSets: e.plannedSets ?? null,
           plannedReps: e.plannedReps ?? null,
+          plannedSeconds: e.plannedSeconds ?? null,
         })),
       },
     },
@@ -1703,23 +1751,28 @@ export const removeRoutineDay = withLogging('removeRoutineDay', async (
 // ============================================================
 
 // Sane bounds for planned numbers. plannedSets caps at 20 to mirror the
-// defaultSetsPerExercise schema; plannedReps at 999 to allow long timed-set
-// counts (think 60-second carries logged as "60 reps") without being silly.
+// defaultSetsPerExercise schema; plannedReps at 100 (real rep ranges); and
+// plannedSeconds at 3600 (one hour, easily covers any reasonable hold or
+// loaded carry). Time-based exercises store their plan in plannedSeconds, not
+// plannedReps — historically a "60s plank" was stored as plannedReps=60, which
+// the data model now distinguishes properly.
 const PlannedSetsSchema = z.number().int().min(1).max(20).nullable().optional();
-const PlannedRepsSchema = z.number().int().min(1).max(999).nullable().optional();
+const PlannedRepsSchema = z.number().int().min(1).max(100).nullable().optional();
+const PlannedSecondsSchema = z.number().int().min(1).max(3600).nullable().optional();
 
 const AddExerciseToRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
   exerciseId: z.string().min(1),
   plannedSets: PlannedSetsSchema,
   plannedReps: PlannedRepsSchema,
+  plannedSeconds: PlannedSecondsSchema,
 });
 
 export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', async (
   input: z.infer<typeof AddExerciseToRoutineDaySchema>,
 ) => {
   const userId = await requireUser();
-  const { routineDayId, exerciseId, plannedSets, plannedReps } =
+  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds } =
     AddExerciseToRoutineDaySchema.parse(input);
 
   const day = await db.routineDay.findFirst({
@@ -1750,6 +1803,7 @@ export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', as
       position: nextPos,
       plannedSets: plannedSets ?? null,
       plannedReps: plannedReps ?? null,
+      plannedSeconds: plannedSeconds ?? null,
     },
   });
 
@@ -1762,17 +1816,19 @@ const UpdateRoutineDayExerciseSchema = z.object({
   exerciseId: z.string().min(1),
   plannedSets: PlannedSetsSchema,
   plannedReps: PlannedRepsSchema,
+  plannedSeconds: PlannedSecondsSchema,
 });
 
 /**
- * Edit a routine-day exercise's planned set/rep numbers. Pass null to clear a
- * field; omit to leave it untouched. Operates on the day's owned template.
+ * Edit a routine-day exercise's planned set/rep/seconds numbers. Pass null to
+ * clear a field; omit to leave it untouched. Operates on the day's owned
+ * template.
  */
 export const updateRoutineDayExercise = withLogging('updateRoutineDayExercise', async (
   input: z.infer<typeof UpdateRoutineDayExerciseSchema>,
 ) => {
   const userId = await requireUser();
-  const { routineDayId, exerciseId, plannedSets, plannedReps } =
+  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds } =
     UpdateRoutineDayExerciseSchema.parse(input);
 
   const day = await db.routineDay.findFirst({
@@ -1792,6 +1848,7 @@ export const updateRoutineDayExercise = withLogging('updateRoutineDayExercise', 
     data: {
       ...(plannedSets !== undefined ? { plannedSets } : {}),
       ...(plannedReps !== undefined ? { plannedReps } : {}),
+      ...(plannedSeconds !== undefined ? { plannedSeconds } : {}),
     },
   });
 
@@ -2114,6 +2171,7 @@ const DraftExerciseSchema = z.object({
   exerciseId: z.string().min(1),
   plannedSets: PlannedSetsSchema,
   plannedReps: PlannedRepsSchema,
+  plannedSeconds: PlannedSecondsSchema,
 });
 
 const DraftDaySchema = z
@@ -2210,6 +2268,7 @@ export const createRoutineFromDraft = withLogging('createRoutineFromDraft', asyn
               exerciseId: e.exerciseId,
               plannedSets: e.plannedSets ?? null,
               plannedReps: e.plannedReps ?? null,
+              plannedSeconds: e.plannedSeconds ?? null,
             })),
           );
 
@@ -2301,6 +2360,7 @@ export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
     exerciseId: string;
     plannedSets: number | null;
     plannedReps: number | null;
+    plannedSeconds: number | null;
   }[] = [];
   for (const te of day.template.exercises) {
     const ex = te.exercise;
@@ -2310,12 +2370,14 @@ export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
         exerciseId: replacement,
         plannedSets: te.plannedSets,
         plannedReps: te.plannedReps,
+        plannedSeconds: te.plannedSeconds,
       });
     } else if (ex.deletedAt === null && (ex.ownerId === null || ex.ownerId === userId)) {
       lineup.push({
         exerciseId: te.exerciseId,
         plannedSets: te.plannedSets,
         plannedReps: te.plannedReps,
+        plannedSeconds: te.plannedSeconds,
       });
     }
   }
@@ -2337,7 +2399,11 @@ export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
   const hints = new Map(
     lineup.map((l) => [
       l.exerciseId,
-      { plannedSets: l.plannedSets, plannedReps: l.plannedReps },
+      {
+        plannedSets: l.plannedSets,
+        plannedReps: l.plannedReps,
+        plannedSeconds: l.plannedSeconds,
+      },
     ]),
   );
   const rows = await buildSeededSetLogRows(

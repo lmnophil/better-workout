@@ -54,6 +54,17 @@ import {
   type ScheduleStyle,
 } from '@/lib/routine';
 import { moduleDescription } from '@/lib/exercises-data';
+import {
+  buildStarterRoutine,
+  EQUIPMENT_TIERS,
+  EQUIPMENT_TIER_INFO,
+  STARTER_DURATIONS,
+  STARTER_FOCUSES,
+  STARTER_FOCUS_INFO,
+  type EquipmentTier,
+  type StarterDuration,
+  type StarterFocus,
+} from '@/lib/starter-routines';
 import { ExercisePicker } from '@/components/workout/exercise-picker';
 import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { useConfirm } from '@/components/ui/use-confirm';
@@ -66,8 +77,10 @@ type DayExercise = {
   exerciseId: string;
   name: string;
   module: string;
+  metric: string;
   plannedSets: number | null;
   plannedReps: number | null;
+  plannedSeconds: number | null;
 };
 
 type EditorDay = {
@@ -89,9 +102,11 @@ export type DayClient = {
     exerciseId: string;
     name: string;
     module: string;
+    metric: string;
     position: number;
     plannedSets: number | null;
     plannedReps: number | null;
+    plannedSeconds: number | null;
     primaryMuscles: string[];
     secondaryMuscles: string[];
   }[];
@@ -186,6 +201,7 @@ type DraftExercise = {
   exerciseId: string;
   plannedSets: number | null;
   plannedReps: number | null;
+  plannedSeconds: number | null;
 };
 
 type DraftDay = {
@@ -212,6 +228,14 @@ function makeDraftDay(initial: Partial<DraftDay> = {}): DraftDay {
   };
 }
 
+// Local-storage key for the work-in-progress Custom draft. Single-user app,
+// single browser per user — no userId namespace needed. Versioned so a future
+// change to DraftDay shape can invalidate stale localStorage cleanly without
+// trying to migrate.
+const DRAFT_STORAGE_KEY = 'starter-routine-draft.v1';
+
+type PresetTab = StarterFocus | 'custom';
+
 function DraftEditor({
   seedTemplates,
   availableExercises,
@@ -228,6 +252,65 @@ function DraftEditor({
   const [days, setDays] = useState<DraftDay[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pickerForDayClientId, setPickerForDayClientId] = useState<string | null>(null);
+
+  // Preset picker state. The user lands on the Strength preview by default;
+  // they pick filters and either click "Use this preset" (which copies the
+  // built preset into `days` and switches to 'custom') or they switch to the
+  // Custom tab to start blank / continue a WIP draft.
+  const [presetTab, setPresetTab] = useState<PresetTab>('strength');
+  const [presetDays, setPresetDays] = useState<number>(3);
+  const [presetDuration, setPresetDuration] = useState<StarterDuration>(45);
+  const [presetTier, setPresetTier] = useState<EquipmentTier>('home-rack');
+  // Set once we've attempted to hydrate from localStorage so the persistence
+  // effect below doesn't write the empty initial state over a saved draft.
+  const [draftHydrated, setDraftHydrated] = useState(false);
+
+  // Hydrate the Custom draft from localStorage on mount. We only treat the
+  // result as valid if every exercise still resolves — exercises can be
+  // soft-deleted between sessions and a stale draft pointing at a missing
+  // one would be a footgun. Drop unresolved entries silently; if the draft
+  // is now empty, clear it.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as DraftDay[];
+        if (Array.isArray(parsed)) {
+          const validIds = new Set(availableExercises.map((e) => e.id));
+          const cleaned = parsed
+            .map((d) => ({
+              ...d,
+              exercises: (d.exercises ?? []).filter((e) =>
+                validIds.has(e.exerciseId),
+              ),
+            }))
+            .filter((d) => d.exercises.length > 0);
+          setDays(cleaned);
+        }
+      }
+    } catch {
+      // Bad JSON or shape mismatch — start fresh, no need to surface it.
+    }
+    setDraftHydrated(true);
+  }, [availableExercises]);
+
+  // Persist Custom draft to localStorage on change. Skipped until hydration
+  // completes so we never overwrite a saved draft with the initial empty
+  // state during the first paint.
+  useEffect(() => {
+    if (!draftHydrated || typeof window === 'undefined') return;
+    try {
+      if (days.length === 0) {
+        window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(days));
+      }
+    } catch {
+      // Storage full / blocked / private mode — UI continues to work without
+      // persistence; no point yelling at the user.
+    }
+  }, [days, draftHydrated]);
 
   const exerciseById = useMemo(
     () => new Map(availableExercises.map((e) => [e.id, e])),
@@ -258,8 +341,10 @@ function DraftEditor({
                 exerciseId: e.id,
                 name: e.name,
                 module: e.module,
+                metric: e.metric,
                 plannedSets: dx.plannedSets,
                 plannedReps: dx.plannedReps,
+                plannedSeconds: dx.plannedSeconds,
               };
             })
             .filter((x): x is DayExercise => x !== null),
@@ -320,7 +405,12 @@ function DraftEditor({
     const seeded: DraftExercise[] = tpl.exerciseNames
       .map((n) => nameToId.get(n))
       .filter((id): id is string => id !== undefined)
-      .map((exerciseId) => ({ exerciseId, plannedSets: null, plannedReps: null }));
+      .map((exerciseId) => ({
+        exerciseId,
+        plannedSets: null,
+        plannedReps: null,
+        plannedSeconds: null,
+      }));
     updateDay(clientId, (d) => ({
       ...d,
       // Default the day's name to the seed's, but only if the user hasn't
@@ -360,11 +450,17 @@ function DraftEditor({
               exerciseId: e.exerciseId,
               plannedSets: e.plannedSets,
               plannedReps: e.plannedReps,
+              plannedSeconds: e.plannedSeconds,
             })),
             label: d.label?.trim() || undefined,
             weekday: scheduleStyle === 'weekday' ? d.weekday : null,
           })),
         });
+        // The routine now exists server-side; drop the WIP draft so the user
+        // doesn't re-hydrate stale state next time they hit /routine.
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+        }
         router.refresh();
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : 'Could not save routine.');
@@ -372,95 +468,170 @@ function DraftEditor({
     });
   }
 
+  // Compute the current preset's resolved preview. Recomputes whenever the
+  // user changes the focus tab, days, duration, or equipment tier. Cheap —
+  // the builder is just iterating the static base + filtering variants.
+  const presetResult = useMemo(() => {
+    if (presetTab === 'custom') return null;
+    return buildStarterRoutine({
+      focus: presetTab,
+      days: presetDays,
+      durationMinutes: presetDuration,
+      equipmentTier: presetTier,
+    });
+  }, [presetTab, presetDays, presetDuration, presetTier]);
+
+  // Apply the current preset to the Custom draft and switch tabs. Per the UX
+  // spec: this *overwrites* any prior Custom WIP. The user implicitly agreed
+  // to that by editing or clicking "Use this preset" — there's no separate
+  // "merge with custom" flow.
+  function applyPreset() {
+    if (!presetResult) return;
+    const nameToId = new Map(availableExercises.map((e) => [e.name, e.id]));
+    const newDays: DraftDay[] = presetResult.days
+      .map((d) => {
+        const exercises: DraftExercise[] = [];
+        for (const e of d.exercises) {
+          const id = nameToId.get(e.exerciseName);
+          if (!id) continue;
+          exercises.push({
+            exerciseId: id,
+            plannedSets: e.plannedSets,
+            plannedReps: e.plannedReps,
+            plannedSeconds: e.plannedSeconds,
+          });
+        }
+        return {
+          clientId:
+            typeof crypto !== 'undefined' && 'randomUUID' in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+          name: d.name,
+          label: null as string | null,
+          weekday: null as number | null,
+          exercises,
+        };
+      })
+      .filter((d) => d.exercises.length > 0);
+    setDays(newDays);
+    setPresetTab('custom');
+    setSubmitError(null);
+  }
+
+  const customHasContent = days.length > 0;
+
   return (
     <>
-      <ScheduleToggle
-        value={scheduleStyle}
-        onChange={(s) => setScheduleStyle(s)}
-        // Switching mode leaves the days but clears weekday pins so the
-        // user re-pins from scratch in calendar. We do the clear in both
-        // directions to keep the data clean.
-        onSwitchSideEffect={() =>
-          setDays((prev) => prev.map((d) => ({ ...d, weekday: null })))
-        }
+      <PresetTabs
+        tab={presetTab}
+        onChange={setPresetTab}
+        customHasContent={customHasContent}
       />
 
-      <div className="mt-5">
-        <DaysSection
-          mode="draft"
-          scheduleStyle={scheduleStyle}
-          days={editorDays}
-          atCap={days.length >= MAX_ROUTINE_DAYS}
-          isPending={isPending}
-          seedTemplates={seedTemplates}
-          onAddDay={addDay}
-          onRenameDay={(id, name) =>
-            updateDay(id, (d) => ({ ...d, name }))
-          }
-          onSetWeekday={(id, weekday) =>
-            updateDay(id, (d) => ({ ...d, weekday }))
-          }
-          onRemoveDay={removeDay}
-          onMoveDay={moveDay}
-          onOpenExercisePicker={setPickerForDayClientId}
-          onSeedFromTemplate={seedFromTemplate}
-          onRemoveExercise={(id, exerciseId) =>
-            updateDay(id, (d) => ({
-              ...d,
-              exercises: d.exercises.filter((e) => e.exerciseId !== exerciseId),
-            }))
-          }
-          onReorderExercise={(id, exerciseId, direction) =>
-            updateDay(id, (d) => {
-              const idx = d.exercises.findIndex((e) => e.exerciseId === exerciseId);
-              if (idx < 0) return d;
-              const target = direction === 'up' ? idx - 1 : idx + 1;
-              if (target < 0 || target >= d.exercises.length) return d;
-              const next = [...d.exercises];
-              [next[idx], next[target]] = [next[target], next[idx]];
-              return { ...d, exercises: next };
-            })
-          }
-          onUpdateExercisePlanned={(id, exerciseId, planned) =>
-            updateDay(id, (d) => ({
-              ...d,
-              exercises: d.exercises.map((e) =>
-                e.exerciseId === exerciseId ? { ...e, ...planned } : e,
-              ),
-            }))
-          }
-          onSwapExercise={null}
+      {presetTab !== 'custom' && presetResult ? (
+        <PresetView
+          focus={presetTab}
+          days={presetDays}
+          duration={presetDuration}
+          tier={presetTier}
+          result={presetResult}
+          onChangeDays={setPresetDays}
+          onChangeDuration={setPresetDuration}
+          onChangeTier={setPresetTier}
+          onApply={applyPreset}
+          willOverwriteCustom={customHasContent}
         />
-      </div>
+      ) : (
+        <>
+          <ScheduleToggle
+            value={scheduleStyle}
+            onChange={(s) => setScheduleStyle(s)}
+            // Switching mode leaves the days but clears weekday pins so the
+            // user re-pins from scratch in calendar. We do the clear in both
+            // directions to keep the data clean.
+            onSwitchSideEffect={() =>
+              setDays((prev) => prev.map((d) => ({ ...d, weekday: null })))
+            }
+          />
 
-      <CoveragePanel
-        totals={totals}
-        anyEstimated={anyEstimated}
-        muscleGroups={muscleGroups}
-      />
-
-      <div className="mt-6 border border-ink-800 rounded-lg p-4 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm text-ink-100">Save your routine</div>
-          <div className="text-[11px] text-ink-500 italic font-display mt-0.5 leading-relaxed">
-            {canSave
-              ? 'Looks good — commit it when you’re ready.'
-              : days.length === 0
-                ? 'Add at least one day with one exercise.'
-                : scheduleStyle === 'weekday'
-                  ? 'Each day needs a weekday and at least one exercise.'
-                  : 'Each day needs at least one exercise.'}
+          <div className="mt-5">
+            <DaysSection
+              mode="draft"
+              scheduleStyle={scheduleStyle}
+              days={editorDays}
+              atCap={days.length >= MAX_ROUTINE_DAYS}
+              isPending={isPending}
+              seedTemplates={seedTemplates}
+              onAddDay={addDay}
+              onRenameDay={(id, name) =>
+                updateDay(id, (d) => ({ ...d, name }))
+              }
+              onSetWeekday={(id, weekday) =>
+                updateDay(id, (d) => ({ ...d, weekday }))
+              }
+              onRemoveDay={removeDay}
+              onMoveDay={moveDay}
+              onOpenExercisePicker={setPickerForDayClientId}
+              onSeedFromTemplate={seedFromTemplate}
+              onRemoveExercise={(id, exerciseId) =>
+                updateDay(id, (d) => ({
+                  ...d,
+                  exercises: d.exercises.filter((e) => e.exerciseId !== exerciseId),
+                }))
+              }
+              onReorderExercise={(id, exerciseId, direction) =>
+                updateDay(id, (d) => {
+                  const idx = d.exercises.findIndex((e) => e.exerciseId === exerciseId);
+                  if (idx < 0) return d;
+                  const target = direction === 'up' ? idx - 1 : idx + 1;
+                  if (target < 0 || target >= d.exercises.length) return d;
+                  const next = [...d.exercises];
+                  [next[idx], next[target]] = [next[target], next[idx]];
+                  return { ...d, exercises: next };
+                })
+              }
+              onUpdateExercisePlanned={(id, exerciseId, planned) =>
+                updateDay(id, (d) => ({
+                  ...d,
+                  exercises: d.exercises.map((e) =>
+                    e.exerciseId === exerciseId ? { ...e, ...planned } : e,
+                  ),
+                }))
+              }
+              onSwapExercise={null}
+            />
           </div>
-          {submitError && <p className="text-[11px] text-bad mt-1.5">{submitError}</p>}
-        </div>
-        <button
-          onClick={save}
-          disabled={!canSave || isPending}
-          className="accent-bg text-ink-950 px-4 py-2 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
-        >
-          {isPending ? 'Saving…' : 'Save routine'}
-        </button>
-      </div>
+
+          <CoveragePanel
+            totals={totals}
+            anyEstimated={anyEstimated}
+            muscleGroups={muscleGroups}
+          />
+
+          <div className="mt-6 border border-ink-800 rounded-lg p-4 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm text-ink-100">Save your routine</div>
+              <div className="text-[11px] text-ink-500 italic font-display mt-0.5 leading-relaxed">
+                {canSave
+                  ? 'Looks good — commit it when you’re ready.'
+                  : days.length === 0
+                    ? 'Add at least one day with one exercise.'
+                    : scheduleStyle === 'weekday'
+                      ? 'Each day needs a weekday and at least one exercise.'
+                      : 'Each day needs at least one exercise.'}
+              </div>
+              {submitError && <p className="text-[11px] text-bad mt-1.5">{submitError}</p>}
+            </div>
+            <button
+              onClick={save}
+              disabled={!canSave || isPending}
+              className="accent-bg text-ink-950 px-4 py-2 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+            >
+              {isPending ? 'Saving…' : 'Save routine'}
+            </button>
+          </div>
+        </>
+      )}
 
       {pickerForDayClientId &&
         (() => {
@@ -482,6 +653,7 @@ function DraftEditor({
                       exerciseId,
                       plannedSets: null,
                       plannedReps: null,
+                      plannedSeconds: null,
                     }));
                   return { ...d, exercises: [...d.exercises, ...additions] };
                 });
@@ -510,6 +682,225 @@ function DraftEditor({
           );
         })()}
     </>
+  );
+}
+
+// ============ PRESET PICKER (Draft mode only) ============
+
+// Top tabs: three focuses + Custom. Selecting a focus tab is read-only preview;
+// Custom is the editable WIP draft. Tab order is intentional — Strength /
+// Build / Mobility flow heaviest → lightest, then Custom anchors as the
+// "your hand-rolled" option on the right.
+function PresetTabs({
+  tab,
+  onChange,
+  customHasContent,
+}: {
+  tab: PresetTab;
+  onChange: (next: PresetTab) => void;
+  customHasContent: boolean;
+}) {
+  const tabs: { value: PresetTab; label: string }[] = [
+    { value: 'strength', label: STARTER_FOCUS_INFO.strength.label },
+    { value: 'build', label: STARTER_FOCUS_INFO.build.label },
+    { value: 'mobility', label: STARTER_FOCUS_INFO.mobility.label },
+    { value: 'custom', label: 'Custom' },
+  ];
+  return (
+    <div className="mb-4">
+      <div className="flex gap-1 border-b border-ink-800">
+        {tabs.map((t) => {
+          const active = tab === t.value;
+          return (
+            <button
+              key={t.value}
+              onClick={() => onChange(t.value)}
+              className={`px-3 py-2 text-[12px] tracking-wide transition border-b-2 -mb-px ${
+                active
+                  ? 'accent-text border-accent'
+                  : 'text-ink-500 border-transparent hover:text-ink-200'
+              }`}
+            >
+              {t.label}
+              {t.value === 'custom' && customHasContent && (
+                <span
+                  className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full accent-bg align-middle"
+                  aria-hidden="true"
+                  title="You have a saved draft"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Read-only preview of a (focus × days × duration × tier) preset, with
+// filter pills above and a "use this preset" button below. Editing happens
+// only after the user clicks "Use this preset" and is dropped into Custom.
+function PresetView({
+  focus,
+  days,
+  duration,
+  tier,
+  result,
+  onChangeDays,
+  onChangeDuration,
+  onChangeTier,
+  onApply,
+  willOverwriteCustom,
+}: {
+  focus: StarterFocus;
+  days: number;
+  duration: StarterDuration;
+  tier: EquipmentTier;
+  result: ReturnType<typeof buildStarterRoutine>;
+  onChangeDays: (n: number) => void;
+  onChangeDuration: (n: StarterDuration) => void;
+  onChangeTier: (t: EquipmentTier) => void;
+  onApply: () => void;
+  willOverwriteCustom: boolean;
+}) {
+  const focusInfo = STARTER_FOCUS_INFO[focus];
+  return (
+    <div>
+      <div className="mb-4">
+        <p className="text-[12px] text-ink-300 leading-relaxed">{focusInfo.description}</p>
+      </div>
+
+      {/* Filter pills */}
+      <div className="space-y-3 mb-5">
+        <PillRow
+          label="Days / cycle"
+          options={[1, 2, 3, 4, 5, 6, 7].map((n) => ({ value: n, label: String(n) }))}
+          value={days}
+          onChange={onChangeDays}
+        />
+        <PillRow
+          label="Time / day"
+          options={STARTER_DURATIONS.map((n) => ({ value: n, label: `${n}m` }))}
+          value={duration}
+          onChange={onChangeDuration}
+        />
+        <PillRow
+          label="Equipment"
+          options={EQUIPMENT_TIERS.map((t) => ({
+            value: t,
+            label: EQUIPMENT_TIER_INFO[t].label,
+          }))}
+          value={tier}
+          onChange={onChangeTier}
+        />
+      </div>
+
+      {/* Tradeoffs / mat hint */}
+      {(result.tradeoffs.length > 0 || result.needsMat) && (
+        <div className="mb-4 space-y-1.5">
+          {result.tradeoffs.map((msg) => (
+            <p
+              key={msg}
+              className="text-[11px] text-ink-400 italic font-display leading-relaxed"
+            >
+              {msg}
+            </p>
+          ))}
+          {result.needsMat && (
+            <p className="text-[11px] text-ink-500 font-display leading-relaxed">
+              You'll want a mat for floor work.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Days preview */}
+      <div className="space-y-2.5 mb-5">
+        {result.days.length === 0 ? (
+          <p className="text-[12px] text-ink-500 italic font-display">
+            No exercises matched at this combination — try a different equipment tier or duration.
+          </p>
+        ) : (
+          result.days.map((d, idx) => (
+            <div key={idx} className="border border-ink-800 rounded-lg p-3">
+              <div className="text-[11px] tracking-wider uppercase text-ink-500 mb-1.5">
+                {d.name}
+              </div>
+              {d.exercises.length === 0 ? (
+                <div className="text-[11px] text-ink-500 italic font-display">
+                  Empty after trim — pick a longer duration.
+                </div>
+              ) : (
+                <ul className="space-y-0.5">
+                  {d.exercises.map((ex, j) => (
+                    <li
+                      key={j}
+                      className="flex items-center justify-between gap-3 text-[12px] text-ink-200"
+                    >
+                      <span className="truncate">{ex.exerciseName}</span>
+                      <span className="text-ink-500 font-mono text-[10px] shrink-0">
+                        {ex.plannedSets}×
+                        {ex.plannedSeconds !== null
+                          ? `${ex.plannedSeconds}s`
+                          : (ex.plannedReps ?? '—')}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Use-this-preset CTA */}
+      <button
+        onClick={onApply}
+        disabled={result.days.every((d) => d.exercises.length === 0)}
+        className="w-full accent-bg text-ink-950 px-4 py-2.5 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        Use this preset {willOverwriteCustom && <span className="font-normal opacity-80">— replaces your current draft</span>}
+      </button>
+    </div>
+  );
+}
+
+// Generic pill-row used by the preset filters. Single-select.
+function PillRow<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500 w-24 shrink-0">
+        {label}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={String(opt.value)}
+              onClick={() => onChange(opt.value)}
+              className={`px-2.5 py-1 text-[11px] rounded-full border transition ${
+                active
+                  ? 'accent-bg accent-border text-ink-950 font-medium'
+                  : 'border-ink-800 text-ink-300 hover:border-ink-600 hover:text-ink-100'
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -551,8 +942,10 @@ function LiveEditor({
               exerciseId: e.exerciseId,
               name: e.name,
               module: e.module,
+              metric: e.metric,
               plannedSets: e.plannedSets,
               plannedReps: e.plannedReps,
+              plannedSeconds: e.plannedSeconds,
             })),
         })),
     [routine.days],
@@ -968,6 +1361,7 @@ function ToggleOption({
 type PlannedPatch = {
   plannedSets?: number | null;
   plannedReps?: number | null;
+  plannedSeconds?: number | null;
 };
 
 type DaysSectionProps = {
@@ -1464,8 +1858,10 @@ function ExerciseRow({
         </div>
       </div>
       <PlannedInputs
+        metric={exercise.metric}
         plannedSets={exercise.plannedSets}
         plannedReps={exercise.plannedReps}
+        plannedSeconds={exercise.plannedSeconds}
         disabled={isPending}
         onChange={onUpdatePlanned}
       />
@@ -1491,46 +1887,62 @@ function ExerciseRow({
   );
 }
 
-// Tiny pair of inputs for plannedSets × plannedReps. Both optional — empty
-// means "not set," which lets the seed flow fall back to history /
-// prescription / preference. We keep edits in local state and commit on blur
-// so the user can tap-and-type without each keystroke firing a server action.
-// Bounds match the action-side Zod schemas; out-of-range values are clamped
-// rather than rejected so a stray fat-finger doesn't drop the whole edit.
+// Tiny pair of inputs for plannedSets × (plannedReps | plannedSeconds). All
+// optional — empty means "not set," which lets the seed flow fall back to
+// history / prescription / preference. We keep edits in local state and commit
+// on blur so the user can tap-and-type without each keystroke firing a server
+// action. Bounds match the action-side Zod schemas; out-of-range values are
+// clamped rather than rejected so a stray fat-finger doesn't drop the whole
+// edit.
+//
+// Whether the second input is "reps" or "seconds" depends on the exercise's
+// `metric`. Time-metric exercises (planks, holds, carries) flip to a seconds
+// input with an `s` separator and a wider bound (3600s = one hour).
 function PlannedInputs({
+  metric,
   plannedSets,
   plannedReps,
+  plannedSeconds,
   disabled,
   onChange,
 }: {
+  metric: string;
   plannedSets: number | null;
   plannedReps: number | null;
+  plannedSeconds: number | null;
   disabled: boolean;
   onChange: (patch: PlannedPatch) => void;
 }) {
+  const isTime = metric === 'time';
+  const secondaryValue = isTime ? plannedSeconds : plannedReps;
+  const secondaryMax = isTime ? 3600 : 100;
+  const secondaryLabel = isTime ? 'Planned seconds' : 'Planned reps';
+
   const [setsText, setSetsText] = useState(plannedSets?.toString() ?? '');
-  const [repsText, setRepsText] = useState(plannedReps?.toString() ?? '');
+  const [secondaryText, setSecondaryText] = useState(
+    secondaryValue?.toString() ?? '',
+  );
 
   useEffect(() => {
     setSetsText(plannedSets?.toString() ?? '');
   }, [plannedSets]);
   useEffect(() => {
-    setRepsText(plannedReps?.toString() ?? '');
-  }, [plannedReps]);
+    setSecondaryText(secondaryValue?.toString() ?? '');
+  }, [secondaryValue]);
 
-  function commit(field: 'sets' | 'reps', text: string) {
+  function commit(field: 'sets' | 'secondary', text: string) {
     const trimmed = text.trim();
     if (trimmed === '') {
-      // Cleared — only fire if it actually changed.
       if (field === 'sets' && plannedSets !== null) onChange({ plannedSets: null });
-      if (field === 'reps' && plannedReps !== null) onChange({ plannedReps: null });
+      if (field === 'secondary' && secondaryValue !== null) {
+        onChange(isTime ? { plannedSeconds: null } : { plannedReps: null });
+      }
       return;
     }
     const n = parseInt(trimmed, 10);
     if (Number.isNaN(n)) {
-      // Reset to last good value on garbage.
       if (field === 'sets') setSetsText(plannedSets?.toString() ?? '');
-      else setRepsText(plannedReps?.toString() ?? '');
+      else setSecondaryText(secondaryValue?.toString() ?? '');
       return;
     }
     if (field === 'sets') {
@@ -1538,14 +1950,16 @@ function PlannedInputs({
       if (clamped !== plannedSets) onChange({ plannedSets: clamped });
       setSetsText(clamped.toString());
     } else {
-      const clamped = Math.max(1, Math.min(999, n));
-      if (clamped !== plannedReps) onChange({ plannedReps: clamped });
-      setRepsText(clamped.toString());
+      const clamped = Math.max(1, Math.min(secondaryMax, n));
+      if (clamped !== secondaryValue) {
+        onChange(isTime ? { plannedSeconds: clamped } : { plannedReps: clamped });
+      }
+      setSecondaryText(clamped.toString());
     }
   }
 
   const inputClass =
-    'w-9 bg-ink-950 border border-ink-800 rounded text-[11px] text-ink-100 text-center font-mono py-1 px-1 focus:outline-none focus:border-accent/50 disabled:opacity-50';
+    'bg-ink-950 border border-ink-800 rounded text-[11px] text-ink-100 text-center font-mono py-1 px-1 focus:outline-none focus:border-accent/50 disabled:opacity-50';
 
   return (
     <div className="flex items-center gap-1 shrink-0 text-ink-500 text-[10px] font-mono">
@@ -1565,27 +1979,28 @@ function PlannedInputs({
         disabled={disabled}
         placeholder="—"
         aria-label="Planned sets"
-        className={inputClass}
+        className={`${inputClass} w-9`}
       />
       <span aria-hidden="true">×</span>
       <input
         type="text"
         inputMode="numeric"
-        value={repsText}
-        onChange={(e) => setRepsText(e.target.value)}
-        onBlur={(e) => commit('reps', e.currentTarget.value)}
+        value={secondaryText}
+        onChange={(e) => setSecondaryText(e.target.value)}
+        onBlur={(e) => commit('secondary', e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();
           if (e.key === 'Escape') {
-            setRepsText(plannedReps?.toString() ?? '');
+            setSecondaryText(secondaryValue?.toString() ?? '');
             e.currentTarget.blur();
           }
         }}
         disabled={disabled}
         placeholder="—"
-        aria-label="Planned reps"
-        className={inputClass}
+        aria-label={secondaryLabel}
+        className={`${inputClass} ${isTime ? 'w-12' : 'w-9'}`}
       />
+      {isTime && <span className="text-ink-600" aria-hidden="true">s</span>}
     </div>
   );
 }

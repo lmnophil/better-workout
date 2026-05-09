@@ -32,6 +32,7 @@ type Props = {
       setNumber: number;
       reps: number | null;
       weight: number | null;
+      seconds: number | null;
       notes: string | null;
     }[];
   } | null;
@@ -42,7 +43,16 @@ type Props = {
   // The user's global default weight stepper increment.
   globalWeightIncrement: number;
   onAddSet: () => void;
-  onUpdateSet: (setLogId: string, reps: number | null, weight: number | null) => void;
+  // Patch-shaped — caller sends only the fields it touched. reps/seconds are
+  // mutually exclusive in normal use, dictated by exercise.metric.
+  onUpdateSet: (
+    setLogId: string,
+    patch: {
+      reps?: number | null;
+      weight?: number | null;
+      seconds?: number | null;
+    },
+  ) => void;
   onUpdateNotes: (setLogId: string, notes: string) => void;
   onRemoveSet: (setLogId: string) => void;
   onRemoveExercise: () => void;
@@ -52,7 +62,7 @@ type Props = {
   onSwap: () => void;
   onSetRestOverride: (seconds: number | null) => void;
   onSetWeightIncrementOverride: (increment: number | null) => void;
-  // Snap the current sets to match the user's last-time set count and reps/weight.
+  // Snap the current sets to match the user's last-time set count and reps/weight/seconds.
   onRepeatLast: () => void;
 };
 
@@ -272,7 +282,11 @@ export function ExerciseInSession({
               Last {lastTime.when}:{' '}
               <span className="accent-text">
                 {lastTime.sets
-                  .map((s) => `${s.reps ?? '–'}×${s.weight ?? '–'}`)
+                  .map((s) =>
+                    exercise.metric === 'time'
+                      ? `${s.seconds ?? '–'}s${s.weight ? `@${s.weight}` : ''}`
+                      : `${s.reps ?? '–'}×${s.weight ?? '–'}`,
+                  )
                   .join('  ')}
               </span>
             </div>
@@ -318,7 +332,9 @@ export function ExerciseInSession({
             sets to the first instead of stacking same-weight cards. */}
         <div className="flex items-center gap-1.5 px-1 pb-1 text-[9px] tracking-[0.2em] uppercase text-ink-600">
           <span className="w-4 shrink-0 text-center">#</span>
-          <span className="flex-1 min-w-0 text-center">Reps</span>
+          <span className="flex-1 min-w-0 text-center">
+            {exercise.metric === 'time' ? 'Sec' : 'Reps'}
+          </span>
           <span className="w-3 shrink-0" />
           <span className="flex-1 min-w-0 text-center">Weight</span>
           <span className="w-4 shrink-0" />
@@ -330,8 +346,9 @@ export function ExerciseInSession({
             <SetRow
               key={set.id}
               set={set}
+              metric={exercise.metric}
               increment={effectiveIncrement}
-              onUpdate={(reps, weight) => onUpdateSet(set.id, reps, weight)}
+              onUpdate={(patch) => onUpdateSet(set.id, patch)}
               onUpdateNotes={(notes) => onUpdateNotes(set.id, notes)}
               onRemove={() => onRemoveSet(set.id)}
             />
@@ -352,20 +369,32 @@ export function ExerciseInSession({
 
 function SetRow({
   set,
+  metric,
   increment,
   onUpdate,
   onUpdateNotes,
   onRemove,
 }: {
   set: SetLogClient;
+  metric: string;
   increment: number;
-  onUpdate: (reps: number | null, weight: number | null) => void;
+  onUpdate: (patch: {
+    reps?: number | null;
+    weight?: number | null;
+    seconds?: number | null;
+  }) => void;
   onUpdateNotes: (notes: string) => void;
   onRemove: () => void;
 }) {
+  const isTime = metric === 'time';
+
   // Local mirror state — keystrokes feel instant; server sync happens on blur.
-  // Storing as strings to allow empty input (vs forcing 0).
-  const [reps, setReps] = useState<string>(set.reps?.toString() ?? '');
+  // Storing as strings to allow empty input (vs forcing 0). For time-metric
+  // exercises the first input mirrors `seconds`; for reps-metric, `reps`. The
+  // weight input is shared either way.
+  const [primary, setPrimary] = useState<string>(
+    (isTime ? set.seconds : set.reps)?.toString() ?? '',
+  );
   const [weight, setWeight] = useState<string>(formatWeight(set.weight));
   const [notesOpen, setNotesOpen] = useState(
     set.notes !== null && set.notes !== '',
@@ -373,7 +402,7 @@ function SetRow({
   const [notesValue, setNotesValue] = useState(set.notes ?? '');
   const [justSaved, setJustSaved] = useState(false);
 
-  const repsRef = useRef<HTMLInputElement>(null);
+  const primaryRef = useRef<HTMLInputElement>(null);
   const weightRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
   // Cleared on unmount so we don't fire setState after the component is gone.
@@ -390,10 +419,11 @@ function SetRow({
   // Sync local state with prop changes — but only when the input isn't focused,
   // so we don't yank values out from under someone who's actively typing.
   // Handles the "edit on phone, see update on desktop" case AND the
-  // server-side repeat-last action that rewrites reps/weight server-side.
+  // server-side repeat-last action that rewrites server-side.
   useEffect(() => {
-    if (document.activeElement !== repsRef.current) {
-      setReps(set.reps?.toString() ?? '');
+    if (document.activeElement !== primaryRef.current) {
+      const next = isTime ? set.seconds : set.reps;
+      setPrimary(next?.toString() ?? '');
     }
     if (document.activeElement !== weightRef.current) {
       setWeight(formatWeight(set.weight));
@@ -401,7 +431,7 @@ function SetRow({
     if (document.activeElement !== notesRef.current) {
       setNotesValue(set.notes ?? '');
     }
-  }, [set.reps, set.weight, set.notes]);
+  }, [set.reps, set.seconds, set.weight, set.notes, isTime]);
 
   function flashSaved() {
     setJustSaved(true);
@@ -415,11 +445,18 @@ function SetRow({
   }
 
   function commit() {
-    const newReps = reps.trim() === '' ? null : Number(reps);
+    const newPrimary = primary.trim() === '' ? null : Number(primary);
     const newWeight = weight.trim() === '' ? null : Number(weight);
-    if (Number.isNaN(newReps) || Number.isNaN(newWeight)) return;
-    if (newReps === set.reps && newWeight === set.weight) return;
-    onUpdate(newReps, newWeight);
+    if (Number.isNaN(newPrimary) || Number.isNaN(newWeight)) return;
+    const patch: { reps?: number | null; weight?: number | null; seconds?: number | null } = {};
+    if (isTime) {
+      if (newPrimary !== set.seconds) patch.seconds = newPrimary;
+    } else {
+      if (newPrimary !== set.reps) patch.reps = newPrimary;
+    }
+    if (newWeight !== set.weight) patch.weight = newWeight;
+    if (Object.keys(patch).length === 0) return;
+    onUpdate(patch);
     flashSaved();
   }
 
@@ -438,10 +475,8 @@ function SetRow({
     if (Number.isNaN(current)) return;
     const next = Math.max(0, roundToIncrement(current + direction * increment));
     if (next === set.weight) return;
-    const repsNum = reps.trim() === '' ? null : Number(reps);
-    if (Number.isNaN(repsNum)) return;
     setWeight(formatWeight(next));
-    onUpdate(repsNum, next);
+    onUpdate({ weight: next });
     flashSaved();
   }
 
@@ -454,17 +489,17 @@ function SetRow({
           {set.setNumber}
         </span>
         <input
-          ref={repsRef}
+          ref={primaryRef}
           type="number"
           inputMode="numeric"
-          value={reps}
-          onChange={(e) => setReps(e.target.value)}
+          value={primary}
+          onChange={(e) => setPrimary(e.target.value)}
           onBlur={commit}
           placeholder="–"
-          aria-label={`Set ${set.setNumber} reps`}
+          aria-label={`Set ${set.setNumber} ${isTime ? 'seconds' : 'reps'}`}
           className="flex-1 min-w-0 bg-ink-950 border border-ink-800 rounded px-1 py-1.5 text-sm font-mono text-center focus:outline-none focus:border-accent/50"
         />
-        <span className="text-ink-700 text-[10px] shrink-0">×</span>
+        <span className="text-ink-700 text-[10px] shrink-0">{isTime ? 's' : '×'}</span>
         {/* Stepper-flanked weight input. Buttons are tight so the trio reads as
             one control rather than three loose elements. */}
         <div className="flex-1 min-w-0 flex items-stretch border border-ink-800 rounded overflow-hidden bg-ink-950 focus-within:border-accent/50">

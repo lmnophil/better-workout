@@ -135,6 +135,7 @@ export default async function WorkoutPage() {
                 setNumber: s.setNumber,
                 reps: s.reps,
                 weight: s.weight,
+                seconds: s.seconds,
                 notes: s.notes,
               })),
             }
@@ -149,6 +150,8 @@ export default async function WorkoutPage() {
         secondaryMuscles: e.secondaryMuscles,
         videoUrl: e.videoUrl,
         isCustom: e.isCustom,
+        metric: e.metric,
+        equipment: e.equipment,
         restTimerSecondsOverride: e.restTimerSecondsOverride,
         weightIncrementOverride: e.weightIncrementOverride,
       }))}

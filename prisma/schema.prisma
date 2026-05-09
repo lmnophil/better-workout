@@ -89,6 +89,23 @@ model Exercise {
   module       String // EXERCISE_MODULES values from lib/exercises-data.ts ('SMR Lower'…'Rev Up') or 'Custom' for user-created.
   prescription String? // Suggested set/rep scheme, e.g. "3×12, 5-sec hold"
 
+  // 'reps' (default) or 'time'. Determines whether SetLog rows for this
+  // exercise are measured in reps + weight, or in seconds. The set-row UI
+  // renders a stopwatch + seconds input for 'time' exercises and the standard
+  // reps/weight inputs otherwise. A handful of built-ins (planks, holds,
+  // carries, wall sits) ship as 'time'; everything else stays 'reps'.
+  metric String @default("reps")
+
+  // Equipment tokens this exercise needs. Populated for built-ins; user-created
+  // customs can leave it empty. Used by the starter-routine preset picker to
+  // filter exercises by the user's available gear (full gym / home rack /
+  // dumbbells / bands / bodyweight). 'mat' is informational rather than
+  // gating — it surfaces in the preset preview as a small note.
+  // Canonical tokens: 'barbell', 'rack', 'bench', 'dumbbells', 'cable',
+  // 'machine', 'bands', 'pull-up bar', 'foam roller', 'lacrosse ball',
+  // 'bodyweight', 'mat'. Empty array means "no equipment / always available."
+  equipment String[] @default([])
+
   // Muscles trained, split by emphasis:
   //   primary   = the targets the lift was chosen for (full credit in volume)
   //   secondary = muscles meaningfully worked but not the focus (half credit)
@@ -302,7 +319,12 @@ model TemplateExercise {
   position   Int
 
   plannedSets Int?
+  // Used when the source Exercise.metric is 'reps'. Null = no plan.
   plannedReps Int?
+  // Used when the source Exercise.metric is 'time'. Null = no plan. Only one of
+  // plannedReps / plannedSeconds should be populated for a given row, dictated
+  // by the exercise's metric; the actions enforce this rather than the schema.
+  plannedSeconds Int?
 
   createdAt DateTime @default(now())
 
@@ -319,8 +341,14 @@ model SetLog {
   // share the same position. Higher = later in the workout. Updated by the
   // reorderExercise action when the user moves an exercise up or down.
   position   Int     @default(0)
+  // For exercises with metric='reps': how many reps were performed.
   reps       Int?
-  weight     Float? // Stored as number; UI handles unit display
+  // Stored as number; UI handles unit display. Only meaningful for metric='reps'.
+  weight     Float?
+  // For exercises with metric='time': how long the set was held, in seconds.
+  // Mutually exclusive with reps in normal use; the writing actions populate
+  // the right field based on the exercise's metric.
+  seconds    Int?
   notes      String?
 
   session  WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)

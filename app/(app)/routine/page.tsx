@@ -68,6 +68,8 @@ export default async function RoutinePage() {
               position: te.position,
               plannedSets: te.plannedSets,
               plannedReps: te.plannedReps,
+              plannedSeconds: te.plannedSeconds,
+              metric: te.exercise.metric,
               primaryMuscles: te.exercise.primaryMuscles,
               secondaryMuscles: te.exercise.secondaryMuscles,
             })),
@@ -101,6 +103,8 @@ export default async function RoutinePage() {
         secondaryMuscles: e.secondaryMuscles,
         videoUrl: e.videoUrl,
         isCustom: e.isCustom,
+        metric: e.metric,
+        equipment: e.equipment,
         restTimerSecondsOverride: e.restTimerSecondsOverride,
         weightIncrementOverride: e.weightIncrementOverride,
       }))}
