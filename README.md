@@ -50,6 +50,7 @@ workout-tracker/
 ├── CLAUDE.md                    Standing brief for any session working on this code
 ├── README.md                    You are here
 ├── DEPLOY.md                    End-to-end deployment guide
+├── CADDY.md                     Putting an external Caddy in front of the app
 ├── docs/
 │   ├── decisions.md             Substantive decisions + reasoning
 │   └── roadmap.md               Deliberately deferred features
