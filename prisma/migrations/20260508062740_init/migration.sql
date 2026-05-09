@@ -115,13 +115,24 @@ CREATE TABLE "UserPreferences" (
 -- CreateTable
 CREATE TABLE "WorkoutTemplate" (
     "id" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
+    "userId" TEXT,
+    "isBuiltin" BOOLEAN NOT NULL DEFAULT false,
     "name" TEXT NOT NULL,
     "description" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "WorkoutTemplate_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "UserHiddenTemplate" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "templateId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UserHiddenTemplate_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -201,6 +212,12 @@ CREATE INDEX "WorkoutTemplate_userId_idx" ON "WorkoutTemplate"("userId");
 CREATE UNIQUE INDEX "WorkoutTemplate_userId_name_key" ON "WorkoutTemplate"("userId", "name");
 
 -- CreateIndex
+CREATE INDEX "UserHiddenTemplate_userId_idx" ON "UserHiddenTemplate"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "UserHiddenTemplate_userId_templateId_key" ON "UserHiddenTemplate"("userId", "templateId");
+
+-- CreateIndex
 CREATE INDEX "TemplateExercise_templateId_position_idx" ON "TemplateExercise"("templateId", "position");
 
 -- CreateIndex
@@ -241,6 +258,12 @@ ALTER TABLE "UserPreferences" ADD CONSTRAINT "UserPreferences_userId_fkey" FOREI
 
 -- AddForeignKey
 ALTER TABLE "WorkoutTemplate" ADD CONSTRAINT "WorkoutTemplate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserHiddenTemplate" ADD CONSTRAINT "UserHiddenTemplate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserHiddenTemplate" ADD CONSTRAINT "UserHiddenTemplate_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "WorkoutTemplate"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TemplateExercise" ADD CONSTRAINT "TemplateExercise_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "WorkoutTemplate"("id") ON DELETE CASCADE ON UPDATE CASCADE;

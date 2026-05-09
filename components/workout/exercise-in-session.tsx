@@ -17,6 +17,7 @@ import {
   PlayCircle,
   Settings2,
   StickyNote,
+  Replace,
 } from 'lucide-react';
 import type { ExerciseInfo, SetLogClient } from './workout-view';
 
@@ -43,6 +44,8 @@ type Props = {
   onRemoveExercise: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  // Open the picker to replace this exercise with another in the same slot.
+  onSwap: () => void;
   onSetRestOverride: (seconds: number | null) => void;
 };
 
@@ -64,6 +67,7 @@ export function ExerciseInSession({
   onRemoveExercise,
   onMoveUp,
   onMoveDown,
+  onSwap,
   onSetRestOverride,
 }: Props) {
   const [editingRest, setEditingRest] = useState(false);
@@ -150,6 +154,14 @@ export function ExerciseInSession({
             title="Move down"
           >
             <ChevronDown size={18} />
+          </button>
+          <button
+            onClick={onSwap}
+            className="text-ink-500 hover:accent-text transition p-2"
+            aria-label={`Swap ${exercise.name} for another exercise`}
+            title="Swap for another exercise"
+          >
+            <Replace size={16} />
           </button>
           <button
             onClick={onRemoveExercise}

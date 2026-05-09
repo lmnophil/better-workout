@@ -63,7 +63,9 @@ The `finishedFor` ref makes the chime fire exactly once per timer run, even acro
 
 The picker's two tabs (browse / add-custom) share an enclosing modal but have nothing else in common. They could be split into separate files; they're not, because the file is short enough and the boundary is clear.
 
-The browse tab is **multi-select**. Tapping a row toggles a checkbox; the sticky footer shows a target summary, an optional balance hint (`lib/area-filter.ts → balanceHint`), and a single "Add N to session" button that calls `onPickMany`. The legacy single-pick `onPick` prop is gone — anything that wants to add exercises uses `onPickMany`.
+The browse tab is **multi-select** by default. Tapping a row toggles a checkbox; the sticky footer shows a target summary, an optional balance hint (`lib/area-filter.ts → balanceHint`), and a single "Add N to session" button that calls `onPickMany`. The legacy single-pick `onPick` prop is gone — anything that wants to add exercises uses `onPickMany`.
+
+The picker also has a **swap mode**, opted into by passing the `swap` prop (`{ targetName, onPick }`). In swap mode the picker is single-select with instant commit: tapping any row fires `swap.onPick(id)` and closes. The "Add custom" tab is hidden, the title becomes "Replace [name]", and the row checkbox + footer summary disappear since neither has anything to do. Chips remain live so the user can widen the pre-filter. The workout-view's `startSwap` opens the picker pre-filtered to the outgoing exercise's primary muscles via `muscleIdsToChipIds`.
 
 Above the search box are two rows of chips: regions (Upper / Lower / Full body / Mobility) and muscle groups (Chest / Back / Shoulders / Arms / Glutes / Quads / Hamstrings / Core). Selection is multi — chips are unioned with each other and with the search box. The "Full body" region chip is exclusive: tapping it clears every other chip. Tapping any non-Full chip cancels Full. The chip taxonomy and filter logic live in `lib/area-filter.ts` so other surfaces (empty state, future coverage→picker links) can reuse them.
 

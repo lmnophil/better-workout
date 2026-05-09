@@ -51,6 +51,14 @@ type Props = {
     restTimerSeconds: number | undefined,
   ) => void;
   onDeleteCustom: (exerciseId: string) => void;
+  // When set, the picker is in swap mode: single-select with instant commit,
+  // a different title, and the "Add custom" tab is hidden (creating a new
+  // exercise mid-swap is the wrong workflow). The chip filter is still live
+  // so the user can widen the search if the pre-filter is too narrow.
+  swap?: {
+    targetName: string;
+    onPick: (newExerciseId: string) => void;
+  };
 };
 
 export function ExercisePicker({
@@ -62,8 +70,10 @@ export function ExercisePicker({
   onClose,
   onCreateCustom,
   onDeleteCustom,
+  swap,
 }: Props) {
   const [tab, setTab] = useState<'browse' | 'custom'>('browse');
+  const isSwap = swap !== undefined;
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -87,7 +97,14 @@ export function ExercisePicker({
       >
         <div className="px-5 pt-4 pb-3 border-b border-ink-800 flex items-center justify-between">
           <h2 id="picker-title" className="font-display text-2xl">
-            Pick exercises
+            {isSwap ? (
+              <>
+                Replace{' '}
+                <span className="accent-text">{swap.targetName}</span>
+              </>
+            ) : (
+              'Pick exercises'
+            )}
           </h2>
           <button
             onClick={onClose}
@@ -98,16 +115,21 @@ export function ExercisePicker({
           </button>
         </div>
 
-        <div className="flex border-b border-ink-800 px-5">
-          <TabButton active={tab === 'browse'} onClick={() => setTab('browse')}>
-            Browse
-          </TabButton>
-          <TabButton active={tab === 'custom'} onClick={() => setTab('custom')}>
-            Add custom
-          </TabButton>
-        </div>
+        {/* Tabs are only meaningful in add mode. During a swap the user is
+            replacing a known slot; creating a brand-new custom mid-swap is a
+            workflow we deliberately don't support — finish the swap first. */}
+        {!isSwap && (
+          <div className="flex border-b border-ink-800 px-5">
+            <TabButton active={tab === 'browse'} onClick={() => setTab('browse')}>
+              Browse
+            </TabButton>
+            <TabButton active={tab === 'custom'} onClick={() => setTab('custom')}>
+              Add custom
+            </TabButton>
+          </div>
+        )}
 
-        {tab === 'browse' ? (
+        {isSwap || tab === 'browse' ? (
           <BrowseTab
             availableExercises={availableExercises}
             excludeIds={excludeIds}
@@ -121,6 +143,16 @@ export function ExercisePicker({
               onClose();
             }}
             onDeleteCustom={onDeleteCustom}
+            swapMode={
+              swap
+                ? {
+                    onPick: (id) => {
+                      swap.onPick(id);
+                      onClose();
+                    },
+                  }
+                : undefined
+            }
           />
         ) : (
           <div className="flex-1 overflow-y-auto">
@@ -167,6 +199,7 @@ function BrowseTab({
   initialMuscleChipIds,
   onPickMany,
   onDeleteCustom,
+  swapMode,
 }: {
   availableExercises: ExerciseInfo[];
   excludeIds: Set<string>;
@@ -174,7 +207,11 @@ function BrowseTab({
   initialMuscleChipIds: string[];
   onPickMany: (ids: string[]) => void;
   onDeleteCustom: (id: string) => void;
+  // When set, tapping any row commits immediately and the parent closes the
+  // picker. The footer + checkbox-multi-select UI is hidden in this mode.
+  swapMode?: { onPick: (id: string) => void };
 }) {
+  const isSwap = swapMode !== undefined;
   const [query, setQuery] = useState('');
   const [regionIds, setRegionIds] = useState<string[]>(initialRegionIds);
   const [muscleChipIds, setMuscleChipIds] = useState<string[]>(initialMuscleChipIds);
@@ -242,6 +279,11 @@ function BrowseTab({
   const hint = useMemo(() => balanceHint(selectedExercises), [selectedExercises]);
 
   function toggleSelection(id: string) {
+    if (swapMode) {
+      // Single-select with instant commit. Parent closes the picker.
+      swapMode.onPick(id);
+      return;
+    }
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -335,18 +377,22 @@ function BrowseTab({
                             onClick={() => toggleSelection(ex.id)}
                             className="flex-1 px-3 py-2.5 text-left flex items-center gap-3"
                           >
-                            <span
-                              className={`shrink-0 w-5 h-5 rounded border flex items-center justify-center transition ${
-                                isSelected
-                                  ? 'accent-bg accent-border'
-                                  : 'border-ink-700'
-                              }`}
-                              aria-hidden="true"
-                            >
-                              {isSelected && (
-                                <Check size={13} strokeWidth={3} className="text-ink-950" />
-                              )}
-                            </span>
+                            {/* Checkbox is multi-select scaffolding; in swap
+                                mode the row commits on tap so we drop it. */}
+                            {!isSwap && (
+                              <span
+                                className={`shrink-0 w-5 h-5 rounded border flex items-center justify-center transition ${
+                                  isSelected
+                                    ? 'accent-bg accent-border'
+                                    : 'border-ink-700'
+                                }`}
+                                aria-hidden="true"
+                              >
+                                {isSelected && (
+                                  <Check size={13} strokeWidth={3} className="text-ink-950" />
+                                )}
+                              </span>
+                            )}
                             <span className="flex-1 min-w-0">
                               <span className="text-sm text-ink-100 flex items-center gap-1.5">
                                 <span className="truncate">{ex.name}</span>
@@ -394,12 +440,16 @@ function BrowseTab({
         </div>
       </div>
 
-      <PickerFooter
-        selectedCount={selected.size}
-        primaryCounts={summary.primaryCounts}
-        hint={hint}
-        onCommit={commit}
-      />
+      {/* In swap mode the row IS the commit, so the bottom-bar selection
+          summary + commit button has nothing to do — drop it entirely. */}
+      {!isSwap && (
+        <PickerFooter
+          selectedCount={selected.size}
+          primaryCounts={summary.primaryCounts}
+          hint={hint}
+          onCommit={commit}
+        />
+      )}
     </>
   );
 }

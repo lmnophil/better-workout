@@ -6,7 +6,7 @@ This is the API surface of the workout tracker. It's a guidebook, not exhaustive
 
 The app has three distinct ways of being called, and they answer different questions.
 
-**Server actions** (`lib/actions.ts`). The application API. Every state change goes through here. Eighteen functions, organized into nine categories below. Called directly from React components — Next.js handles the wire format. When someone says "the API," this is usually what they mean.
+**Server actions** (`lib/actions.ts`). The application API. Every state change goes through here. Twenty-one functions, organized into nine categories below. Called directly from React components — Next.js handles the wire format. When someone says "the API," this is usually what they mean.
 
 **Server-side queries** (`lib/queries.ts`). Reads, called only from server components. Eight functions. Never called from a browser; never wrapped in HTTP handlers.
 
@@ -74,7 +74,7 @@ Every server action calls `requireUser()` first; the function throws `'Unauthori
 
 ## Server actions
 
-Twenty actions in `lib/actions.ts`, grouped into nine categories that match the `// =====` section headers in the file.
+Twenty-one actions in `lib/actions.ts`, grouped into nine categories that match the `// =====` section headers in the file.
 
 ### Session lifecycle
 
@@ -82,6 +82,7 @@ How a user's active session gets created, populated, finished, or thrown away.
 
 - **`addExercisesToActiveSession({ exerciseIds })`** — Adds one or more exercises to the active session, creating the session if none exists. Skips IDs already in the session (no-op for the duplicate subset). Pre-fills each new exercise with an empty first set, in caller-provided order. The picker calls this with the user's multi-select; mid-session "add more" goes through the same path.
 - **`removeExerciseFromActiveSession({ exerciseId })`** — Removes all sets for an exercise from the active session. Deletes the session entirely if it had no other exercises.
+- **`swapExerciseInActiveSession({ oldExerciseId, newExerciseId })`** — Replaces one exercise with another at the same position. Drops the outgoing exercise's logged sets (swap is destructive — if you wanted to keep the work, you wouldn't be swapping) and seeds an empty SetLog for the incoming exercise. Refuses if the new exercise is already in the session. Powers the one-tap swap affordance on each in-session exercise card.
 - **`completeActiveSession()`** — Marks the active session `completedAt: now`. Refuses if the session has zero sets (deletes it instead).
 - **`discardActiveSession()`** — Hard-deletes the active session and all its sets. Used when the user wants to throw away an in-progress workout.
 - **`reorderExercise({ exerciseId, direction: 'up' | 'down' })`** — Swaps the position of an exercise with its neighbor. Atomic — both updates run in one transaction so observers never see two exercises sharing a position.

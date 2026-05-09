@@ -47,6 +47,7 @@ const EXPECTED_MESSAGES = [
   'Template not found',
   'Add at least one exercise',
   'This template no longer',
+  'That exercise is already in this session',
 ];
 
 function isExpectedError(err: unknown): boolean {

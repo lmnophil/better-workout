@@ -320,6 +320,75 @@ export const discardActiveSession = withLogging('discardActiveSession', async ()
   revalidatePath('/');
 });
 
+const SwapExerciseSchema = z.object({
+  oldExerciseId: z.string().min(1),
+  newExerciseId: z.string().min(1),
+});
+
+/**
+ * Replace one exercise in the active session with another. Preserves the
+ * original's position in the order and discards any logged sets for the
+ * outgoing exercise — swap is destructive by design (if you wanted to keep
+ * the work, you wouldn't be swapping). The incoming exercise gets a single
+ * empty SetLog at the same position, ready to log against.
+ *
+ * Refuses to swap to an exercise already in the session (would create a
+ * duplicate at a different position). Same-id no-ops cleanly.
+ */
+export const swapExerciseInActiveSession = withLogging(
+  'swapExerciseInActiveSession',
+  async (input: z.infer<typeof SwapExerciseSchema>) => {
+    const userId = await requireUser();
+    const { oldExerciseId, newExerciseId } = SwapExerciseSchema.parse(input);
+
+    if (oldExerciseId === newExerciseId) return;
+
+    await requireAvailableExercise(userId, newExerciseId);
+
+    const session = await findActiveSession(userId);
+    if (!session) throw new Error('No active session');
+
+    // Find the outgoing exercise's position. Any of its sets has the position
+    // (they're all equal — position is per-exercise-in-session).
+    const sample = await db.setLog.findFirst({
+      where: { sessionId: session.id, exerciseId: oldExerciseId },
+      select: { position: true },
+    });
+    if (!sample) throw new Error('Exercise not in active session');
+
+    // Refuse to swap to an exercise the session already has. Letting it
+    // through would either create a duplicate at this position or leave the
+    // user with a confusingly-deleted other slot.
+    const collision = await db.setLog.count({
+      where: { sessionId: session.id, exerciseId: newExerciseId },
+    });
+    if (collision > 0) {
+      throw new Error('That exercise is already in this session');
+    }
+
+    // Atomic: drop old sets, create the new exercise's seed set at the same
+    // position. A failure between the two would leave the user with either
+    // a missing slot or an empty one.
+    await db.$transaction([
+      db.setLog.deleteMany({
+        where: { sessionId: session.id, exerciseId: oldExerciseId },
+      }),
+      db.setLog.create({
+        data: {
+          sessionId: session.id,
+          exerciseId: newExerciseId,
+          setNumber: 1,
+          position: sample.position,
+          reps: null,
+          weight: null,
+        },
+      }),
+    ]);
+
+    revalidatePath('/');
+  },
+);
+
 const ReorderSchema = z.object({
   exerciseId: z.string().min(1),
   direction: z.enum(['up', 'down']),
