@@ -70,6 +70,7 @@ CREATE TABLE "ExerciseUserSettings" (
     "userId" TEXT NOT NULL,
     "exerciseId" TEXT NOT NULL,
     "restTimerSeconds" INTEGER,
+    "weightIncrement" DOUBLE PRECISION,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -107,6 +108,8 @@ CREATE TABLE "UserPreferences" (
     "restTimerSeconds" INTEGER NOT NULL DEFAULT 90,
     "restTimerSound" BOOLEAN NOT NULL DEFAULT true,
     "restTimerVibrate" BOOLEAN NOT NULL DEFAULT true,
+    "defaultSetsPerExercise" INTEGER NOT NULL DEFAULT 3,
+    "defaultWeightIncrement" DOUBLE PRECISION NOT NULL DEFAULT 5,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

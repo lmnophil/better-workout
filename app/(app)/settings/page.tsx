@@ -13,6 +13,7 @@ import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { isScheduleStyle } from '@/lib/routine';
 import { VolumeTargetsEditor } from '@/components/settings/volume-targets-editor';
 import { RestTimerEditor } from '@/components/settings/rest-timer-editor';
+import { WorkoutDefaultsEditor } from '@/components/settings/workout-defaults-editor';
 import { HiddenTemplatesEditor } from '@/components/settings/hidden-templates-editor';
 import { RoutineEditor } from '@/components/settings/routine-editor';
 
@@ -116,6 +117,17 @@ export default async function SettingsPage() {
           </p>
         </div>
         <RestTimerEditor />
+      </section>
+
+      <section className="mb-8">
+        <div className="mb-3">
+          <h2 className="font-display text-xl">Workout defaults</h2>
+          <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
+            How sets get seeded for new exercises and how big the weight stepper&apos;s
+            +/- buttons jump. Override per-exercise from the workout view.
+          </p>
+        </div>
+        <WorkoutDefaultsEditor />
       </section>
 
       <section className="mb-8">

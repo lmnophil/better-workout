@@ -12,13 +12,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, Plus, Pause, Volume2, VolumeX, Vibrate } from 'lucide-react';
+import type { UserPrefs } from '@/lib/prefs';
 
-export type RestTimerPrefs = {
-  restTimerEnabled: boolean;
-  restTimerSeconds: number;
-  restTimerSound: boolean;
-  restTimerVibrate: boolean;
-};
+// The rest-timer reads only its own subset of UserPrefs. Kept as an alias so
+// the hook signature stays narrow without requiring the full prefs object.
+export type RestTimerPrefs = Pick<
+  UserPrefs,
+  'restTimerEnabled' | 'restTimerSeconds' | 'restTimerSound' | 'restTimerVibrate'
+>;
 
 export type RestTimerControls = {
   active: boolean;

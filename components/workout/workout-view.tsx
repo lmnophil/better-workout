@@ -26,6 +26,8 @@ import {
   deleteTemplate,
   hideTemplate,
   swapExerciseInActiveSession,
+  setExerciseWeightIncrement,
+  repeatLastForExercise,
 } from '@/lib/actions';
 import { ExerciseInSession } from './exercise-in-session';
 import { ExercisePicker } from './exercise-picker';
@@ -52,6 +54,8 @@ export type ExerciseInfo = {
   isCustom: boolean;
   // Per-user rest timer override; null = use the global default from preferences
   restTimerSecondsOverride: number | null;
+  // Per-user weight stepper override; null = use the global default
+  weightIncrementOverride: number | null;
 };
 
 export type SetLogClient = {
@@ -241,6 +245,21 @@ export function WorkoutView({
   ) => {
     startTransition(() => {
       setExerciseRestOverride({ exerciseId, restTimerSeconds: seconds });
+    });
+  };
+
+  const handleSetExerciseWeightIncrement = (
+    exerciseId: string,
+    increment: number | null,
+  ) => {
+    startTransition(() => {
+      setExerciseWeightIncrement({ exerciseId, weightIncrement: increment });
+    });
+  };
+
+  const handleRepeatLast = (exerciseId: string) => {
+    startTransition(() => {
+      repeatLastForExercise({ exerciseId });
     });
   };
 
@@ -459,6 +478,7 @@ export function WorkoutView({
                   canMoveUp={idx > 0}
                   canMoveDown={idx < exerciseOrderInSession.length - 1}
                   globalRestSeconds={prefs.restTimerSeconds}
+                  globalWeightIncrement={prefs.defaultWeightIncrement}
                   onAddSet={() => handleAddSet(exerciseId)}
                   onUpdateSet={handleUpdateSet}
                   onUpdateNotes={handleUpdateNotes}
@@ -470,6 +490,10 @@ export function WorkoutView({
                   onSetRestOverride={(seconds) =>
                     handleSetExerciseRestOverride(exerciseId, seconds)
                   }
+                  onSetWeightIncrementOverride={(inc) =>
+                    handleSetExerciseWeightIncrement(exerciseId, inc)
+                  }
+                  onRepeatLast={() => handleRepeatLast(exerciseId)}
                 />,
               );
             });

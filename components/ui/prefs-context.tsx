@@ -13,12 +13,12 @@
 
 import { createContext, useContext, useState, ReactNode, useTransition } from 'react';
 import { updateUserPreferences } from '@/lib/actions';
-import type { RestTimerPrefs } from '@/components/workout/rest-timer';
+import type { UserPrefs } from '@/lib/prefs';
 
 type PrefsContextShape = {
-  prefs: RestTimerPrefs;
+  prefs: UserPrefs;
   /** Apply a partial update locally + persist via server action. */
-  updatePrefs: (patch: Partial<RestTimerPrefs>) => void;
+  updatePrefs: (patch: Partial<UserPrefs>) => void;
 };
 
 const PrefsContext = createContext<PrefsContextShape | null>(null);
@@ -27,13 +27,13 @@ export function PrefsProvider({
   initial,
   children,
 }: {
-  initial: RestTimerPrefs;
+  initial: UserPrefs;
   children: ReactNode;
 }) {
   const [prefs, setPrefs] = useState(initial);
   const [, startTransition] = useTransition();
 
-  const updatePrefs = (patch: Partial<RestTimerPrefs>) => {
+  const updatePrefs = (patch: Partial<UserPrefs>) => {
     setPrefs((p) => ({ ...p, ...patch }));
     startTransition(() => {
       updateUserPreferences(patch);
@@ -48,8 +48,8 @@ export function PrefsProvider({
 }
 
 /**
- * Read + update the user's rest-timer preferences. Throws if used outside the
- * provider — surfacing the bug at dev time rather than rendering broken UI.
+ * Read + update the user's preferences. Throws if used outside the provider —
+ * surfacing the bug at dev time rather than rendering broken UI.
  */
 export function usePrefs(): PrefsContextShape {
   const ctx = useContext(PrefsContext);

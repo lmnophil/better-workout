@@ -20,11 +20,11 @@ The contract:
 
 If you need a new pref, add it to:
 1. `prisma/schema.prisma` (`UserPreferences` model)
-2. `lib/queries.ts` (`getUserPreferences` defaults)
-3. `lib/actions.ts` (`UpdatePreferencesSchema`)
-4. `components/workout/rest-timer.tsx` (`RestTimerPrefs` type) — yes, the type lives here for now
+2. `lib/prefs.ts` (`UserPrefs` type + `PREFS_DEFAULTS`)
+3. `lib/queries.ts` (`getUserPreferences` reads the new column)
+4. `lib/actions.ts` (`UpdatePreferencesSchema` accepts the new field)
 
-That's a lot of touch points; if it grows further consider extracting the pref shape to a single source.
+The shared `UserPrefs` shape replaced the older `RestTimerPrefs` type that used to live in `rest-timer.tsx`. The rest-timer hook now narrows to the rest-* subset via `Pick`, so its public surface is unchanged but the central source of truth is `lib/prefs.ts`.
 
 ## Set commit semantics
 

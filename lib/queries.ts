@@ -3,6 +3,7 @@
 
 import { cache } from 'react';
 import { db } from '@/lib/db';
+import { PREFS_DEFAULTS, type UserPrefs } from '@/lib/prefs';
 
 export type ActiveSession = Awaited<ReturnType<typeof getActiveSession>>;
 export type AvailableExercise = Awaited<ReturnType<typeof getAvailableExercises>>[number];
@@ -43,16 +44,20 @@ export async function getAvailableExercises(userId: string) {
 
   const settings = await db.exerciseUserSettings.findMany({
     where: { userId },
-    select: { exerciseId: true, restTimerSeconds: true },
+    select: { exerciseId: true, restTimerSeconds: true, weightIncrement: true },
   });
   const settingsByExerciseId = new Map(
-    settings.map((s) => [s.exerciseId, s.restTimerSeconds]),
+    settings.map((s) => [s.exerciseId, s] as const),
   );
 
-  return exercises.map((e) => ({
-    ...e,
-    restTimerSecondsOverride: settingsByExerciseId.get(e.id) ?? null,
-  }));
+  return exercises.map((e) => {
+    const s = settingsByExerciseId.get(e.id);
+    return {
+      ...e,
+      restTimerSecondsOverride: s?.restTimerSeconds ?? null,
+      weightIncrementOverride: s?.weightIncrement ?? null,
+    };
+  });
 }
 
 /**
@@ -122,6 +127,66 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
     }
   }
 
+  return result;
+}
+
+/**
+ * Most-recent completed-session sets for a specific list of exerciseIds.
+ *
+ * Like getLastSetsByExercise but scoped — used by seeding when exercises are
+ * added to a session, so we can pre-populate set count and reps/weight from
+ * the user's prior workout. Returns a Map keyed by exerciseId; missing keys
+ * mean "no prior session for this exercise."
+ *
+ * Same 180-day window as getLastSetsByExercise — older history is stale enough
+ * that pre-filling from it would be more confusing than helpful.
+ */
+export async function getLastSetsForExerciseIds(
+  userId: string,
+  exerciseIds: string[],
+  excludeSessionId?: string,
+) {
+  if (exerciseIds.length === 0) {
+    return new Map<
+      string,
+      { sets: { reps: number | null; weight: number | null }[] }
+    >();
+  }
+  const since = new Date();
+  since.setDate(since.getDate() - 180);
+
+  const sessions = await db.workoutSession.findMany({
+    where: {
+      userId,
+      completedAt: { not: null },
+      date: { gte: since },
+      ...(excludeSessionId ? { id: { not: excludeSessionId } } : {}),
+      setLogs: { some: { exerciseId: { in: exerciseIds } } },
+    },
+    orderBy: { date: 'desc' },
+    include: {
+      setLogs: {
+        where: { exerciseId: { in: exerciseIds } },
+        orderBy: { setNumber: 'asc' },
+      },
+    },
+  });
+
+  const result = new Map<
+    string,
+    { sets: { reps: number | null; weight: number | null }[] }
+  >();
+  for (const session of sessions) {
+    for (const set of session.setLogs) {
+      if (result.has(set.exerciseId)) continue;
+      // Collect every set for this exerciseId in this session, in order.
+      const sets = session.setLogs
+        .filter((s) => s.exerciseId === set.exerciseId)
+        .map((s) => ({ reps: s.reps, weight: s.weight }));
+      result.set(set.exerciseId, { sets });
+    }
+    if (result.size === exerciseIds.length) break;
+  }
   return result;
 }
 
@@ -233,17 +298,22 @@ export async function getUserVolumeTargets(userId: string) {
  */
 // Wrapped with React.cache so multiple callers in a single request (e.g. the
 // app layout and the workout page) share one DB hit.
-export const getUserPreferences = cache(async function getUserPreferences(userId: string) {
+export const getUserPreferences = cache(async function getUserPreferences(
+  userId: string,
+): Promise<UserPrefs> {
   const row = await db.userPreferences.findUnique({ where: { userId } });
+  if (!row) return { ...PREFS_DEFAULTS };
   return {
-    restTimerEnabled: row?.restTimerEnabled ?? true,
-    restTimerSeconds: row?.restTimerSeconds ?? 90,
-    restTimerSound: row?.restTimerSound ?? true,
-    restTimerVibrate: row?.restTimerVibrate ?? true,
+    restTimerEnabled: row.restTimerEnabled,
+    restTimerSeconds: row.restTimerSeconds,
+    restTimerSound: row.restTimerSound,
+    restTimerVibrate: row.restTimerVibrate,
+    defaultSetsPerExercise: row.defaultSetsPerExercise,
+    defaultWeightIncrement: row.defaultWeightIncrement,
   };
 });
 
-export type UserPreferencesShape = Awaited<ReturnType<typeof getUserPreferences>>;
+export type UserPreferencesShape = UserPrefs;
 
 /**
  * List the templates a user sees in the picker: their own user templates plus

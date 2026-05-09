@@ -2,17 +2,28 @@
 
 Schema, migrations, and seed data live here. Read the root `CLAUDE.md` first if you haven't.
 
-## Schema changes
+## Schema changes — single-init policy
 
-After editing `schema.prisma`, run:
+This project keeps **one** migration: `prisma/migrations/<timestamp>_init/`. Every schema change squashes back into that single init migration rather than stacking new ones. There's no production deployment to protect, and the seed rebuilds the data we care about — so a fresh DB from a single migration is the source of truth, not a chain of incremental migrations.
+
+After editing `schema.prisma`, regenerate the init:
 
 ```bash
-npm run db:migrate dev    # creates a migration, applies it locally
+# Drop the existing init dir
+rm -rf prisma/migrations/*_init
+
+# Reset the local DB and create a new single init that matches the schema.
+# Both prisma commands require explicit consent when invoked by an AI agent —
+# pass it through PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=<the user's
+# yes-message> when running on the user's behalf.
+npx prisma migrate reset --force          # drops DB, runs whatever migrations exist (none), runs seed
+npx prisma migrate dev --name init        # creates fresh init from current schema
+npm run db:seed                            # re-seed (reset would have run seed against the empty schema, so re-run after the init applies)
 ```
 
-Don't edit existing migration files — they're committed and other environments rely on them being stable. If the migration came out wrong, roll forward with another migration rather than rewriting history.
+`migration_lock.toml` stays put across resets.
 
-The seed (`seed.ts`) is idempotent — re-running it after schema changes is safe and often necessary if you renamed/recategorized something.
+The seed (`seed.ts`) is idempotent — re-running it is safe and necessary after a reset.
 
 ## Built-in vs custom exercises
 

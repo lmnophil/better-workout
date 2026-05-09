@@ -15,6 +15,9 @@ import { z } from 'zod';
 import { withLogging } from './observability';
 import { metrics } from './metrics';
 import { MAX_ROUTINE_DAYS } from './routine';
+import { PREFS_DEFAULTS } from './prefs';
+import { parsePrescriptionSetCount } from './prescription';
+import { getLastSetsForExerciseIds } from './queries';
 
 async function requireUser() {
   const session = await auth();
@@ -60,6 +63,85 @@ async function getOrCreateActiveSession(userId: string) {
   return db.workoutSession.create({
     data: { userId, date: new Date() },
   });
+}
+
+/**
+ * Build the seed SetLog rows for a list of exercises being added to a session.
+ *
+ * Set-count source order (history wins because it represents what the user
+ * actually does, not what was prescribed):
+ *   1. Most recent completed session for that exercise (180-day window)
+ *   2. Leading "N×" in the prescription string ("3×12" → 3)
+ *   3. The user's `defaultSetsPerExercise` preference
+ *
+ * Reps/weight on each seeded set come from the corresponding set in last-time
+ * (set 1 from set 1, set 2 from set 2, ...). Sets beyond what last-time had
+ * inherit from last-time's final set so progressive-overload typing is one
+ * tap away. With no history, the rows are empty.
+ *
+ * Returns rows ready for createMany; setNumber is 1-indexed and contiguous.
+ */
+async function buildSeededSetLogRows(
+  userId: string,
+  entries: { exerciseId: string; sessionId: string; position: number }[],
+  excludeSessionId?: string,
+) {
+  if (entries.length === 0) return [];
+
+  const exerciseIds = entries.map((e) => e.exerciseId);
+
+  const [lastByExercise, exercisesMeta, prefRow] = await Promise.all([
+    getLastSetsForExerciseIds(userId, exerciseIds, excludeSessionId),
+    db.exercise.findMany({
+      where: { id: { in: exerciseIds } },
+      select: { id: true, prescription: true },
+    }),
+    db.userPreferences.findUnique({
+      where: { userId },
+      select: { defaultSetsPerExercise: true },
+    }),
+  ]);
+
+  const prescriptionById = new Map(exercisesMeta.map((e) => [e.id, e.prescription]));
+  const defaultSets =
+    prefRow?.defaultSetsPerExercise ?? PREFS_DEFAULTS.defaultSetsPerExercise;
+
+  const rows: {
+    sessionId: string;
+    exerciseId: string;
+    setNumber: number;
+    position: number;
+    reps: number | null;
+    weight: number | null;
+  }[] = [];
+
+  for (const entry of entries) {
+    const last = lastByExercise.get(entry.exerciseId);
+    const fromHistory = last?.sets.length ?? 0;
+    const fromPrescription =
+      fromHistory === 0
+        ? parsePrescriptionSetCount(prescriptionById.get(entry.exerciseId) ?? null)
+        : null;
+    const setCount = Math.max(
+      1,
+      fromHistory > 0 ? fromHistory : (fromPrescription ?? defaultSets),
+    );
+
+    for (let i = 0; i < setCount; i++) {
+      // Reach for the same set index from last time, or fall back to the last
+      // set we have history for. Empty when no history exists at all.
+      const fromSet = last?.sets[i] ?? last?.sets[last.sets.length - 1];
+      rows.push({
+        sessionId: entry.sessionId,
+        exerciseId: entry.exerciseId,
+        setNumber: i + 1,
+        position: entry.position,
+        reps: fromSet?.reps ?? null,
+        weight: fromSet?.weight ?? null,
+      });
+    }
+  }
+  return rows;
 }
 
 // ============================================================
@@ -122,16 +204,16 @@ export const addExercisesToActiveSession = withLogging('addExercisesToActiveSess
   });
   const startPosition = (maxPos._max.position ?? -1) + 1;
 
-  await db.setLog.createMany({
-    data: toAdd.map((exId, idx) => ({
-      sessionId: session.id,
+  const rows = await buildSeededSetLogRows(
+    userId,
+    toAdd.map((exId, idx) => ({
       exerciseId: exId,
-      setNumber: 1,
+      sessionId: session.id,
       position: startPosition + idx,
-      reps: null,
-      weight: null,
     })),
-  });
+    session.id,
+  );
+  await db.setLog.createMany({ data: rows });
 
   revalidatePath('/');
 });
@@ -235,6 +317,80 @@ export const updateSet = withLogging('updateSet', async (input: z.infer<typeof U
   await db.setLog.update({
     where: { id: setLogId },
     data: { reps, weight },
+  });
+
+  revalidatePath('/');
+});
+
+const RepeatLastSchema = z.object({ exerciseId: z.string().min(1) });
+
+/**
+ * Snap the current exercise's sets to match the user's last completed session
+ * for that exercise — matching set count, copying reps/weight. Useful as a
+ * one-tap escape hatch when the auto-seed didn't quite line up, or when the
+ * user added more sets and wants to revert to the prior pattern.
+ *
+ * No-op if the exercise has no prior history. Preserves notes on existing
+ * rows that survive the snap. Renumbers atomically, like removeSet.
+ */
+export const repeatLastForExercise = withLogging('repeatLastForExercise', async (
+  input: z.infer<typeof RepeatLastSchema>,
+) => {
+  const userId = await requireUser();
+  const { exerciseId } = RepeatLastSchema.parse(input);
+
+  await requireAvailableExercise(userId, exerciseId);
+  const session = await findActiveSession(userId);
+  if (!session) throw new Error('No active session');
+
+  const lastByExercise = await getLastSetsForExerciseIds(
+    userId,
+    [exerciseId],
+    session.id,
+  );
+  const last = lastByExercise.get(exerciseId);
+  if (!last || last.sets.length === 0) return;
+
+  const current = await db.setLog.findMany({
+    where: { sessionId: session.id, exerciseId },
+    orderBy: { setNumber: 'asc' },
+  });
+  if (current.length === 0) throw new Error('Exercise not in active session');
+
+  // All current sets share the same position — preserve it for new rows.
+  const position = current[0].position;
+  const targetCount = last.sets.length;
+
+  await db.$transaction(async (tx) => {
+    // Drop overflow first so setNumber renumbering can't collide.
+    if (current.length > targetCount) {
+      const toDrop = current.slice(targetCount).map((s) => s.id);
+      await tx.setLog.deleteMany({ where: { id: { in: toDrop } } });
+    }
+    // Update the rows we keep, copying reps/weight from last-time.
+    const toKeep = current.slice(0, targetCount);
+    for (let i = 0; i < toKeep.length; i++) {
+      const row = toKeep[i];
+      const src = last.sets[i];
+      if (row.reps !== src.reps || row.weight !== src.weight) {
+        await tx.setLog.update({
+          where: { id: row.id },
+          data: { reps: src.reps, weight: src.weight },
+        });
+      }
+    }
+    // Create any extra sets last-time had that we don't.
+    if (current.length < targetCount) {
+      const toCreate = last.sets.slice(current.length).map((src, idx) => ({
+        sessionId: session.id,
+        exerciseId,
+        setNumber: current.length + idx + 1,
+        position,
+        reps: src.reps,
+        weight: src.weight,
+      }));
+      await tx.setLog.createMany({ data: toCreate });
+    }
   });
 
   revalidatePath('/');
@@ -593,6 +749,8 @@ const UpdatePreferencesSchema = z.object({
   restTimerSeconds: z.number().int().min(0).max(600).optional(),
   restTimerSound: z.boolean().optional(),
   restTimerVibrate: z.boolean().optional(),
+  defaultSetsPerExercise: z.number().int().min(1).max(20).optional(),
+  defaultWeightIncrement: z.number().min(0.25).max(50).optional(),
 });
 
 /**
@@ -648,13 +806,77 @@ export const setExerciseRestOverride = withLogging('setExerciseRestOverride', as
   if (!exercise) throw new Error('Exercise not found');
 
   if (restTimerSeconds === null) {
-    // Clearing — delete the row entirely
-    await db.exerciseUserSettings.deleteMany({ where: { userId, exerciseId } });
+    // Clearing — but only this field. If a weight-increment override exists
+    // we keep the row; otherwise we drop it so we don't leave empty settings
+    // rows lying around.
+    const existing = await db.exerciseUserSettings.findUnique({
+      where: { userId_exerciseId: { userId, exerciseId } },
+      select: { weightIncrement: true },
+    });
+    if (existing && existing.weightIncrement !== null) {
+      await db.exerciseUserSettings.update({
+        where: { userId_exerciseId: { userId, exerciseId } },
+        data: { restTimerSeconds: null },
+      });
+    } else {
+      await db.exerciseUserSettings.deleteMany({ where: { userId, exerciseId } });
+    }
   } else {
     await db.exerciseUserSettings.upsert({
       where: { userId_exerciseId: { userId, exerciseId } },
       create: { userId, exerciseId, restTimerSeconds },
       update: { restTimerSeconds },
+    });
+  }
+
+  revalidatePath('/');
+});
+
+const SetExerciseWeightIncrementSchema = z.object({
+  exerciseId: z.string().min(1),
+  // null = clear the override (fall back to global). Otherwise 0.25-50.
+  weightIncrement: z.number().min(0.25).max(50).nullable(),
+});
+
+/**
+ * Set or clear the per-exercise weight-stepper increment for the current user.
+ * Mirrors setExerciseRestOverride. The +/- buttons next to the weight input
+ * use the override when present, otherwise the user's global default.
+ */
+export const setExerciseWeightIncrement = withLogging('setExerciseWeightIncrement', async (
+  input: z.infer<typeof SetExerciseWeightIncrementSchema>,
+) => {
+  const userId = await requireUser();
+  const { exerciseId, weightIncrement } = SetExerciseWeightIncrementSchema.parse(input);
+
+  const exercise = await db.exercise.findFirst({
+    where: {
+      id: exerciseId,
+      OR: [{ ownerId: null }, { ownerId: userId }],
+      deletedAt: null,
+    },
+    select: { id: true },
+  });
+  if (!exercise) throw new Error('Exercise not found');
+
+  if (weightIncrement === null) {
+    const existing = await db.exerciseUserSettings.findUnique({
+      where: { userId_exerciseId: { userId, exerciseId } },
+      select: { restTimerSeconds: true },
+    });
+    if (existing && existing.restTimerSeconds !== null) {
+      await db.exerciseUserSettings.update({
+        where: { userId_exerciseId: { userId, exerciseId } },
+        data: { weightIncrement: null },
+      });
+    } else {
+      await db.exerciseUserSettings.deleteMany({ where: { userId, exerciseId } });
+    }
+  } else {
+    await db.exerciseUserSettings.upsert({
+      where: { userId_exerciseId: { userId, exerciseId } },
+      create: { userId, exerciseId, weightIncrement },
+      update: { weightIncrement },
     });
   }
 
@@ -823,22 +1045,25 @@ export const startFromTemplate = withLogging('startFromTemplate', async (input: 
     throw new Error('This template no longer has any usable exercises');
   }
 
-  // Create the session and seed empty SetLogs in one transaction
-  await db.$transaction(async (tx) => {
-    const newSession = await tx.workoutSession.create({
-      data: { userId, date: new Date() },
-    });
-    await tx.setLog.createMany({
-      data: usable.map((te, idx) => ({
-        sessionId: newSession.id,
-        exerciseId: te.exerciseId,
-        setNumber: 1,
-        position: idx,
-        reps: null,
-        weight: null,
-      })),
-    });
+  // Create the session, then seed SetLogs from history + prefs. The seed step
+  // runs after the session create commits because buildSeededSetLogRows needs
+  // a fixed sessionId and reads from completed sessions (which it must not
+  // see this brand-new in-progress one — the excludeSessionId param guards it,
+  // but separating the writes also keeps the read-then-write logic outside the
+  // transaction, where the additional queries don't extend transaction time.)
+  const newSession = await db.workoutSession.create({
+    data: { userId, date: new Date() },
   });
+  const rows = await buildSeededSetLogRows(
+    userId,
+    usable.map((te, idx) => ({
+      exerciseId: te.exerciseId,
+      sessionId: newSession.id,
+      position: idx,
+    })),
+    newSession.id,
+  );
+  await db.setLog.createMany({ data: rows });
 
   metrics.templatesUsed.inc();
   revalidatePath('/');

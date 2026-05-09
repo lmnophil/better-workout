@@ -150,6 +150,7 @@ export default async function WorkoutPage() {
         videoUrl: e.videoUrl,
         isCustom: e.isCustom,
         restTimerSecondsOverride: e.restTimerSecondsOverride,
+        weightIncrementOverride: e.weightIncrementOverride,
       }))}
       lastSets={lastSetsArray}
       templates={templates.map((t) => ({

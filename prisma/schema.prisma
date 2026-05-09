@@ -143,6 +143,11 @@ model ExerciseUserSettings {
   // "no override — use the global default."
   restTimerSeconds Int?
 
+  // Override the global default weight-increment step for just this exercise.
+  // Null = "use the global default." Useful for users who load DBs in 2.5lb
+  // jumps but BBs in 5lb jumps, or for machines with stack-only increments.
+  weightIncrement Float?
+
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
 
@@ -206,6 +211,16 @@ model UserPreferences {
   restTimerSeconds Int     @default(90) // Default rest period after each set
   restTimerSound   Boolean @default(true) // Play a chime when timer ends
   restTimerVibrate Boolean @default(true) // Vibrate when timer ends (mobile)
+
+  // Set-seeding defaults. When an exercise is added to a session (picker or
+  // template) and has no prior history to crib from, this many empty SetLogs
+  // are pre-created. History wins when present; this is the fallback floor.
+  defaultSetsPerExercise Int @default(3)
+
+  // Weight stepper increment. The +/- buttons next to the weight input nudge
+  // by this amount. Stored as Float so users on metric or with micro-plates
+  // can use 1.25, 2.5, etc. Per-exercise overrides live on ExerciseUserSettings.
+  defaultWeightIncrement Float @default(5)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
