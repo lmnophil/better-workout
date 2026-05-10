@@ -628,6 +628,28 @@ function shouldersSlot(priority: SlotPriority): Slot {
   };
 }
 
+// Postural / scapular work for upper days. The variant chain prefers band
+// work (pull-aparts and face pulls hit rear delts + scapular + lower traps
+// together) and falls back to dumbbell reverse fly or bodyweight prone Y
+// raises when bands aren't available. Without this, the upper-body presets
+// systematically miss rear delts, scapular stabilizers, and lower traps —
+// the postural muscles that don't show up as primary work on the main lifts.
+// Priority 3: kept at 45+ min, trimmed at 15-30.
+function thoracicSlot(priority: SlotPriority): Slot {
+  return {
+    pattern: 'thoracic',
+    module: 'Strength Thoracic',
+    priority,
+    estMinutes: 3,
+    variants: [
+      { exerciseName: 'Banded pull-aparts', plannedSets: 3, plannedReps: 15, equipment: ['bands'] },
+      { exerciseName: 'Banded face pulls', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      { exerciseName: 'Reverse fly', plannedSets: 3, plannedReps: 12, equipment: ['dumbbells'] },
+      { exerciseName: 'Prone Y raises', plannedSets: 2, plannedReps: 8, equipment: ['mat'] },
+    ],
+  };
+}
+
 function coreSlot(priority: SlotPriority): Slot {
   return {
     pattern: 'core',
@@ -733,6 +755,7 @@ function fullBodyDay(focus: StarterFocus, name: string): DayBase {
       vPushSlot(focus, 2),
       vPullSlot(focus, 2),
       coreSlot(2),
+      thoracicSlot(3),
       lungeSlot(focus, 3),
       carrySlot(3),
       conditioningSlot(4),
@@ -767,6 +790,7 @@ function upperDay(focus: StarterFocus, name: string): DayBase {
       pullSlot(focus, 1),
       vPushSlot(focus, 2),
       vPullSlot(focus, 2),
+      thoracicSlot(3),
       bicepsSlot(3),
       tricepsSlot(3),
       shouldersSlot(3),
@@ -785,6 +809,7 @@ function pushDay(focus: StarterFocus, name: string): DayBase {
       vPushSlot(focus, 1),
       shouldersSlot(2),
       tricepsSlot(2),
+      thoracicSlot(3),
       coreSlot(3),
       conditioningSlot(4),
     ],
@@ -798,6 +823,7 @@ function pullDay(focus: StarterFocus, name: string): DayBase {
       pullSlot(focus, 1),
       vPullSlot(focus, 1),
       bicepsSlot(2),
+      thoracicSlot(3),
       coreSlot(2),
       carrySlot(3),
       mobilitySlot(),

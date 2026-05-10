@@ -1,7 +1,13 @@
-// Exercise seed data — Edwardo's modular program with Bernadette's additions,
-// plus a wider equipment-tier pool that the starter routines (lib/starter-
-// routines.ts) draw from. This is the source of truth for built-in exercises.
+// Exercise seed data — a broad library of common, evidence-based strength,
+// mobility, and conditioning movements drawn from current best practices in
+// the strength-and-conditioning and rehab-coaching space. The starter routines
+// (lib/starter-routines.ts) draw from this pool, and users can layer their own
+// custom exercises on top. This is the source of truth for built-in exercises.
 // Updates here flow into the database via `npm run db:seed` (idempotent upsert).
+//
+// The library is intentionally generic — not any one program. The user's own
+// tailored routine is whatever they assemble from this library and any customs
+// they add; the app provides the materials, the user provides the plan.
 
 // Modules are visual chunks within a workout. The order here is the natural
 // flow within a single session: prep (SMR → mobility → activation), then load
@@ -251,7 +257,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Reverse / walking lunges',
     module: 'Activation Lower',
     primaryMuscles: ['glutes', 'quads'],
-    secondaryMuscles: ['hamstrings'],
+    secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '2×8 per side',
   },
   {
@@ -430,11 +436,11 @@ export const SEED_EXERCISES: SeedExercise[] = [
   },
 
   // ============ STRENGTH BARBELL ============
-  // Edwardo's program: olympic-flavored hinges and squats. Equipment is mostly
-  // barbell + rack; trap bar callouts are kept since the program named them
-  // explicitly, but the starter-routine builder prefers conventional/back-squat
-  // variants when picking defaults so users without specialty bars aren't
-  // pushed toward niche equipment.
+  // Main loaded lifts — the canonical squat / hinge / press / row patterns
+  // that anchor most strength programs. Equipment is mostly barbell + rack;
+  // a trap-bar deadlift is included for users who own one, but the starter-
+  // routine builder defaults to conventional/back-squat variants so users
+  // without specialty bars aren't pushed toward niche equipment.
   {
     name: 'Trap bar deadlift',
     module: 'Strength Barbell',
@@ -463,7 +469,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Front squat',
     module: 'Strength Barbell',
     primaryMuscles: ['quads', 'glutes'],
-    secondaryMuscles: ['core', 'scapular'],
+    secondaryMuscles: ['core', 'scapular', 'adductors'],
     prescription: '3–4×5, upright torso, active T-spine',
     equipment: ['barbell', 'rack'],
   },
@@ -471,7 +477,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Back squat',
     module: 'Strength Barbell',
     primaryMuscles: ['quads', 'glutes'],
-    secondaryMuscles: ['core', 'lower back'],
+    secondaryMuscles: ['core', 'lower back', 'adductors'],
     prescription: '3–5×5, brace, full depth',
     equipment: ['barbell', 'rack'],
   },
@@ -503,21 +509,23 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Barbell row',
     module: 'Strength Barbell',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps', 'rear delts'],
+    secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3–4×6–10, torso ~45°, pull to lower ribs',
     equipment: ['barbell'],
   },
 
   // ============ STRENGTH ACCESSORY ============
-  // Mix of Edwardo's program accessories and a wider equipment-tier pool that
-  // the starter routines pick from. Where the same pattern is offered at
-  // multiple tiers (squat: barbell / DB / band / bodyweight), each variant is
-  // a distinct entry so coverage / volume math counts the same primary-muscle
-  // credit regardless of equipment.
+  // Supporting variants and isolation work covering a wide equipment range —
+  // full-gym (cables, machines), home-rack (barbell + DBs), DB-only, bands,
+  // and bodyweight. Where the same pattern is offered at multiple tiers
+  // (squat: barbell / DB / band / bodyweight), each variant is a distinct
+  // entry so coverage / volume math counts the same primary-muscle credit
+  // regardless of equipment.
   {
     name: 'Bulgarian squat (seated step away)',
     module: 'Strength Accessory',
     primaryMuscles: ['glutes', 'quads'],
+    secondaryMuscles: ['adductors'],
     prescription: '3–4×8 per side',
     equipment: ['dumbbells', 'bench'],
   },
@@ -540,7 +548,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Bulgarian long-distance squat',
     module: 'Strength Accessory',
     primaryMuscles: ['glutes'],
-    secondaryMuscles: ['quads'],
+    secondaryMuscles: ['quads', 'adductors'],
     prescription: '3–4×8 per side',
     equipment: ['dumbbells', 'bench'],
   },
@@ -566,7 +574,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Goblet squat',
     module: 'Strength Accessory',
     primaryMuscles: ['quads', 'glutes'],
-    secondaryMuscles: ['core'],
+    secondaryMuscles: ['core', 'adductors'],
     prescription: '3–4×8–12, elbows tucked, upright torso',
     equipment: ['dumbbells'],
   },
@@ -614,7 +622,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Single-arm dumbbell row',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps', 'rear delts'],
+    secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3–4×8–12 per side, brace on bench',
     equipment: ['dumbbells', 'bench'],
   },
@@ -622,7 +630,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Chest-supported dumbbell row',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps', 'rear delts'],
+    secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×10–12, incline bench, low-back-friendly',
     equipment: ['dumbbells', 'bench'],
   },
@@ -630,7 +638,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Dumbbell walking lunges',
     module: 'Strength Accessory',
     primaryMuscles: ['quads', 'glutes'],
-    secondaryMuscles: ['hamstrings'],
+    secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '3×8 per leg, knee tracks toes',
     equipment: ['dumbbells'],
   },
@@ -699,7 +707,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Banded row',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps', 'rear delts'],
+    secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×12–15, anchor in front, pull to ribs',
     equipment: ['bands'],
   },
@@ -707,7 +715,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Banded pulldown',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps'],
+    secondaryMuscles: ['biceps', 'lower traps'],
     prescription: '3×10–15, anchor overhead, pull to chest',
     equipment: ['bands'],
   },
@@ -768,14 +776,14 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Walking lunges',
     module: 'Strength Accessory',
     primaryMuscles: ['quads', 'glutes'],
-    secondaryMuscles: ['hamstrings'],
+    secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '3×8 per leg, controlled',
   },
   {
     name: 'Reverse lunges',
     module: 'Strength Accessory',
     primaryMuscles: ['glutes', 'quads'],
-    secondaryMuscles: ['hamstrings'],
+    secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '3×10 per side, knee-friendly version of forward lunge',
   },
   {
@@ -834,7 +842,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Inverted row',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps', 'rear delts'],
+    secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×AMRAP, bar low in rack, body straight',
     equipment: ['rack', 'barbell'],
   },
@@ -842,7 +850,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Ring rows',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps', 'rear delts'],
+    secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×AMRAP, adjust angle for difficulty',
     equipment: ['rings'],
   },
@@ -850,6 +858,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Chin-ups',
     module: 'Strength Accessory',
     primaryMuscles: ['back', 'biceps'],
+    secondaryMuscles: ['lower traps'],
     prescription: '3×AMRAP or weighted 5–8, supinated grip',
     equipment: ['pull-up bar'],
   },
@@ -883,7 +892,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Pull-ups',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps'],
+    secondaryMuscles: ['biceps', 'lower traps'],
     prescription: '3–4×AMRAP or weighted 5–8',
     equipment: ['pull-up bar'],
   },
@@ -891,7 +900,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Lat pulldown',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps'],
+    secondaryMuscles: ['biceps', 'lower traps'],
     prescription: '3–4×8–12, full stretch at top',
     equipment: ['cable'],
   },
@@ -899,7 +908,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Cable row',
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
-    secondaryMuscles: ['biceps', 'rear delts'],
+    secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3–4×8–12, controlled tempo',
     equipment: ['cable'],
   },
@@ -977,12 +986,14 @@ export const SEED_EXERCISES: SeedExercise[] = [
   },
 
   // ============ STRENGTH THORACIC ============
-  // Postural strength for the thoracic spine and surrounding muscles.
-  // Pairs with Activation Upper / SMR Upper on Days 2 and 3 of Edwardo's split.
+  // Postural strength for the thoracic spine and surrounding muscles. Pairs
+  // naturally with Activation Upper / SMR Upper as a warm-up-into-load arc
+  // on upper-body or full-body days.
   {
     name: 'Banded pull-aparts',
     module: 'Strength Thoracic',
     primaryMuscles: ['rear delts', 'scapular'],
+    secondaryMuscles: ['lower traps'],
     prescription: '3×12–15, arms straight',
     equipment: ['bands'],
   },
@@ -1006,7 +1017,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Reverse fly',
     module: 'Strength Thoracic',
     primaryMuscles: ['rear delts'],
-    secondaryMuscles: ['scapular'],
+    secondaryMuscles: ['scapular', 'lower traps'],
     prescription: '3×10–12, light DB or band',
     equipment: ['dumbbells'],
   },
@@ -1030,7 +1041,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Banded face pulls',
     module: 'Activation Upper',
     primaryMuscles: ['rear delts'],
-    secondaryMuscles: ['back'],
+    secondaryMuscles: ['back', 'scapular', 'lower traps'],
     prescription: '2×12',
     equipment: ['bands'],
   },
@@ -1156,34 +1167,168 @@ export type MuscleGroup = {
   // UserVolumeTarget table. Undefined for mobility/balance — those are
   // frequency-based and tracked through the Coverage view, not volume.
   weeklyVolumeTarget?: number;
+  // One-line plain-English description surfaced in coverage tooltips. Tells the
+  // user what the muscle is and what kinds of exercises hit it, so the row
+  // labels aren't bare jargon. Lower-target ("postural") muscles deliberately
+  // call out that the smaller number is by design, not by neglect.
+  description?: string;
 };
 
 // Defaults are middle-of-the-road hypertrophy targets (~10 sets/week for major
 // muscles, ~8 for smaller assistance muscles, lower for corrective/postural work).
 // Users can override per-muscle in settings. Not gospel — just a reasonable start.
+//
+// A note on the lower targets (lower traps 6, lower back 6, adductors 4): those
+// numbers reflect that these muscles get a lot of secondary credit from main
+// lifts and rarely need dedicated isolation. Lower target ≠ less important —
+// it's just less *direct* work needed.
 export const MUSCLE_GROUPS: MuscleGroup[] = [
-  { id: 'glutes', label: 'Glutes', category: 'lower', weeklyVolumeTarget: 12 },
-  { id: 'hamstrings', label: 'Hamstrings', category: 'lower', weeklyVolumeTarget: 10 },
-  { id: 'quads', label: 'Quads', category: 'lower', weeklyVolumeTarget: 10 },
-  { id: 'adductors', label: 'Adductors', category: 'lower', weeklyVolumeTarget: 6 },
-  { id: 'chest', label: 'Chest', category: 'upper', weeklyVolumeTarget: 10 },
-  { id: 'back', label: 'Back', category: 'upper', weeklyVolumeTarget: 12 },
-  { id: 'scapular', label: 'Scapular stabilizers', category: 'upper', weeklyVolumeTarget: 8 },
-  { id: 'rear delts', label: 'Rear delts', category: 'upper', weeklyVolumeTarget: 8 },
-  { id: 'lower traps', label: 'Lower traps', category: 'upper', weeklyVolumeTarget: 6 },
-  { id: 'biceps', label: 'Biceps', category: 'upper', weeklyVolumeTarget: 8 },
-  { id: 'triceps', label: 'Triceps', category: 'upper', weeklyVolumeTarget: 8 },
-  { id: 'shoulders', label: 'Shoulders', category: 'upper', weeklyVolumeTarget: 10 },
-  { id: 'core', label: 'Core', category: 'trunk', weeklyVolumeTarget: 8 },
-  { id: 'lower back', label: 'Lower back', category: 'trunk', weeklyVolumeTarget: 6 },
-  { id: 'balance', label: 'Balance', category: 'other' },
-  { id: 'cardio', label: 'Cardio', category: 'other' },
-  { id: 'hip mobility', label: 'Hip mobility', category: 'mobility' },
-  { id: 'ankle mobility', label: 'Ankle mobility', category: 'mobility' },
-  { id: 'hip flexors', label: 'Hip flexors', category: 'mobility' },
-  { id: 'shoulder mobility', label: 'Shoulder mobility', category: 'mobility' },
-  { id: 't-spine mobility', label: 'T-spine mobility', category: 'mobility' },
-  { id: 'soft tissue', label: 'Soft tissue', category: 'mobility' },
+  {
+    id: 'glutes',
+    label: 'Glutes',
+    category: 'lower',
+    weeklyVolumeTarget: 12,
+    description: 'The primary hip extensor — built by squats, deadlifts, hip thrusts, lunges, and dedicated glute work.',
+  },
+  {
+    id: 'hamstrings',
+    label: 'Hamstrings',
+    category: 'lower',
+    weeklyVolumeTarget: 10,
+    description: 'Back-of-thigh hip extensors and knee flexors. Hit by deadlifts, RDLs, leg curls, and lunges.',
+  },
+  {
+    id: 'quads',
+    label: 'Quads',
+    category: 'lower',
+    weeklyVolumeTarget: 10,
+    description: 'Front-of-thigh knee extensors. Hit by squats, lunges, leg press, step-ups.',
+  },
+  {
+    id: 'adductors',
+    label: 'Adductors',
+    category: 'lower',
+    weeklyVolumeTarget: 4,
+    description: 'Inner-thigh hip stabilizers. Mostly trained as spillover from squats, lunges, and split squats — rarely programmed directly. Lower target reflects the realistic spillover dose.',
+  },
+  {
+    id: 'chest',
+    label: 'Chest',
+    category: 'upper',
+    weeklyVolumeTarget: 10,
+    description: 'Pecs — horizontal pushers. Hit by bench press, push-ups, dips, dumbbell press.',
+  },
+  {
+    id: 'back',
+    label: 'Back',
+    category: 'upper',
+    weeklyVolumeTarget: 12,
+    description: 'Lats, mid-traps, rhomboids — pulled by rows, pulldowns, pull-ups, deadlifts.',
+  },
+  {
+    id: 'scapular',
+    label: 'Scapular stabilizers',
+    category: 'upper',
+    weeklyVolumeTarget: 8,
+    description: 'Small muscles that anchor the shoulder blade. Hit by face pulls, pull-aparts, Y/T raises, prone work. Postural — keeps shoulders healthy.',
+  },
+  {
+    id: 'rear delts',
+    label: 'Rear delts',
+    category: 'upper',
+    weeklyVolumeTarget: 8,
+    description: 'Back of the shoulder. Hit by face pulls, reverse fly, pull-aparts, and rows (secondary). Often underdosed when training is bench-heavy.',
+  },
+  {
+    id: 'lower traps',
+    label: 'Lower traps',
+    category: 'upper',
+    weeklyVolumeTarget: 6,
+    description: 'Postural muscles between the shoulder blades. Hit by Y raises, face pulls, pull-aparts, and rows (secondary). Lower target — small muscle, big impact on shoulder health.',
+  },
+  {
+    id: 'biceps',
+    label: 'Biceps',
+    category: 'upper',
+    weeklyVolumeTarget: 8,
+    description: 'Front of the upper arm. Hit by curls and pulling movements (secondary).',
+  },
+  {
+    id: 'triceps',
+    label: 'Triceps',
+    category: 'upper',
+    weeklyVolumeTarget: 8,
+    description: 'Back of the upper arm. Hit by tricep work and pressing movements (secondary).',
+  },
+  {
+    id: 'shoulders',
+    label: 'Shoulders',
+    category: 'upper',
+    weeklyVolumeTarget: 10,
+    description: 'Front and side delts — overhead and lateral raising. Hit by overhead press, lateral raises, and bench/push-ups (secondary).',
+  },
+  {
+    id: 'core',
+    label: 'Core',
+    category: 'trunk',
+    weeklyVolumeTarget: 8,
+    description: 'Abs and obliques. Hit by planks, hollow holds, carries, and braced compound lifts (secondary).',
+  },
+  {
+    id: 'lower back',
+    label: 'Lower back',
+    category: 'trunk',
+    weeklyVolumeTarget: 6,
+    description: 'Spinal erectors. Hit primarily as secondary on deadlifts, RDLs, good mornings, and bird-dog work. Lower target — usually well-served by hinge variants.',
+  },
+  {
+    id: 'balance',
+    label: 'Balance',
+    category: 'other',
+    description: 'Single-leg and proprioception work. Tracked by recency, not volume — once a week is plenty.',
+  },
+  {
+    id: 'cardio',
+    label: 'Cardio',
+    category: 'other',
+    description: 'Conditioning and finishers. Tracked by recency, not volume.',
+  },
+  {
+    id: 'hip mobility',
+    label: 'Hip mobility',
+    category: 'mobility',
+    description: 'Hip range of motion — 90/90s, deep squat reaches, world’s greatest. Recency, not volume.',
+  },
+  {
+    id: 'ankle mobility',
+    label: 'Ankle mobility',
+    category: 'mobility',
+    description: 'Dorsiflexion range — ankle rocks. Helps squat depth. Recency, not volume.',
+  },
+  {
+    id: 'hip flexors',
+    label: 'Hip flexors',
+    category: 'mobility',
+    description: 'Front-of-hip stretch — half-kneeling stretch, couch stretch. Recency, not volume.',
+  },
+  {
+    id: 'shoulder mobility',
+    label: 'Shoulder mobility',
+    category: 'mobility',
+    description: 'Shoulder range — pec stretch, sleeper, child’s pose with reach. Recency, not volume.',
+  },
+  {
+    id: 't-spine mobility',
+    label: 'T-spine mobility',
+    category: 'mobility',
+    description: 'Thoracic-spine rotation and extension — thread-the-needle, cat-cow, T-spine rotations. Recency, not volume.',
+  },
+  {
+    id: 'soft tissue',
+    label: 'Soft tissue',
+    category: 'mobility',
+    description: 'Foam rolling and SMR. Tracks "did I roll out recently?" — recency, not volume.',
+  },
 ];
 
 // Built-in WorkoutTemplate rows are no longer seeded. Users instead pick a

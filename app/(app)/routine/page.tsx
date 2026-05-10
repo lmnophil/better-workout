@@ -38,6 +38,7 @@ export default async function RoutinePage() {
     category: g.category,
     target: userTargets.get(g.id) ?? g.weeklyVolumeTarget ?? null,
     isOverridden: userTargets.has(g.id),
+    description: g.description ?? null,
   }));
 
   // Project the routine into a client-friendly shape. Each day's identity is

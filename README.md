@@ -12,7 +12,7 @@ The app is deliberately neutral about *how* you train — no prescribed program,
 - **Coverage drives guidance.** A color-graded map of muscle groups (recently worked → neglected) is the primary signal for what to do today.
 - **Volume targets are configurable defaults.** ~10 sets/muscle/week for hypertrophy is baked in; users override per-muscle in settings.
 - **Multi-muscle credit is weighted.** Compound lifts credit primary muscles fully and secondary muscles at half. RDLs give your back something, but not full credit.
-- **Built-in vs. custom exercises coexist.** The seed data is one trainer's program. Users can add anything else.
+- **Built-in vs. custom exercises coexist.** The seed is a broad library of common, evidence-based movements drawn from current best practices in the strength-and-conditioning space — not any one program. Users assemble their own routine on top, and can add anything else as customs.
 
 ## Features
 

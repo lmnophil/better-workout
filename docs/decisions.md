@@ -60,7 +60,7 @@ These are calls where the alternatives are genuinely worth remembering, in case 
 
 ### Don't store "type of day" on a WorkoutSession
 
-**Context.** Edwardo's program has named days (Lower 1, Lower 2, Upper, Balance). The original instinct was to add `dayFocus: string` to `WorkoutSession`.
+**Context.** Most splits a user might bring in (their own, a coach's, a common template like PPL or Upper/Lower) have named days — "Lower 1", "Lower 2", "Upper", "Balance", "Push", "Pull", and so on. The original instinct was to add `dayFocus: string` to `WorkoutSession` to capture that label.
 
 **Decision.** Don't. A session is a date and a list of sets. The "what kind of day was this" is implicit in which exercises you logged, and the user knows what they did.
 

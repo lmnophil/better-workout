@@ -1,10 +1,11 @@
 // Prescription string parsing.
 //
-// Prescriptions are free-form strings the trainer authored on each exercise
-// ("3×12, 5-sec hold", "2×8 per side", "1 min per side"). They're a hint, not
-// structured data — the schema doesn't constrain them. We do a conservative
-// parse to extract a set count for set-seeding, and bail out (return null)
-// for anything that doesn't fit a clear "<N>×<reps>" lead.
+// Prescriptions are free-form strings authored on each exercise — both the
+// built-in seeds and any customs the user creates ("3×12, 5-sec hold",
+// "2×8 per side", "1 min per side"). They're a hint, not structured data —
+// the schema doesn't constrain them. We do a conservative parse to extract
+// a set count for set-seeding, and bail out (return null) for anything that
+// doesn't fit a clear "<N>×<reps>" lead.
 //
 // History from prior sessions outranks the prescription as a seeding source,
 // so a wrong parse here is recoverable — the next time the user logs the

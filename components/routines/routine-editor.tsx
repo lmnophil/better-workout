@@ -139,6 +139,10 @@ export type MuscleGroupClient = {
   // Null for muscles tracked only by recency (mobility/balance/cardio).
   target: number | null;
   isOverridden: boolean;
+  // Plain-English description shown as a hover tooltip on the coverage row,
+  // so the user can see what the muscle is and what hits it without leaving
+  // the screen.
+  description: string | null;
 };
 
 type Props = {
@@ -2431,6 +2435,7 @@ function CoveragePanel({
       {hasAnything && (
         <>
           <SummaryStrip summary={summary} />
+          <CoverageLegend />
           <div className="space-y-4 mt-3">
             {Array.from(byCategory.entries()).map(([category, items]) => (
               <CoverageCategory
@@ -2444,6 +2449,70 @@ function CoveragePanel({
         </>
       )}
     </section>
+  );
+}
+
+// Collapsible legend that explains the tier colors and the philosophy of why
+// smaller-target muscles aren't "less important". Defaults closed so the panel
+// stays compact for return users; the question is mostly a first-look concern.
+function CoverageLegend() {
+  return (
+    <details className="mt-2 group">
+      <summary className="text-[10px] text-ink-500 italic font-display cursor-pointer select-none hover:text-ink-300 transition list-none flex items-center gap-1">
+        <span className="text-ink-600 group-open:rotate-90 transition-transform inline-block w-2">
+          ›
+        </span>
+        What do these colors mean?
+      </summary>
+      <div className="mt-2 mb-1 pl-3 border-l border-ink-800 space-y-1.5 text-[11px] text-ink-300 leading-relaxed">
+        <LegendRow tier="meets" label="On target">
+          Weekly sets meet the target. Hover any muscle for details on what hits it.
+        </LegendRow>
+        <LegendRow tier="under" label="Below target">
+          Some work is happening, but not enough for the weekly target. Often fine for
+          smaller postural muscles; consider adding a set or two for the main movers.
+        </LegendRow>
+        <LegendRow tier="gap" label="Gap">
+          Zero sets across the cycle on a muscle that has a target. Worth a deliberate
+          choice — either tag-fill (add an exercise) or override the target down.
+        </LegendRow>
+        <LegendRow tier="untracked" label="Untracked">
+          Mobility, balance, and cardio rows. Tracked by recency on the Coverage page,
+          not weekly volume — once or twice a week is plenty.
+        </LegendRow>
+        <p className="text-[10px] italic text-ink-500 pt-1">
+          A smaller target (like Lower traps at 6 or Adductors at 4) doesn’t mean the
+          muscle is less important — it’s a small/postural muscle that gets a lot of
+          secondary credit from the main lifts, so less direct work is needed. Override
+          any target in Settings.
+        </p>
+      </div>
+    </details>
+  );
+}
+
+function LegendRow({
+  tier,
+  label,
+  children,
+}: {
+  tier: CoverageTier;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const tok = TIER_TOKENS[tier];
+  return (
+    <div className="flex items-baseline gap-2">
+      <span
+        className="w-1.5 h-1.5 rounded-full shrink-0 mt-1"
+        style={{ background: tok.dot }}
+        aria-hidden="true"
+      />
+      <div className="flex-1">
+        <span className="text-ink-100 font-medium">{label}.</span>{' '}
+        <span className="text-ink-400">{children}</span>
+      </div>
+    </div>
   );
 }
 
@@ -2556,17 +2625,27 @@ function CoverageRow({
   const tier = tierFor(sets, muscle.target);
   const tok = TIER_TOKENS[tier];
 
+  // Tooltip text combines the description with a target hint when relevant.
+  // Falls through to a plain label-as-tooltip if no description is loaded
+  // (e.g. on a stale client bundle), so the row never goes silent.
+  const tooltip = muscle.description
+    ? hasTarget
+      ? `${muscle.label} — ${muscle.description}`
+      : `${muscle.label} — ${muscle.description}`
+    : muscle.label;
+
   return (
     <div
       className="border rounded px-2.5 py-1.5 flex items-center gap-3"
       style={{ background: tok.bg, borderColor: tok.border }}
+      title={tooltip}
     >
       <span
         className="w-1.5 h-1.5 rounded-full shrink-0"
         style={{ background: tok.dot }}
         aria-hidden="true"
       />
-      <span className="text-[12px] text-ink-100 truncate flex-1 min-w-0">
+      <span className="text-[12px] text-ink-100 truncate flex-1 min-w-0 decoration-dotted decoration-ink-700 underline-offset-[3px] hover:underline">
         {muscle.label}
       </span>
 
