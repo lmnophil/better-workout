@@ -22,6 +22,10 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import type { ExerciseInfo, SetLogClient } from './workout-view';
+import {
+  estimateActiveExerciseSeconds,
+  formatEstimateCompact,
+} from '@/lib/time-estimate';
 
 type Props = {
   exercise: ExerciseInfo;
@@ -104,6 +108,18 @@ export function ExerciseInSession({
   // mid-session if they want to revert any manual edits and snap to history.
   const canRepeatLast = lastTime !== null && lastTime.sets.length > 0;
 
+  // Time estimate for this exercise. Each existing set log is treated as a
+  // planned set; filled rows weight by their actual reps/seconds. Hidden when
+  // there's nothing to estimate yet (no sets added).
+  const exerciseEstimateSec =
+    sets.length > 0
+      ? estimateActiveExerciseSeconds({
+          metric: exercise.metric,
+          restSeconds: effectiveRest,
+          setLogs: sets.map((s) => ({ reps: s.reps, seconds: s.seconds })),
+        })
+      : 0;
+
   return (
     <div className="border accent-border bg-ink-900 rounded-lg">
       {/* Header */}
@@ -135,6 +151,11 @@ export function ExerciseInSession({
             {exercise.prescription && (
               <span className="text-[11px] text-ink-500 font-mono">
                 {exercise.prescription}
+              </span>
+            )}
+            {exerciseEstimateSec > 0 && (
+              <span className="text-[11px] text-ink-500 font-mono">
+                ~{formatEstimateCompact(exerciseEstimateSec)}
               </span>
             )}
             <button

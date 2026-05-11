@@ -7,7 +7,12 @@
 
 import { useState, useTransition, useEffect } from 'react';
 import Link from 'next/link';
-import { Plus, Check, Calendar, Trash2, BookmarkPlus, ArrowRight } from 'lucide-react';
+import { Plus, Check, Calendar, Clock, Trash2, BookmarkPlus, ArrowRight } from 'lucide-react';
+import {
+  estimateActiveSession,
+  estimatePlannedTotalSeconds,
+  formatEstimate,
+} from '@/lib/time-estimate';
 import {
   addExercisesToActiveSession,
   removeExerciseFromActiveSession,
@@ -102,6 +107,16 @@ export type TemplateClient = {
   exerciseCount: number;
   // Names of the first few exercises, for preview
   previewNames: string[];
+  // Planned dimensions per exercise, in display order. Drives the time
+  // estimate shown alongside the template in the empty state. Metric and
+  // rest overrides are resolved at render time against availableExercises
+  // and the user's prefs, so this only carries data unique to the template.
+  plannedExercises: {
+    exerciseId: string;
+    plannedSets: number | null;
+    plannedReps: number | null;
+    plannedSeconds: number | null;
+  }[];
   updatedAt: string; // ISO
 };
 
@@ -162,6 +177,27 @@ export function WorkoutView({
 
   const exerciseIdsAlreadyInSession = new Set(exerciseOrderInSession);
   const sessionStarted = activeSession !== null && exerciseOrderInSession.length > 0;
+
+  // Active-session time estimate. Walks the exercises in their session order
+  // so the rest-after-last-set subtraction lands on the right exercise's rest
+  // value. Filled set logs use their actual reps/seconds for working time;
+  // unfilled rows fall back to the estimator's defaults.
+  const sessionEstimate = sessionStarted
+    ? estimateActiveSession(
+        exerciseOrderInSession.flatMap((id) => {
+          const ex = exerciseById.get(id);
+          if (!ex) return [];
+          return [
+            {
+              metric: ex.metric,
+              restSeconds:
+                ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
+              setLogs: setLogsByExercise.get(id) ?? [],
+            },
+          ];
+        }),
+      )
+    : null;
 
   // Handlers — all wrap server actions in a transition so UI stays responsive
   const handleAddExercises = (exerciseIds: string[]) => {
@@ -435,12 +471,30 @@ export function WorkoutView({
           {sessionStarted ? 'Workout in progress' : 'Ready when you are'}
         </h1>
         {sessionStarted && (
-          <p className="text-sm text-ink-400 italic font-display mt-1">
-            {exerciseOrderInSession.length}{' '}
-            {exerciseOrderInSession.length === 1 ? 'exercise' : 'exercises'} ·{' '}
-            {(activeSession?.setLogs ?? []).length}{' '}
-            {(activeSession?.setLogs ?? []).length === 1 ? 'set' : 'sets'} logged
-          </p>
+          <>
+            <p className="text-sm text-ink-400 italic font-display mt-1">
+              {exerciseOrderInSession.length}{' '}
+              {exerciseOrderInSession.length === 1 ? 'exercise' : 'exercises'} ·{' '}
+              {(activeSession?.setLogs ?? []).length}{' '}
+              {(activeSession?.setLogs ?? []).length === 1 ? 'set' : 'sets'} logged
+            </p>
+            {sessionEstimate && sessionEstimate.totalSec > 0 && (
+              <p className="text-[11px] text-ink-500 font-mono mt-1 flex items-center gap-1.5">
+                <Clock size={11} className="text-ink-600" />
+                <span>
+                  ~{formatEstimate(sessionEstimate.totalSec)} total
+                  {sessionEstimate.remainingSec > 0 && (
+                    <>
+                      <span className="text-ink-700"> · </span>
+                      <span className="text-ink-300">
+                        ~{formatEstimate(sessionEstimate.remainingSec)} more at typical pace
+                      </span>
+                    </>
+                  )}
+                </span>
+              </p>
+            )}
+          </>
         )}
       </div>
 
@@ -661,6 +715,7 @@ function EmptyState({
               <TemplateRow
                 key={t.id}
                 template={t}
+                availableExercises={availableExercises}
                 onStart={() => onStartFromTemplate(t.id)}
                 onDelete={() =>
                   t.isBuiltin
@@ -725,11 +780,16 @@ function BuildRoutineCTA() {
 
 function TemplateRow({
   template,
+  availableExercises,
   onStart,
   onDelete,
   disabled,
 }: {
   template: TemplateClient;
+  // Used to resolve each planned exercise's metric and per-user rest override
+  // when computing the time estimate. Templates ship the planned dimensions
+  // (sets/reps/seconds) but not the exercise's metric, so we reach across.
+  availableExercises: ExerciseInfo[];
   // Called when the user taps the trash icon. The parent decides whether
   // this means "delete" (user template) or "hide" (built-in) — by the time
   // it reaches here both look the same.
@@ -738,6 +798,26 @@ function TemplateRow({
   disabled: boolean;
 }) {
   const trailingActionLabel = template.isBuiltin ? 'Hide' : 'Delete';
+  const { prefs } = usePrefs();
+
+  const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
+  const templateEstimateSec = estimatePlannedTotalSeconds(
+    template.plannedExercises.flatMap((p) => {
+      const ex = exerciseById.get(p.exerciseId);
+      if (!ex) return [];
+      return [
+        {
+          metric: ex.metric,
+          restSeconds:
+            ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
+          plannedSets: p.plannedSets,
+          plannedReps: p.plannedReps,
+          plannedSeconds: p.plannedSeconds,
+        },
+      ];
+    }),
+  );
+
   return (
     <div className="border border-ink-800 hover:border-accent/40 transition rounded-lg flex items-stretch">
       <button
@@ -756,6 +836,9 @@ function TemplateRow({
         <div className="text-[11px] text-ink-500 mt-0.5">
           {template.exerciseCount}{' '}
           {template.exerciseCount === 1 ? 'exercise' : 'exercises'}
+          {templateEstimateSec > 0 && (
+            <span> · ~{formatEstimate(templateEstimateSec)}</span>
+          )}
           {template.previewNames.length > 0 && (
             <span className="text-ink-600">
               {' · '}

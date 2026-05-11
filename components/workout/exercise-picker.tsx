@@ -34,6 +34,14 @@ import {
   balanceHint,
 } from '@/lib/area-filter';
 import type { ExerciseInfo } from './workout-view';
+import { usePrefs } from '@/components/ui/prefs-context';
+import {
+  TIME_ESTIMATE,
+  estimatePlannedExerciseSeconds,
+  workTimePerSet,
+  formatEstimate,
+  formatEstimateCompact,
+} from '@/lib/time-estimate';
 
 type Props = {
   availableExercises: ExerciseInfo[];
@@ -232,6 +240,7 @@ function BrowseTab({
   // surface actually has a gap signal — collapsed otherwise.
   const [gapsOnly, setGapsOnly] = useState(false);
   const hasGapSignal = gapMuscles !== undefined && gapMuscles.size > 0;
+  const { prefs } = usePrefs();
 
   function toggleRegion(id: string) {
     setRegionIds((prev) => {
@@ -313,6 +322,39 @@ function BrowseTab({
   );
   const summary = useMemo(() => summariseTargets(selectedExercises), [selectedExercises]);
   const hint = useMemo(() => balanceHint(selectedExercises), [selectedExercises]);
+
+  // Per-exercise time estimate at default planning. Shown on every row so the
+  // user can see how each pick compounds before committing — and the building
+  // blocks (work-per-set × set count) are visible too, so the number isn't a
+  // black-box guess. No template is involved, so plannedSets/Reps/Seconds are
+  // null and the estimator falls back to its defaults.
+  const estimateForExercise = (e: ExerciseInfo) => {
+    const restSeconds = e.restTimerSecondsOverride ?? prefs.restTimerSeconds;
+    const work = workTimePerSet({
+      metric: e.metric,
+      plannedReps: null,
+      plannedSeconds: null,
+    });
+    const total = estimatePlannedExerciseSeconds({
+      metric: e.metric,
+      plannedSets: null,
+      plannedReps: null,
+      plannedSeconds: null,
+      restSeconds,
+    });
+    return { work, total, sets: TIME_ESTIMATE.DEFAULT_SETS };
+  };
+
+  const selectedTotalSec = useMemo(
+    () =>
+      selectedExercises.reduce(
+        (sum, e) => sum + estimateForExercise(e).total,
+        0,
+      ),
+    // estimateForExercise depends on prefs; selected set already triggers via selectedExercises.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedExercises, prefs.restTimerSeconds],
+  );
 
   function toggleSelection(id: string) {
     if (swapMode) {
@@ -471,6 +513,21 @@ function BrowseTab({
                                     {ex.prescription}
                                   </span>
                                 )}
+                                {(() => {
+                                  const est = estimateForExercise(ex);
+                                  return (
+                                    <span
+                                      className="text-[10px] text-ink-500 font-mono"
+                                      title={`${formatEstimateCompact(est.work)} per set × ${est.sets} sets at default planning`}
+                                    >
+                                      ~{formatEstimateCompact(est.total)}
+                                      <span className="text-ink-700">
+                                        {' '}
+                                        ({formatEstimateCompact(est.work)}×{est.sets})
+                                      </span>
+                                    </span>
+                                  );
+                                })()}
                                 {ex.primaryMuscles.length > 0 && (
                                   <span className="text-[10px] text-ink-500">
                                     · {ex.primaryMuscles.slice(0, 3).join(', ')}
@@ -511,6 +568,7 @@ function BrowseTab({
           selectedCount={selected.size}
           primaryCounts={summary.primaryCounts}
           hint={hint}
+          totalSec={selectedTotalSec}
           onCommit={commit}
         />
       )}
@@ -621,11 +679,16 @@ function PickerFooter({
   selectedCount,
   primaryCounts,
   hint,
+  totalSec,
   onCommit,
 }: {
   selectedCount: number;
   primaryCounts: Map<string, number>;
   hint: string | null;
+  // Sum of per-exercise estimates for the current selection. Shown alongside
+  // the target summary so the user can see "+3 exercises and ~7 min" at a
+  // glance before committing.
+  totalSec: number;
   onCommit: () => void;
 }) {
   // Convert the primary-count map into labelled rows. Order by descending
@@ -665,7 +728,7 @@ function PickerFooter({
       >
         {selectedCount === 0
           ? 'Pick exercises to add'
-          : `Add ${selectedCount} to session`}
+          : `Add ${selectedCount} to session · +~${formatEstimate(totalSec)}`}
       </button>
     </div>
   );

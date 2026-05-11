@@ -20,12 +20,24 @@ import {
 } from '@/lib/routine';
 import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { moduleDescription } from '@/lib/exercises-data';
+import { usePrefs } from '@/components/ui/prefs-context';
+import {
+  estimatePlannedTotalSeconds,
+  formatEstimate,
+} from '@/lib/time-estimate';
 
 export type RoutineDayExerciseClient = {
   exerciseId: string;
   name: string;
   module: string;
   position: number;
+  // Planned dimensions used by the time estimator. plannedSets is the set
+  // count; plannedReps applies for reps-metric exercises and plannedSeconds
+  // for time-metric (planks, carries). All nullable when the slot was created
+  // without a plan; the estimator falls back to its defaults.
+  plannedSets: number | null;
+  plannedReps: number | null;
+  plannedSeconds: number | null;
   // If a one-time swap is staged, the *original* exercise stays here and
   // pendingSwap.inExerciseId/Name describes the substitution.
   pendingSwapInExerciseId?: string;
@@ -243,6 +255,29 @@ function DayCard({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const { prefs } = usePrefs();
+
+  // Estimated time for this day. Walks the day's exercise lineup, applying
+  // any staged one-time swaps so the surfaced number matches what the user
+  // will actually start with. Per-exercise rest comes from the user's
+  // override, or falls back to the global preference.
+  const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
+  const dayPlannedExercises = day.exercises.flatMap((e) => {
+    const effectiveId = e.pendingSwapInExerciseId ?? e.exerciseId;
+    const ex = exerciseById.get(effectiveId);
+    if (!ex) return [];
+    return [
+      {
+        metric: ex.metric,
+        restSeconds:
+          ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
+        plannedSets: e.plannedSets,
+        plannedReps: e.plannedReps,
+        plannedSeconds: e.plannedSeconds,
+      },
+    ];
+  });
+  const dayEstimateSec = estimatePlannedTotalSeconds(dayPlannedExercises);
 
   // Picker open for swap. Holds the outgoing exercise's id+name so the
   // picker can show the right title and the post-pick choice dialog can
@@ -385,6 +420,7 @@ function DayCard({
                 weekdayLabel,
                 day.label,
                 `${day.exercises.length} ${day.exercises.length === 1 ? 'exercise' : 'exercises'}`,
+                dayEstimateSec > 0 ? `~${formatEstimate(dayEstimateSec)}` : null,
               ]
                 .filter(Boolean)
                 .join(' · ')}

@@ -70,6 +70,9 @@ export default async function WorkoutPage() {
           name: te.exercise.name,
           module: te.exercise.module,
           position: te.position,
+          plannedSets: te.plannedSets,
+          plannedReps: te.plannedReps,
+          plannedSeconds: te.plannedSeconds,
           pendingSwapInExerciseId: swap?.id,
           pendingSwapInExerciseName: swap?.name,
         };
@@ -167,6 +170,14 @@ export default async function WorkoutPage() {
         previewNames: t.exercises
           .slice(0, 3)
           .map((te) => (te.exercise.deletedAt ? '(removed)' : te.exercise.name)),
+        plannedExercises: t.exercises
+          .filter((te) => te.exercise.deletedAt === null)
+          .map((te) => ({
+            exerciseId: te.exerciseId,
+            plannedSets: te.plannedSets,
+            plannedReps: te.plannedReps,
+            plannedSeconds: te.plannedSeconds,
+          })),
         updatedAt: t.updatedAt.toISOString(),
       }))}
       routine={routineForView}
