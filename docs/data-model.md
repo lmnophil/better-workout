@@ -47,93 +47,67 @@ erDiagram
     User {
         string id PK
         string email UK
-        datetime emailVerified
     }
     Exercise {
         string id PK
-        string name
-        string module
-        string_array primaryMuscles
-        string_array secondaryMuscles
         string ownerId FK "null = built-in"
-        boolean isCustom
         datetime deletedAt "soft-delete"
     }
     WorkoutSession {
         string id PK
         string userId FK
-        datetime date
         datetime completedAt "null = active"
     }
     SetLog {
         string id PK
         string sessionId FK
-        string exerciseId FK
+        string exerciseId FK "Restrict, not Cascade"
         int setNumber "per (session, exercise)"
         int position "per session"
-        int reps
-        float weight
-        string notes
     }
     WorkoutTemplate {
         string id PK
         string userId FK "null = built-in"
         boolean isBuiltin
-        string name
     }
     UserHiddenTemplate {
-        string id PK
         string userId FK
         string templateId FK
     }
     TemplateExercise {
-        string id PK
         string templateId FK
-        string exerciseId FK
-        int position
+        string exerciseId FK "Cascade"
     }
     ExerciseUserSettings {
-        string id PK
         string userId FK
         string exerciseId FK
-        int restTimerSeconds "null = use global"
     }
     UserVolumeTarget {
-        string id PK
         string userId FK
-        string muscleId
-        int target
+        string muscleId "no FK; muscles live in code"
     }
     UserPreferences {
-        string id PK
         string userId FK,UK
-        boolean restTimerEnabled
-        int restTimerSeconds
     }
     Routine {
-        string id PK
         string userId FK,UK
-        string name
         string scheduleStyle "sequence | weekday"
         int lastCompletedPosition "sequence-mode cursor"
     }
     RoutineDay {
-        string id PK
         string routineId FK
         string templateId FK
-        int position "0..N-1"
-        int weekday "0=Sun..6=Sat, weekday mode only"
-        string label "optional user label"
+        int position "unique per routine"
+        int weekday "unique per routine, null in sequence mode"
     }
     RoutineDayPendingSwap {
-        string id PK
         string routineDayId FK
         string outExerciseId FK
         string inExerciseId FK
     }
 ```
 
-A pre-rendered PDF of this diagram is committed alongside this doc at [`data-model.pdf`](./data-model.pdf) for offline / print viewing. Regenerate it with `npx mmdc -i docs/data-model.md -o docs/data-model.pdf` after schema changes. (The Mermaid block in this markdown file is the source of truth — most viewers, including GitHub, render it inline. The PDF is for situations where Mermaid isn't available.)
+The Mermaid block above is the source of truth — GitHub and most viewers render it inline. (`docs/data-model.pdf` exists as a leftover from when we mirrored to PDF; it's not part of the maintenance contract anymore.)
 
 ## The core domain
 
@@ -154,7 +128,7 @@ Key behaviors:
 
 ### `WorkoutSession`
 
-A user's training session — a date plus a `completedAt`. **Sessions are records, not plans.** There's no "type of day" stored. See [root CLAUDE.md](../CLAUDE.md) for the philosophical stance and [`docs/decisions.md`](./decisions.md) for why we deliberately rejected `dayFocus`.
+A user's training session — a date plus a `completedAt`. **Sessions are records, not plans.** There's no "type of day" stored. See [`docs/decisions.md`](./decisions.md) for why we deliberately rejected `dayFocus`.
 
 Key behaviors:
 
@@ -268,12 +242,4 @@ A few patterns show up across multiple models. Recognizing them on sight saves t
 
 ## When this doc goes stale
 
-If you change `prisma/schema.prisma` and the relationships shown here no longer match, update both this doc *and* regenerate the rendered PDF:
-
-```bash
-npx mmdc -i docs/data-model.md -o docs/data-model.pdf
-```
-
-(`mmdc` extracts the first Mermaid block from the markdown — that's the ER diagram block above.)
-
-If you find this doc says something the schema doesn't, or vice versa, the schema wins. Update the doc as part of the same change.
+If you change `prisma/schema.prisma` and the relationships shown here no longer match, update this doc as part of the same change. The schema is authoritative — if they disagree, fix the doc.

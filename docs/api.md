@@ -72,119 +72,33 @@ The `withLogging('addSet', ...)` wrapper handles timing histograms, success/erro
 
 Every server action calls `requireUser()` first; the function throws `'Unauthorized'` if there's no session. Every server-side query takes `userId` as a parameter and is called from a server component that already authed at the top of its `async function Page()` body. The middleware redirects unauthenticated requests away from protected routes before they ever reach the action or query layer — but actions and queries don't trust that, they re-check. Belt and suspenders on purpose.
 
-## Server actions
+## Server actions: the categories
 
-Actions in `lib/actions.ts` are grouped by the `// =====` section headers in the file; the categories below mirror those headers.
+Actions in `lib/actions.ts` are grouped by `// =====` section headers in the file. The categories and their shapes — for canonical signatures, `grep -n '^export ' lib/actions.ts`.
 
-### Session lifecycle
+**Session lifecycle.** How a user's active session gets created, populated, finished, or thrown away. The user has at most one active session at a time (`completedAt = null`). Adding exercises auto-creates the session; emptying it auto-deletes. Completing requires at least one set; discarding is destructive. Reorders run inside transactions so observers never see two exercises sharing a position.
 
-How a user's active session gets created, populated, finished, or thrown away.
+**Set logging.** The most-frequently-called actions in the app — every rep and weight commit. Adds pre-fill from the previous set (progressive overload is one tap). Updates refuse if the parent session is already completed. Removals renumber the remaining sets so `setNumber` stays contiguous; if the removal leaves the session empty the session itself is deleted.
 
-- **`addExercisesToActiveSession({ exerciseIds })`** — Adds one or more exercises to the active session, creating the session if none exists. Skips IDs already in the session (no-op for the duplicate subset). Pre-fills each new exercise with an empty first set, in caller-provided order. The picker calls this with the user's multi-select; mid-session "add more" goes through the same path.
-- **`removeExerciseFromActiveSession({ exerciseId })`** — Removes all sets for an exercise from the active session. Deletes the session entirely if it had no other exercises.
-- **`swapExerciseInActiveSession({ oldExerciseId, newExerciseId })`** — Replaces one exercise with another at the same position. Drops the outgoing exercise's logged sets (swap is destructive — if you wanted to keep the work, you wouldn't be swapping) and seeds an empty SetLog for the incoming exercise. Refuses if the new exercise is already in the session. Powers the one-tap swap affordance on each in-session exercise card.
-- **`completeActiveSession()`** — Marks the active session `completedAt: now`. Refuses if the session has zero sets (deletes it instead).
-- **`discardActiveSession()`** — Hard-deletes the active session and all its sets. Used when the user wants to throw away an in-progress workout.
-- **`reorderExercise({ exerciseId, direction: 'up' | 'down' })`** — Swaps the position of an exercise with its neighbor. Atomic — both updates run in one transaction so observers never see two exercises sharing a position.
+**Custom exercises.** Per-user customs (`ownerId = userId`) live in the same `Exercise` table as built-ins (`ownerId = null`). Deletes are soft (`deletedAt`), so historical SetLogs aren't orphaned — the `Restrict` FK on `SetLog.exerciseId` enforces this at the DB level too.
 
-### Set logging
+**Volume targets, user preferences, per-exercise settings, set notes.** Small upsert-style actions. Preferences are written through `PrefsContext`, not directly. Volume targets are per-(user, muscle); per-exercise settings are per-(user, exercise); set notes are per-`SetLog`. The user-preferences row is lazily created on first write (the query returns `PREFS_DEFAULTS` if missing).
 
-The most-frequently-called actions in the app — every rep and weight commit goes through `updateSet`.
+**Workout templates.** Named, reusable lineups. `saveActiveAsTemplate` snapshots exercises + order from the active session — not the logged sets. `startFromTemplate` creates a fresh active session from a template. User templates can be deleted; built-ins can only be hidden via `UserHiddenTemplate` (and unhidden later). The split is enforced at the action layer.
 
-- **`addSet({ exerciseId })`** — Adds a new set to an exercise that's already in the active session. Pre-fills reps/weight from the previous set so progressive overload is one tap. Throws `'Exercise not in active session'` if you call it for an exercise the user hasn't added — see `docs/decisions.md` for why we enforce this.
-- **`updateSet({ setLogId, reps, weight })`** — Updates a single set's reps and/or weight. Refuses if the parent session is already completed.
-- **`removeSet({ setLogId })`** — Deletes a set and renumbers the remaining sets for that exercise so they stay contiguous (1, 2, 3...). Done in one transaction. Cleans up the session if removing this set leaves it empty.
+**Routines.** The user's named cycle of templates. One per user, capped at 7 days. Two scheduling modes (`sequence` advances a cursor on completion; `weekday` reads today's `getDay()`). Pending swaps stage a one-time exercise substitution that applies when the session is started from the routine day; permanent swaps edit the underlying `TemplateExercise` and refuse to modify built-in templates. `startFromRoutineDay` populates a session and marks it with `startedFromRoutineDayId`; completing such a session advances the cursor in `sequence` mode. See [`docs/decisions.md`](./decisions.md) for the routines stance and [`docs/data-model.md`](./data-model.md) for the entities.
 
-### Custom exercises
+## Server-side queries: the categories
 
-Users can add their own exercises beyond the built-in seed list. Custom exercises are scoped to the creating user (`ownerId = userId`); built-ins have `ownerId: null`.
+Queries in `lib/queries.ts`. All take `userId` as the first parameter; never trust a client-supplied one. Some are `React.cache()`-wrapped (most prominently `getUserPreferences`).
 
-- **`createCustomExercise({ name, primaryMuscles, secondaryMuscles?, prescription?, videoUrl?, restTimerSeconds? })`** — Creates a new custom exercise plus its optional per-exercise rest override, in one transaction. Rejects names that collide with the user's existing customs.
-- **`deleteCustomExercise({ exerciseId })`** — Soft-deletes (`deletedAt: now`). Preserves SetLog history that references the exercise. Don't hard-delete; the schema's Restrict on SetLog blocks it anyway.
+**Active session and exercises.** `getActiveSession` returns the user's in-progress session or null; `getAvailableExercises` returns built-ins + non-deleted customs annotated with the user's per-exercise overrides; `getLastSetsByExercise` returns "what did I do last time" for the trailing 180 days (see [decisions.md](./decisions.md) on the window).
 
-### Volume targets
+**Coverage and volume.** A `Map<muscleId, Date>` of most-recent muscle hits (trailing 90 days) drives the color-graded coverage map; a `Map<muscleId, number>` of weighted weekly sets drives the volume bars. Primary muscles credit 1.0 per set, secondary 0.5 — coverage (recency) treats both equally.
 
-Per-user overrides for the "X sets per muscle per week" defaults.
+**Preferences and templates.** `getUserPreferences` returns defaults when no row exists, so first-render is cheap. `getTemplates` returns the user's templates + unhidden built-ins, **excluding templates currently used by the routine** (those surface through the routine timeline). `getHiddenBuiltinTemplates` drives the unhide UI in settings.
 
-- **`setVolumeTarget({ muscleId, target })`** — Upserts an override. `target` is a non-negative integer.
-- **`resetVolumeTarget({ muscleId })`** — Removes the override; the muscle reverts to the default in `MUSCLE_GROUPS`.
-
-### User preferences
-
-Rest timer behavior. The `PrefsContext` in `components/ui/prefs-context.tsx` calls this — components rarely call it directly.
-
-- **`updateUserPreferences({ restTimerEnabled?, restTimerSeconds?, restTimerSound?, restTimerVibrate? })`** — Partial update. Lazily creates the row on first call. Only fields included in the input are changed.
-
-### Per-exercise settings
-
-Currently just rest-timer overrides; the table exists for future per-(user, exercise) settings.
-
-- **`setExerciseRestOverride({ exerciseId, restTimerSeconds })`** — Sets or clears (when `restTimerSeconds` is `null`) the per-exercise rest override. The same row is used for built-ins and customs.
-
-### Set notes
-
-Free-text per-set annotations. Surfaced in the "last time" reference.
-
-- **`updateSetNotes({ setLogId, notes })`** — Empty string clears the note (stored as `null`). Trimmed.
-
-### Workout templates
-
-Named, reusable lineups. Saving captures only the exercises and order — not the logged sets.
-
-- **`saveActiveAsTemplate({ name, description? })`** — Snapshots the active session's exercises into a new user-owned (`isBuiltin: false`) template. Rejects collisions with the user's existing templates; doesn't check against built-ins (Postgres NULL semantics make `(null, name)` and `(userId, name)` distinct anyway).
-- **`startFromTemplate({ templateId })`** — Creates a fresh active session pre-populated with empty SetLogs from the template. Works for both user templates and unhidden built-ins. Refuses if the user already has an active session — they must complete or discard the current one first.
-- **`deleteTemplate({ templateId })`** — Removes a user-owned template. Throws if the target is a built-in (use `hideTemplate` instead). Existing sessions started from it are unaffected.
-- **`hideTemplate({ templateId })`** — Hides a built-in template from the user's list by inserting a `UserHiddenTemplate` row. Throws if the target isn't built-in. Idempotent.
-- **`unhideTemplate({ templateId })`** — Removes the user's hide marker for a built-in template. Idempotent.
-
-### Routines
-
-The user's named cycle of templates. One routine per user, capped at 7 days. See [`docs/decisions.md`](./decisions.md) for the stance and [`docs/data-model.md`](./data-model.md) for the entities.
-
-- **`createRoutine({ name, description?, scheduleStyle? })`** — Creates the user's routine. Throws if one already exists. `scheduleStyle` defaults to `'sequence'`.
-- **`updateRoutine({ name?, description?, scheduleStyle? })`** — Patches the routine. Switching `scheduleStyle` clears state that doesn't apply to the new mode (weekday assignments cleared, cursor reset).
-- **`deleteRoutine()`** — Removes the user's routine. Cascades to days and pending swaps. Sessions started from any of these days lose their FK (SetNull) but stay in history.
-- **`addRoutineDay({ templateId, label?, weekday? })`** — Appends a day to the routine. Position auto-assigned to `count`. Refuses if the routine is at the 7-day cap. In weekday mode, refuses if the weekday is already pinned.
-- **`updateRoutineDay({ routineDayId, templateId?, label?, weekday? })`** — Patches a day. Weekday updates are silently ignored in sequence mode.
-- **`removeRoutineDay({ routineDayId })`** — Deletes a day and renumbers remaining positions to stay contiguous from 0. Adjusts the cursor (`lastCompletedPosition`) if it pointed at or past the removed position.
-- **`reorderRoutineDay({ routineDayId, direction })`** — Swaps a day's position with its neighbor via a sentinel value to dodge the unique constraint.
-- **`setPendingSwap({ routineDayId, outExerciseId, inExerciseId })`** — Stages a one-time exercise substitution on a routine day. Validates the outgoing exercise is in the day's template and the incoming one is available to the user. Idempotent — re-staging replaces an existing swap for the same outgoing exercise.
-- **`clearPendingSwap({ routineDayId, outExerciseId })`** — Removes a staged swap. Idempotent.
-- **`swapInRoutineTemplate({ routineDayId, outExerciseId, inExerciseId })`** — Permanent swap: edits the underlying `TemplateExercise` so the change applies every time the template is used. Refuses to modify built-in templates (they're shared); user fixes by building their own template first.
-- **`startFromRoutineDay({ routineDayId })`** — Creates a fresh active session populated from the day's template, applying any pending swaps as the lineup is built. Marks the new session with `startedFromRoutineDayId` so completing it advances the routine cursor. Refuses if there's already an active session.
-- **`completeActiveSession()`** *(extended)* — Now also advances the routine cursor (`Routine.lastCompletedPosition`) when the completed session has a `startedFromRoutineDayId`.
-
-## Server-side queries
-
-Queries in `lib/queries.ts`. All take `userId` as the first parameter; never trust a client-supplied one.
-
-### Active session and exercises
-
-- **`getActiveSession(userId)`** — The user's in-progress session, or `null`. Includes setLogs, ordered by position then setNumber.
-- **`getAvailableExercises(userId)`** — Built-ins + the user's customs (excluding soft-deleted). Each row is augmented with `restTimerSecondsOverride` (the per-user setting if any).
-- **`getLastSetsByExercise(userId, excludeSessionId?)`** — For each exercise the user has logged in a *completed* session, the sets from the most recent such session. Drives the "last time" display. Capped to the trailing 180 days for performance — see `docs/decisions.md` and `lib/queries.ts` for the rationale.
-
-### Coverage and volume
-
-- **`getCoverageData(userId)`** — A `Map<muscleId, Date>` of when each muscle was most recently worked. Drives the color-graded coverage map. Capped to 90 days (the UI gradient maxes at 7 days neglected, anything older renders identically).
-- **`getWeeklyVolume(userId)`** — A `Map<muscleId, number>` of weighted sets per muscle in the trailing 7 days. Primary muscles count 1.0 per set, secondary count 0.5. Rounded to one decimal.
-- **`getUserVolumeTargets(userId)`** — A `Map<muscleId, target>` of the user's overrides.
-
-### Preferences and templates
-
-- **`getUserPreferences(userId)`** — The user's prefs, with defaults filled in if no row exists. Wrapped with `React.cache` so multiple callers in one request share a single DB hit.
-- **`getTemplates(userId)`** — User's templates plus built-in (`isBuiltin: true`, `userId: null`) templates the user hasn't hidden. Sorted built-ins first, then by `updatedAt`. Includes a small subset of the exercise relation (id, name, module, deletedAt) for preview rendering.
-- **`getHiddenBuiltinTemplates(userId)`** — Built-in templates the user has hidden. Drives the settings-page unhide list.
-
-### Routines
-
-- **`getRoutineForUser(userId)`** — Full routine with all days, each day's template (with exercises), and any pending swaps. Returns `null` if the user has no routine. Drives both the settings editor and the workout-page timeline.
-- **`getRoutineRecentSessions(userId, take)`** — Recent completed sessions started from a routine day, capped to the trailing 30 days and the `take` count. Drives the "Recent" portion of the timeline.
-
-Pure-logic helpers in `lib/routine.ts` accompany these:
-
-- **`pickTodaysRoutineDay(routine, now?)`** — Picks "today's day" per the routine's scheduling style. Sequence mode advances from `lastCompletedPosition`; weekday mode reads today's `getDay()`. Returns null when there's nothing for today (rest day in weekday mode, empty routine).
-- **`pickUpcomingRoutineDays(routine, todaysDay, now?)`** — Lists the days after today's. In weekday mode, walks forward through the next 7 weekdays. In sequence mode, returns the cycle order starting after today, wrapping back to position 0 (the wrap entry is the "loops back" indicator in the UI).
+**Routines.** `getRoutineForUser` returns the full nested structure (routine → days → template → exercises + pending swaps). `getRoutineRecentSessions` lists completed sessions started from a routine day. Pure-logic helpers in `lib/routine.ts` (`pickTodaysRoutineDay`, `pickUpcomingRoutineDays`) compute the timeline.
 
 ## HTTP routes
 

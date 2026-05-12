@@ -19,33 +19,22 @@ npm run db:seed                            # re-seed (reset ran seed against an 
 
 The seed (`seed.ts`) is idempotent — re-running it is safe and necessary after a reset.
 
-## Built-in vs custom exercises
+## Built-in vs custom (Exercise) and built-in vs user (WorkoutTemplate)
 
-The `Exercise` model serves both. The distinction:
+The structural split (`ownerId=null` / `userId=null` vs. the user's id) is in [`docs/data-model.md`](../docs/data-model.md). The operational rules:
 
-- **Built-in:** `ownerId` is null, `isCustom` is false. Shared across all users. Comes from `lib/exercises-data.ts` via the seed.
-- **Custom:** `ownerId` is the user's id, `isCustom` is true. Scoped to that user.
-
-Don't merge them. Don't add a separate `BuiltinExercise` model. The unified model is what lets the picker show them in one list and lets `requireAvailableExercise()` do one ownership check covering both cases (`OR: [{ ownerId: null }, { ownerId: userId }]`).
-
-## Built-in vs user workout templates
-
-`WorkoutTemplate` follows the same split:
-
-- **Built-in:** `userId` is null, `isBuiltin` is true. Shared. Seeded from `STARTER_TEMPLATES` in `lib/exercises-data.ts`. Users see them in the picker alongside their own templates and can hide any via `UserHiddenTemplate`, but can't delete or edit them. Re-running the seed rebuilds each built-in's exercise list from scratch (no revision history; that was the explicit scoping decision).
-- **User:** `userId` is set, `isBuiltin` is false. Owned by the creating user. `saveActiveAsTemplate` always creates this kind.
-
-The `@@unique([userId, name])` constraint relies on Postgres NULL semantics: two built-ins with the same name don't collide at the constraint level (NULLs are treated as distinct), so the seed is responsible for not creating duplicates. A user creating a custom template with the same name as a built-in (e.g. "Push") is fine — the unique key for `(null, 'Push')` and `(userId, 'Push')` is distinct. The UI uses the "Default" tag on built-ins to keep them visually separable.
-
-`UserHiddenTemplate` is a per-user side-table (mirrors `ExerciseUserSettings` shape). Inserting a row hides the template from `getTemplates`; deleting it unhides. The settings page exposes a list of hidden templates with an unhide button. `hideTemplate` enforces that the target is built-in; `deleteTemplate` enforces the inverse.
+- **Don't split the models.** A unified `Exercise` lets the picker render one list and `requireAvailableExercise()` does one ownership check covering both (`OR: [{ ownerId: null }, { ownerId: userId }]`). Same shape on `WorkoutTemplate`.
+- **The `@@unique([userId, name])` (and equivalent on `Exercise`) relies on Postgres treating NULLs as distinct.** `(null, 'Push')` and `(userId, 'Push')` coexist. The seed is responsible for not creating duplicates among built-ins; the action layer enforces the user side.
+- **Built-in templates have no revision history.** Re-running the seed rebuilds each built-in's exercise list from scratch. Users who want a customized version should fork to a user template (`saveActiveAsTemplate`).
+- **`hideTemplate` and `deleteTemplate` enforce the split.** `hideTemplate` requires `isBuiltin: true`; `deleteTemplate` requires the inverse. The settings page exposes the unhide UI.
 
 ## Soft-delete
 
-`Exercise.deletedAt` is set when a user removes a custom exercise. The exercise is hidden from all queries that filter `deletedAt: null`, but `SetLog` rows referencing it stay intact. This is why we use Restrict (not Cascade) on `SetLog.exercise`.
+`Exercise.deletedAt` is set when a user removes a custom exercise; the row stays so referencing `SetLog`s aren't orphaned. `SetLog.exercise` uses `Restrict` (not `Cascade`) — a hard delete would be blocked at the DB level.
 
-If you write a query that lists exercises, **include `deletedAt: null` in the where clause**. The existing queries do this; new ones must too. A soft-deleted exercise reappearing in the picker is a bug.
+If you write a query that lists exercises, **include `deletedAt: null` in the where clause**. A soft-deleted exercise reappearing in the picker is a bug.
 
-The `seed.ts` script intentionally clears `deletedAt` on built-ins it touches — so a built-in that was somehow soft-deleted gets restored on the next seed run. This shouldn't happen for built-ins (the UI doesn't expose a delete for them), but it's a self-healing belt.
+`seed.ts` intentionally clears `deletedAt` on built-ins it touches, so any built-in that was somehow soft-deleted gets restored on the next seed run. A self-healing belt — built-ins shouldn't get there in normal flow because the UI doesn't expose a delete for them.
 
 ## Prisma 7 layout
 

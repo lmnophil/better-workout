@@ -2,6 +2,8 @@
 
 The substantive design decisions made on this project, with the reasoning. Entries are appended over time. If you reverse a decision, don't delete the old entry — add a new one explaining why we changed our minds.
 
+**Brief vs detailed.** Promote a decision to the **Detailed** section when *any* of these hold: alternatives were genuinely worth considering, the call could plausibly be reversed under named circumstances, or a future session would re-litigate it without the context written down. Everything else stays in the **Brief list** as a one-or-two-sentence entry, ideally with an inline "reverse if…" clause when there's a real trigger.
+
 ---
 
 ## Brief list
@@ -15,11 +17,11 @@ These are decisions worth knowing but where the rationale is summarizable in a s
 - **Soft-delete for custom exercises.** `deletedAt` rather than hard delete preserves SetLog history. Built-in exercises are never deleted.
 - **`cuid()` for IDs, not UUIDs.** Sortable by creation time, shorter, Prisma's default.
 - **Set/rep prescription on the Exercise stays free-text.** `Exercise.prescription` is shared across every template that uses the exercise — keep it human-readable ("3×12, 5-sec hold") rather than structured. *Per-template* planning is a different story, see "Per-template planned sets and reps" below.
-- **Sessions auto-clean when emptied.** A session with zero sets is deleted, not preserved. Avoids the "phantom in-progress workout" UX.
+- **Sessions auto-clean when emptied.** A session with zero sets is deleted, not preserved. Avoids the "phantom in-progress workout" UX. *Reverse if* users complain about losing a just-started session by accident.
 - **Active session is one-at-a-time.** Enforced by the app, not the database. Convention: at most one `WorkoutSession` per user with `completedAt: null`. The schema doesn't have a partial unique constraint on this — `findFirst` ordered by date keeps it deterministic if a race ever creates two.
 - **Recency windows on coverage and last-sets queries.** 90 days for coverage, 180 for last-sets. The UI gradient maxes at 7 days neglected; older sessions render identically. Last-sets after 6 months is more confusing than helpful. Bounds memory growth.
 - **`React.cache()` on `getUserPreferences`.** Both layout and (formerly) page wanted it; cache de-duplicates the DB hit. Now layout is the only caller, but the cache stays.
-- **Muscle IDs use spaces** (`'rear delts'`, `'lower back'`). Cosmetic — chosen for label-readability when seed data is being authored. URL/debug output sometimes needs quoting; lived with.
+- **Muscle IDs use spaces** (`'rear delts'`, `'lower back'`). Cosmetic — chosen for label-readability when seed data is being authored. URL/debug output sometimes needs quoting; lived with. *Reverse if* muscle IDs ever appear in URL paths and the quoting friction outweighs the seed-readability win.
 - **Plain SQL gzipped backups.** Human-readable, partially restorable, no `pg_restore` needed. Tradeoff is larger files. Custom format is the right call once the DB grows to GB-scale; we're not there.
 - **Backups not encrypted at rest.** The user's offsite pipeline handles encryption. Doing it twice complicates restore.
 - **`x-logging` anchor in compose with json-file rotation.** All services share the same rotation policy. Compatible with future log shippers.
@@ -171,3 +173,18 @@ The UI shows two small "—×—" inputs next to each exercise in the routine ed
 **Why it stays.** Templates were always plans; this just lets users author the numerical part of the plan they were already declaring with their exercise lineup. It doesn't touch the neutral-tool stance — the user authors the numbers, the app represents them back. The seeder's history-first ordering means once you've actually done the workout, your real numbers replace the planned ones — the plan is a starting point, not a prescription.
 
 **Reverse if.** Users want rep *ranges* badly enough that the single-number model gets in the way (then `plannedReps` becomes `plannedRepsLow`/`plannedRepsHigh` with an Int alias for the common case). Or — the opposite — nobody uses the per-template numbers and they sit null forever, in which case strip the columns and revert to prescription-only.
+
+### Prefs come from a context provider, not from props
+
+**Context.** Both the workout page and the app shell header (cue toggle) need to read and write the same user prefs (rest-timer enabled, seconds, sound, vibrate). The initial implementation drilled a `preferences` prop into `WorkoutView` and held parallel local state in the header. The two desynced — toggling the rest-timer in the workout view didn't update the header cue toggle until the next server revalidation, because each surface had its own copy of the same data.
+
+**Decision.** Move prefs into `PrefsContext` (`components/ui/prefs-context.tsx`), provided at the app layout level. Both surfaces consume via `usePrefs()`; the settings page editor reads from the same context. Updates flow through `updatePrefs()`, which patches local state and calls the `updateUserPreferences` server action in one call. The settings page, the workout view, and the header cue toggle all stay in sync.
+
+**Alternatives considered.**
+- *Keep prop-drilling.* The pattern that caused the bug. Across a layout/page boundary, every consumer maintains its own copy of the same prop, and there's no built-in mechanism for one consumer's update to flow to a sibling.
+- *Server state only, no context.* Workable, but every toggle round-trips through `revalidatePath` before the UI reflects the change. Sluggish for a setting the user flips mid-workout.
+- *A global state library (Redux, Zustand, Jotai).* Overkill for a single shared object. Adds a dependency and a vocabulary the rest of the app doesn't use.
+
+**Why it stays.** `PrefsContext` is intentionally the *only* client-side context provider in the app. The rule it represents: shared *mutable* state that crosses the layout/page boundary uses context; everything else (which is almost everything) server-renders and revalidates. If you find yourself reaching for a second provider, check whether the data really needs to be mutable across boundaries — usually a server query is enough.
+
+**Reverse if.** A second concern develops the same shape (mutable, crosses the boundary, can't tolerate a server round-trip) and a more general pattern would be cleaner than two ad-hoc providers. Or React / Next.js evolves a primitive that makes this kind of share trivial without provider boilerplate.

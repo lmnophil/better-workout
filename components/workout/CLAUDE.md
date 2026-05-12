@@ -1,13 +1,6 @@
 # components/workout/CLAUDE.md
 
-The active workout UI. The most complex part of the frontend — the rest of the app is comparatively static. Read root `CLAUDE.md` first.
-
-## Component tree
-
-- `workout-view.tsx` — the top-level client component. Owns the active session render, the picker open state, the save-template dialog, the rest timer instance. Big file but linear.
-- `exercise-in-session.tsx` — one card per exercise in the active session: header, prescription, last-time reference, set rows, inline rest-timer override editor.
-- `exercise-picker.tsx` — bottom-sheet (mobile) / centered modal (desktop). Two tabs: browse + add custom.
-- `rest-timer.tsx` — `useRestTimer` hook + `RestTimerBar` UI. Absolute-deadline pattern (see below).
+The active workout UI. The most complex part of the frontend — the rest of the app is comparatively static. Read root `CLAUDE.md` first; for the file-level component tree see [`docs/codebase-map.md`](../../docs/codebase-map.md) §6. This doc covers the patterns and invariants that the code alone can't show.
 
 ## Prefs come from context, not props
 

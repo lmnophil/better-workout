@@ -1,6 +1,6 @@
 # Codebase map
 
-A point-in-time, code-grounded reference. Skim this once at the start of a session instead of re-discovering the codebase. For *rationale* read [decisions.md](decisions.md); for the *philosophical stance* read the root [CLAUDE.md](../CLAUDE.md). This doc is the "what's actually in the repo" reference.
+A point-in-time, code-grounded reference. Skim this once at the start of a session instead of re-discovering the codebase. For *rationale* read [decisions.md](decisions.md); for *working agreements* read the root [CLAUDE.md](../CLAUDE.md). This doc is the "what's actually in the repo" reference — it deliberately does not enumerate every action, query, or exercise (those lists drift; the code is authoritative).
 
 ---
 
@@ -26,7 +26,7 @@ If that number is in the dozens, this doc is probably stale enough to mislead. T
 
 Paste this to Claude in a fresh session:
 
-> Regenerate `docs/codebase-map.md`. Spawn an Explore subagent with the prompt that was used to build the previous version of this doc (preserved in the file's git history — `git log -p -- docs/codebase-map.md | head -200`). When the agent returns, rewrite the file end-to-end with new generation timestamp and `git rev-parse HEAD`. Keep the section structure stable so future diffs are useful.
+> Regenerate `docs/codebase-map.md` end-to-end. Spawn an Explore subagent to walk the codebase: schema, seeded data, server-action *categories* (not the enumerated list), query *categories*, routes, components, infra. Match the existing section structure so future diffs are readable. The doc deliberately avoids enumerating every action/query/exercise — describe shapes and invariants, not lists. When the agent returns, rewrite the file with a new `Generated at` (today's date) and `Generated from commit` (`git rev-parse HEAD`).
 
 ---
 
@@ -105,40 +105,26 @@ Live in `lib/starter-routines.ts` — PPL, Upper/Lower, Full Body, Mobility. Use
 
 ## 3. Server actions (`lib/actions.ts`)
 
-~39 exported. All wrapped with `withLogging('actionName', async fn)` for timing + metrics + error categorization. Every action: `requireUser()`, validates with Zod at the boundary, scopes DB queries by `userId`, calls `revalidatePath` after mutating. Expected user-facing errors are thrown as plain `Error('message')` matching `EXPECTED_MESSAGES` in `lib/observability.ts` so they log at warn (not error).
+All mutations go through here. Every action is wrapped with `withLogging('actionName', ...)` for timing + metrics + error categorization, calls `requireUser()`, Zod-validates inputs at the boundary, scopes DB writes by `userId`, and calls `revalidatePath` after mutating. Expected user-facing errors are thrown as plain `Error('message')` matching `EXPECTED_MESSAGES` in `lib/observability.ts` so they log at warn (not error).
 
-Grouped:
+Actions return nothing — the UI reads fresh data via queries on the page revalidation.
 
-- **Active session**: `addExercisesToActiveSession`, `removeExerciseFromActiveSession`, `completeActiveSession`, `discardActiveSession`, `swapExerciseInActiveSession`, `reorderExercise`
-- **Sets**: `addSet`, `updateSet`, `removeSet`, `repeatLastForExercise`, `updateSetNotes`
-- **Exercises**: `createCustomExercise`, `deleteCustomExercise` (soft-delete), `setExerciseRestOverride`, `setExerciseWeightIncrement`
-- **Templates**: `saveActiveAsTemplate`, `startFromTemplate`, `deleteTemplate`, `hideTemplate`, `unhideTemplate`
-- **Routines**: `createRoutine`, `updateRoutine`, `deleteRoutine`, `addRoutineDay`, `updateRoutineDay`, `removeRoutineDay`, `addExerciseToRoutineDay`, `updateRoutineDayExercise`, `removeExerciseFromRoutineDay`, `reorderRoutineDayExercise`, `reorderRoutineDay`, `setPendingSwap`, `clearPendingSwap`, `swapInRoutineTemplate`
-- **Startup**: `startFromRoutineDay` (applies pending swaps, advances `lastCompletedPosition`), `createRoutineFromDraft`
-- **Settings**: `updateUserPreferences`, `setVolumeTarget`, `resetVolumeTarget`
-
-Actions return nothing — UI reads fresh data via queries on the page revalidation.
-
-See [api.md](api.md) for the canonical signatures and conventions.
+The action surface is organized by `// =====` section headers in the file: session lifecycle, set logging, custom exercises, volume targets, user preferences, per-exercise settings, set notes, workout templates, routines (the largest section), and routine startup. To enumerate them, `grep -n '^export ' lib/actions.ts` — the code is the canonical list. See [api.md](api.md) for the conventions, the recipe for adding one, and what `withLogging` instruments for free.
 
 ---
 
 ## 4. Queries (`lib/queries.ts`)
 
-Server-side only — never import into client components. Some are wrapped with `cache()` for request-scoped dedup.
+Server-side only — never import into client components. Some are wrapped with `cache()` for request-scoped dedup (most prominently `getUserPreferences`, called from both the layout and pages).
 
-- `getActiveSession(userId)` — most recent session with `completedAt = null`; includes setLogs ordered by (position, setNumber).
-- `getLastSetsByExercise(userId, excludeSessionId?)` — Map of `exerciseId → { sessionDate, sets[] }`. Trailing 180 days. Excludes a session id when seeding the active one.
-- `getLastSetsForExerciseIds(...)` — narrower variant for set-seeding on add-exercise.
-- `getAvailableExercises(userId)` — built-ins + non-deleted customs, with `restTimerSecondsOverride` and `weightIncrementOverride` joined from `ExerciseUserSettings`. Sorted (isCustom, module, name).
-- `getCoverageData(userId)` — Map of `muscleId → mostRecentDate`. Trailing 90 days. Primary and secondary muscles both count for recency.
-- `getWeeklyVolume(userId)` — Map of `muscleId → setCount`. Trailing 7 days. Primary = 1.0 credit, secondary = 0.5. Rounded to 1 decimal.
-- `getUserVolumeTargets(userId)` — Map of overrides; missing keys fall back to `MUSCLE_GROUPS` defaults.
-- `getUserPreferences(userId)` — **React.cache'd**. Returns `PREFS_DEFAULTS` if no row.
-- `getTemplates(userId)` — user templates + built-ins not hidden by user, **excluding templates currently used by the routine** (those surface via the routine timeline instead).
-- `getRoutineForUser(userId)` — full nested structure: routine + days (ordered) + each day's template with exercises + pending swaps.
-- `getRoutineRecentSessions(userId, take=10)` — completed sessions in trailing 30 days that started from a routine day, with day metadata + set count.
-- `getHiddenBuiltinTemplates(userId)` — for the unhide UI in settings.
+What's load-bearing about the query surface, rather than the list itself:
+
+- **Recency windows are baked into the queries.** Coverage looks at trailing 90 days; the "last sets" lookup at trailing 180; weekly volume at 7. Tuned to the UI's gradient and to bound memory growth. See [decisions.md](decisions.md).
+- **Weighted credit for multi-muscle exercises.** Volume credits primary muscles at 1.0 and secondary at 0.5; coverage (recency) treats both equally. See [decisions.md](decisions.md).
+- **Templates currently used by the routine are excluded from `getTemplates`** — they surface through the routine timeline instead. If you write a new template-listing query, decide whether you want the same filter.
+- **`getUserPreferences` returns `PREFS_DEFAULTS` when no row exists**, so reads are cheap on every render and writes are lazy. The lazy-row pattern would extend to any future "one row per user" preference table.
+
+For canonical signatures, read `lib/queries.ts` directly — they're terse and the file is well-organized.
 
 ---
 
@@ -311,20 +297,7 @@ Zod schemas live inline in `lib/actions.ts` next to the action that uses them.
 
 ---
 
-## 14. Tests
-
-**No automated test suite by design.**
-
-Verification is a mix of:
-- `npm run typecheck` after meaningful changes (TypeScript types are load-bearing).
-- Playwright MCP via `.mcp.json` for UI work — drive the dev server in a real browser, navigate, click, screenshot, read console. Profile persists at `./.playwright-profile/` (gitignored) so future MCP sessions land pre-authenticated.
-- Tracing data flow through queries → actions → revalidation for state-shape changes.
-
-If you can't verify a UI change (no MCP, blocked by OAuth, etc.), say so explicitly rather than implying success.
-
----
-
-## 15. Surprises worth flagging
+## 14. Surprises worth flagging
 
 1. **JWT sessions, 1-year lifetime.** Appropriate for a fitness tracker — see [decisions.md](decisions.md). Don't shorten without a reason.
 2. **At-most-one active session per user is app-enforced, not DB-enforced.** Pragma. Don't add a partial unique index unless there's a reason.
@@ -335,17 +308,17 @@ If you can't verify a UI change (no MCP, blocked by OAuth, etc.), say so explici
 7. **One AudioContext shared across rest-timer chimes.** Browsers cap ~6 contexts per origin; per-call construction would exhaust and break audio.
 8. **`PrefsContext` is the only context provider.** Everything else is server-rendered + revalidation. Don't reach for Redux/Zustand.
 9. **No analytics, no Sentry-style error tracking.** `/api/log/client-error` + Pino is the entire pipeline.
-10. **Solo dev, disposable data, permanently.** See the project status section in CLAUDE.md before suggesting back-compat shims, staged rollouts, or migration glue. This isn't a "for now" — it's the stance.
+10. **Solo dev, disposable data, permanently.** See the project status section in CLAUDE.md before suggesting back-compat shims, staged rollouts, or migration glue. This isn't a "for now" — it's the project stance.
 
 ---
 
 ## When to update this doc
 
-Refresh in any of these situations:
+Refresh when something in this doc would mislead a fresh session. Concretely:
+
 - A schema change lands (models added/removed, fields renamed, FK behavior changed).
-- The actions or queries surface changes substantially (≥5 added/removed, or a renaming pass).
 - A new top-level route or major component subtree is added.
 - Auth, observability, or deployment shape changes (new provider, new metrics, new docker service).
-- The `git log --oneline 8f260c3..HEAD` count crosses ~50.
+- You're about to act on a specific claim in this file and you find the claim is no longer true — regenerate before relying on it.
 
-When you update, regenerate the whole thing — partial edits get out of sync with each other. Use the "Regenerate" recipe at the top.
+When you update, regenerate the whole thing using the "Regenerate" recipe at the top — partial edits drift against each other.
