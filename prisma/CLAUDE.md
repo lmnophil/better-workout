@@ -4,21 +4,15 @@ Schema, migrations, and seed data live here. Read the root `CLAUDE.md` first if 
 
 ## Schema changes — single-init policy
 
-This project keeps **one** migration: `prisma/migrations/<timestamp>_init/`. Every schema change squashes back into that single init migration rather than stacking new ones. There's no production deployment to protect, and the seed rebuilds the data we care about — so a fresh DB from a single migration is the source of truth, not a chain of incremental migrations.
+This project keeps **one** migration: `prisma/migrations/<timestamp>_init/`. Every schema change squashes back into that single init migration rather than stacking new ones. The seed rebuilds the data we care about, so a fresh DB from a single migration is the source of truth — and the project status (`CLAUDE.md`) treats this as permanent, not transitional.
 
-After editing `schema.prisma`, regenerate the init:
+After editing `schema.prisma`, regenerate the init (both `prisma migrate` commands require `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION` when run by Claude — see root CLAUDE.md):
 
 ```bash
-# Drop the existing init dir
 rm -rf prisma/migrations/*_init
-
-# Reset the local DB and create a new single init that matches the schema.
-# Both prisma commands require explicit consent when invoked by an AI agent —
-# pass it through PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION=<the user's
-# yes-message> when running on the user's behalf.
-npx prisma migrate reset --force          # drops DB, runs whatever migrations exist (none), runs seed
+npx prisma migrate reset --force          # drops DB, runs migrations (none), runs seed
 npx prisma migrate dev --name init        # creates fresh init from current schema
-npm run db:seed                            # re-seed (reset would have run seed against the empty schema, so re-run after the init applies)
+npm run db:seed                            # re-seed (reset ran seed against an empty schema, so re-run after init)
 ```
 
 `migration_lock.toml` stays put across resets.

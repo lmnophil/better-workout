@@ -4,14 +4,14 @@ The active workout UI. The most complex part of the frontend — the rest of the
 
 ## Component tree
 
-- `workout-view.tsx` — the top-level client component. Owns the active session render, the picker open state, the save-template dialog, the rest timer instance. Big file (~600 lines) but linear.
+- `workout-view.tsx` — the top-level client component. Owns the active session render, the picker open state, the save-template dialog, the rest timer instance. Big file but linear.
 - `exercise-in-session.tsx` — one card per exercise in the active session: header, prescription, last-time reference, set rows, inline rest-timer override editor.
 - `exercise-picker.tsx` — bottom-sheet (mobile) / centered modal (desktop). Two tabs: browse + add custom.
 - `rest-timer.tsx` — `useRestTimer` hook + `RestTimerBar` UI. Absolute-deadline pattern (see below).
 
 ## Prefs come from context, not props
 
-`workout-view.tsx` and the cue-toggle in the layout header both consume the same prefs state via `usePrefs()` from `components/ui/prefs-context.tsx`. If you reintroduce a `preferences` prop on `WorkoutView`, you've recreated the bug the audit fixed (see `docs/decisions.md` for the gory details if you want them).
+`workout-view.tsx` and the cue-toggle in the layout header both consume the same prefs state via `usePrefs()` from `components/ui/prefs-context.tsx`. Don't reintroduce a `preferences` prop on `WorkoutView` — prop-drilling prefs across the layout/page boundary caused state desync between the workout view and the header cue toggle (each held its own copy). See `docs/decisions.md` for the full write-up.
 
 The contract:
 - Read prefs: `const { prefs } = usePrefs()`
@@ -83,7 +83,7 @@ Save-from-active and start-from-template are fully implemented. There's no dedic
 
 If you add a new built-in template, edit `STARTER_TEMPLATES` and re-run `npm run db:seed`. The seeder rebuilds each built-in's exercise list on every run — there's no revision history (deliberate trade-off; users with their own customizations should fork to a user template).
 
-`SaveTemplateDialog` does NOT close optimistically — it awaits the action and surfaces collision errors inline. If you change this to optimistic, you've reintroduced a bug the audit fixed.
+`SaveTemplateDialog` does NOT close optimistically — it awaits the action and surfaces collision errors inline. Optimistic close would hide name-collision errors from the user (e.g. trying to save a template with a name they already used) by dismissing the dialog before the error fires.
 
 ## Things you might want to do that would be wrong
 

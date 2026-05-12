@@ -6,11 +6,11 @@ This is the API surface of the workout tracker. It's a guidebook, not exhaustive
 
 The app has three distinct ways of being called, and they answer different questions.
 
-**Server actions** (`lib/actions.ts`). The application API. Every state change goes through here. Twenty-one functions, organized into nine categories below. Called directly from React components — Next.js handles the wire format. When someone says "the API," this is usually what they mean.
+**Server actions** (`lib/actions.ts`). The application API. Every state change goes through here, organized into the categories below. Called directly from React components — Next.js handles the wire format. When someone says "the API," this is usually what they mean.
 
-**Server-side queries** (`lib/queries.ts`). Reads, called only from server components. Eight functions. Never called from a browser; never wrapped in HTTP handlers.
+**Server-side queries** (`lib/queries.ts`). Reads, called only from server components. Never called from a browser; never wrapped in HTTP handlers.
 
-**HTTP routes** (`app/api/*`). System-level endpoints — auth handler, health check, metrics scrape, error sink. Four routes total. None of them are how the app does its actual work; they exist because something outside React needs to talk to the app (Docker, Prometheus, the browser's error boundary).
+**HTTP routes** (`app/api/*`). System-level endpoints — auth handler, health check, metrics scrape, error sink. None of them are how the app does its actual work; they exist because something outside React needs to talk to the app (Docker, Prometheus, the browser's error boundary).
 
 **Default to server actions.** When you're adding "the user can do X," the answer is almost always a new action in `lib/actions.ts`. Reach for an HTTP route only when there's a specific reason it can't be a server action — typically: it must be unauthenticated, it must return a non-HTML format, or it's called by something other than the React app.
 
@@ -74,7 +74,7 @@ Every server action calls `requireUser()` first; the function throws `'Unauthori
 
 ## Server actions
 
-Thirty-plus actions in `lib/actions.ts`, grouped into ten categories that match the `// =====` section headers in the file.
+Actions in `lib/actions.ts` are grouped by the `// =====` section headers in the file; the categories below mirror those headers.
 
 ### Session lifecycle
 
@@ -156,7 +156,7 @@ The user's named cycle of templates. One routine per user, capped at 7 days. See
 
 ## Server-side queries
 
-Eight queries in `lib/queries.ts`. All take `userId` as the first parameter; never trust a client-supplied one.
+Queries in `lib/queries.ts`. All take `userId` as the first parameter; never trust a client-supplied one.
 
 ### Active session and exercises
 

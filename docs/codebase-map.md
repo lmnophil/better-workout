@@ -32,7 +32,7 @@ Paste this to Claude in a fresh session:
 
 ## TL;DR
 
-Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript strict + Prisma 7 + Postgres 16, deployed via Docker Compose (postgres + app + nightly pg_dump backup). Auth.js v5 with Google OAuth + Resend magic links, JWT sessions. Single-user / small-group; no live users yet (see project status section in CLAUDE.md). Mutations go through server actions in `lib/actions.ts`; reads go through `lib/queries.ts`. The two routine concepts to internalise: a **WorkoutSession is a record of what happened** (date + sets), a **Routine is the user's declared plan** (a cycle of templates) — the app does not invent or prescribe.
+Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript strict + Prisma 7 + Postgres 16, deployed via Docker Compose (postgres + app + nightly pg_dump backup). Auth.js v5 with Google OAuth + Resend magic links, JWT sessions. Single-user / small-group; data is disposable by design (see project status section in CLAUDE.md). Mutations go through server actions in `lib/actions.ts`; reads go through `lib/queries.ts`. The two routine concepts to internalise: a **WorkoutSession is a record of what happened** (date + sets), a **Routine is the user's declared plan** (a cycle of templates) — the app does not invent or prescribe.
 
 ---
 
@@ -288,7 +288,7 @@ JSON-file log driver, 10MB × 5 with gzip per service.
 
 Read these when working in the matching directory.
 
-- **[`prisma/CLAUDE.md`](../prisma/CLAUDE.md)** — single-init migration policy (we squash, especially while pre-prod), built-in vs custom split, soft-delete + Restrict pattern, Prisma 7 layout (client at `prisma/generated/prisma/client`), driver adapter, seed idempotence, schema invariants.
+- **[`prisma/CLAUDE.md`](../prisma/CLAUDE.md)** — single-init migration policy (schema changes squash back into one init; data is disposable), built-in vs custom split, soft-delete + Restrict pattern, Prisma 7 layout (client at `prisma/generated/prisma/client`), driver adapter, seed idempotence, schema invariants.
 - **[`app/api/CLAUDE.md`](../app/api/CLAUDE.md)** — middleware matcher gotcha (excluded paths), rate-limit-before-body-parse, authenticated vs unauthenticated endpoints, reverse-proxy IP visibility + Caddy snippet for internal endpoints.
 - **[`components/workout/CLAUDE.md`](../components/workout/CLAUDE.md)** — component tree, prefs-from-context (not props), SetRow commit semantics, rest timer absolute-deadline design, AudioContext singleton, picker modes, muscle-chip taxonomy.
 - **[`scripts/CLAUDE.md`](../scripts/CLAUDE.md)** — POSIX sh constraints (busybox ash, no bash-isms), atomic writes, pruning logic, schedule math.
@@ -335,7 +335,7 @@ If you can't verify a UI change (no MCP, blocked by OAuth, etc.), say so explici
 7. **One AudioContext shared across rest-timer chimes.** Browsers cap ~6 contexts per origin; per-call construction would exhaust and break audio.
 8. **`PrefsContext` is the only context provider.** Everything else is server-rendered + revalidation. Don't reach for Redux/Zustand.
 9. **No analytics, no Sentry-style error tracking.** `/api/log/client-error` + Pino is the entire pipeline.
-10. **Pre-production, solo dev.** See the project status section in CLAUDE.md before suggesting back-compat shims, staged rollouts, or migration glue.
+10. **Solo dev, disposable data, permanently.** See the project status section in CLAUDE.md before suggesting back-compat shims, staged rollouts, or migration glue. This isn't a "for now" — it's the stance.
 
 ---
 

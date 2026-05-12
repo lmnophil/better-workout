@@ -34,6 +34,12 @@ run_backup
 # specifiers — avoids portability issues with date arithmetic flags.
 # Strip leading zeros via sed so the shell doesn't interpret them as octal
 # (busybox sh doesn't support bash's 10# notation).
+#
+# Edge cases to re-verify if you change this:
+#   - now=00:00:00, target=00  -> 86400 (just missed it, wait 24h)
+#   - now=02:59:59, target=03  -> 1     (just over a second away)
+#   - now=04:00:00, target=03  -> 82800 (23h)
+# A bug here means backups silently stop happening at the right time.
 seconds_until_target_hour() {
   hour=$(date -u +"%H" | sed 's/^0*//')
   minute=$(date -u +"%M" | sed 's/^0*//')

@@ -51,16 +51,6 @@ ls -1t "$BACKUP_DIR"/*.sql.gz | tail -n +"$((KEEP + 1))"
 
 This relies on filenames being unique, which they are because timestamps include seconds.
 
-## Schedule math
-
-`backup-loop.sh::seconds_until_target_hour` computes seconds-until-next-occurrence of a given UTC hour. Edge cases tested:
-
-- `00:00:00` target `00` → 86400 (we just missed it; wait 24h)
-- `02:59:59` target `03` → 1 (just over a second away)
-- `04:00:00` target `03` → 82800 (23h)
-
-If you change this function, re-test these. A bug here means backups silently stop happening at the right time.
-
 ## Things you might want to do that would be wrong
 
 - **Adding bash-only syntax.** Test under busybox or you'll break production with no warning until 3 AM tomorrow.

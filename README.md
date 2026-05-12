@@ -4,7 +4,7 @@ A self-hosted workout tracker that supports flexible, freeform sessions guided b
 
 The app is deliberately neutral about *how* you train — no prescribed program, no opinionated suggestions. It just shows you the data: what you've done, what's been neglected, where you are versus your weekly volume targets. You craft the workout.
 
-> **For AI assistants and developers:** start with [`CLAUDE.md`](./CLAUDE.md) at the repo root. It's the standing brief on the project's stance, conventions, and gotchas. Substantive design decisions and the reasoning behind them are in [`docs/decisions.md`](./docs/decisions.md); deferred features are in [`docs/roadmap.md`](./docs/roadmap.md).
+> **For AI assistants and developers:** start with [`CLAUDE.md`](./CLAUDE.md) at the repo root. It's the standing brief on the project's stance, conventions, and gotchas. Substantive design decisions and the reasoning behind them are in [`docs/decisions.md`](./docs/decisions.md).
 
 ## Design principles
 
@@ -52,8 +52,7 @@ workout-tracker/
 ├── DEPLOY.md                    End-to-end deployment guide
 ├── CADDY.md                     Putting an external Caddy in front of the app
 ├── docs/
-│   ├── decisions.md             Substantive decisions + reasoning
-│   └── roadmap.md               Deliberately deferred features
+│   └── decisions.md             Substantive decisions + reasoning
 ├── app/                         Next.js App Router
 │   ├── (app)/                   Authenticated routes (workout, coverage, settings)
 │   ├── (auth)/                  Sign-in, magic-link verification

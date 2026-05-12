@@ -23,7 +23,6 @@ These are decisions worth knowing but where the rationale is summarizable in a s
 - **Plain SQL gzipped backups.** Human-readable, partially restorable, no `pg_restore` needed. Tradeoff is larger files. Custom format is the right call once the DB grows to GB-scale; we're not there.
 - **Backups not encrypted at rest.** The user's offsite pipeline handles encryption. Doing it twice complicates restore.
 - **`x-logging` anchor in compose with json-file rotation.** All services share the same rotation policy. Compatible with future log shippers.
-- **Cross-method account linking by verified email.** `allowDangerousEmailAccountLinking: true` is set on the Google provider so a user who signed up via magic link can later sign in with Google (and vice versa) without hitting `OAuthAccountNotLinked`. Safe here because both of our providers gate on a verified email — Google verifies before issuing tokens, and Resend magic links require clicking a link delivered to the inbox. The "dangerous" warning applies to providers that don't verify emails or to password signups; we have neither.
 
 ---
 
@@ -127,6 +126,27 @@ The framing matters: a routine is a *representation* of the user's own cycle, no
 **Why it stays.** Templates were always plans; routines are the same kind of object scaled up to a cycle. The schema cost is small (3 models + 1 nullable FK), the cursor model is honest about how training really progresses (next-in-sequence, not calendar-shame), and the cap on size keeps the UI predictable.
 
 **Reverse if.** Users adopt routines and find the cap too tight (rotate to weekday mode, or revisit the cap). Or the next-in-sequence model fights actual usage — e.g. people skipping arbitrary days and wanting the cursor to track which one they actually did, not just advance — in which case the cursor probably becomes a `lastCompletedDayId` rather than a position.
+
+### Cross-method account linking by verified email
+
+**Context.** Auth.js v5 supports Google OAuth and email magic links as separate providers. By default, signing up with one provider and later attempting the other for the same email throws `OAuthAccountNotLinked` — the user is locked out of their own account from the alternate path. Auth.js's `allowDangerousEmailAccountLinking` flag bypasses this, but the "dangerous" label exists for good reasons.
+
+**Decision.** Set `allowDangerousEmailAccountLinking: true` on the Google provider. A user who signed up via magic link can later sign in with Google (and vice versa) without account-linking errors.
+
+**Why this is safe here.** The "dangerous" warning targets account-takeover via *unverified* email. The classic attack: an attacker creates an OAuth account with a fake `email_verified: true` claim using a provider that doesn't actually verify, then "links" to a victim's existing account. Neither of our providers has that hole:
+
+- **Google** verifies email ownership before issuing OAuth tokens — `email_verified: true` from Google is real.
+- **Resend magic links** require the user to click a link delivered to their inbox, so signing in via magic link proves current control of the address.
+
+Both providers therefore prove "I currently control this email" at sign-in time. Linking them is safe because either provider already establishes the trust the other needs.
+
+**Alternatives considered.**
+- *Leave the default behavior on.* Means a user who signs in once with magic link can never use the Google button for the same address without manual intervention. Real friction; no security benefit given our verified-email-on-both-sides setup.
+- *Manual linking UI.* Build a settings screen where the user explicitly links their second provider. Overengineered — the flag already produces the right behavior given our threat model.
+
+**Why it stays.** Removes a sign-in dead-end for a self-host audience that has no incentive to attack themselves. The verified-email property of both providers is load-bearing — if either ever gets swapped for a provider that doesn't verify email, this decision flips.
+
+**Reverse if.** A password-based signup is added (passwords + linking-by-email = the classic vulnerability), or either provider is replaced with one that doesn't gate on a verified email.
 
 ### Per-template planned sets and reps
 

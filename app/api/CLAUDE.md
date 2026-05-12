@@ -21,7 +21,7 @@ Currently excluded:
 - `api/log/*` — error-reporting endpoints must work for unauthenticated clients
 - Static assets, manifest, service worker
 
-**If you add a public-or-system endpoint, update the matcher in `middleware.ts`.** This bug already happened once and would have caused an outage on first deploy — the audit log entry in `docs/decisions.md` is honest about it.
+**If you add a public-or-system endpoint, update the matcher in `middleware.ts`.** Forgetting this means Docker's healthcheck (or Prometheus, or the client-error sink) gets redirected to `/signin`, returns a 307 instead of a 200, and the container is restarted in a loop. Verify any new public endpoint by hitting it with `curl -i` and confirming the status code, not just the body.
 
 The pattern is:
 
