@@ -1316,6 +1316,7 @@ async function cloneTemplateForUser(
           plannedSets: te.plannedSets,
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
+          note: te.note,
         })),
       },
     },
@@ -1333,6 +1334,7 @@ type FreshTemplateExerciseInput = {
   plannedSets?: number | null;
   plannedReps?: number | null;
   plannedSeconds?: number | null;
+  note?: string | null;
 };
 
 async function freshTemplateForUser(
@@ -1372,6 +1374,7 @@ async function freshTemplateForUser(
           plannedSets: e.plannedSets ?? null,
           plannedReps: e.plannedReps ?? null,
           plannedSeconds: e.plannedSeconds ?? null,
+          note: e.note ?? null,
         })),
       },
     },
@@ -1618,13 +1621,23 @@ const UpdateRoutineDaySchema = z.object({
   // identity. We resolve collisions with uniqueTemplateName so the user's
   // chosen text is preserved when possible.
   name: z.string().trim().min(1).max(80).optional(),
+  // Free-text paragraph framing the whole day. Trims; empty → null.
+  description: z
+    .string()
+    .max(2000)
+    .transform((s) => {
+      const trimmed = s.trim();
+      return trimmed.length === 0 ? null : trimmed;
+    })
+    .nullable()
+    .optional(),
 });
 
 export const updateRoutineDay = withLogging('updateRoutineDay', async (
   input: z.infer<typeof UpdateRoutineDaySchema>,
 ) => {
   const userId = await requireUser();
-  const { routineDayId, label, weekday, name } = UpdateRoutineDaySchema.parse(input);
+  const { routineDayId, label, weekday, name, description } = UpdateRoutineDaySchema.parse(input);
 
   const day = await db.routineDay.findFirst({
     where: { id: routineDayId, routine: { userId } },
@@ -1664,12 +1677,13 @@ export const updateRoutineDay = withLogging('updateRoutineDay', async (
         data: { name: resolved },
       });
     }
-    if (label !== undefined || effectiveWeekday !== undefined) {
+    if (label !== undefined || effectiveWeekday !== undefined || description !== undefined) {
       await tx.routineDay.update({
         where: { id: routineDayId },
         data: {
           ...(label !== undefined ? { label: label || null } : {}),
           ...(effectiveWeekday !== undefined ? { weekday: effectiveWeekday } : {}),
+          ...(description !== undefined ? { description } : {}),
         },
       });
     }
@@ -1761,6 +1775,18 @@ export const removeRoutineDay = withLogging('removeRoutineDay', async (
 const PlannedSetsSchema = z.number().int().min(1).max(20).nullable().optional();
 const PlannedRepsSchema = z.number().int().min(1).max(100).nullable().optional();
 const PlannedSecondsSchema = z.number().int().min(1).max(3600).nullable().optional();
+// Free-text note on a routine-day exercise. 2000 chars covers multi-paragraph
+// PT-style annotations comfortably. Trim then collapse empty strings to null
+// so blanking the textarea clears the column rather than persisting "".
+const RoutineExerciseNoteSchema = z
+  .string()
+  .max(2000)
+  .transform((s) => {
+    const trimmed = s.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  })
+  .nullable()
+  .optional();
 
 const AddExerciseToRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
@@ -1768,13 +1794,14 @@ const AddExerciseToRoutineDaySchema = z.object({
   plannedSets: PlannedSetsSchema,
   plannedReps: PlannedRepsSchema,
   plannedSeconds: PlannedSecondsSchema,
+  note: RoutineExerciseNoteSchema,
 });
 
 export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', async (
   input: z.infer<typeof AddExerciseToRoutineDaySchema>,
 ) => {
   const userId = await requireUser();
-  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds } =
+  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds, note } =
     AddExerciseToRoutineDaySchema.parse(input);
 
   const day = await db.routineDay.findFirst({
@@ -1806,6 +1833,7 @@ export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', as
       plannedSets: plannedSets ?? null,
       plannedReps: plannedReps ?? null,
       plannedSeconds: plannedSeconds ?? null,
+      note: note ?? null,
     },
   });
 
@@ -1819,18 +1847,19 @@ const UpdateRoutineDayExerciseSchema = z.object({
   plannedSets: PlannedSetsSchema,
   plannedReps: PlannedRepsSchema,
   plannedSeconds: PlannedSecondsSchema,
+  note: RoutineExerciseNoteSchema,
 });
 
 /**
- * Edit a routine-day exercise's planned set/rep/seconds numbers. Pass null to
- * clear a field; omit to leave it untouched. Operates on the day's owned
- * template.
+ * Edit a routine-day exercise's planned set/rep/seconds numbers or its free-text
+ * note. Pass null to clear a field; omit to leave it untouched. Operates on the
+ * day's owned template.
  */
 export const updateRoutineDayExercise = withLogging('updateRoutineDayExercise', async (
   input: z.infer<typeof UpdateRoutineDayExerciseSchema>,
 ) => {
   const userId = await requireUser();
-  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds } =
+  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds, note } =
     UpdateRoutineDayExerciseSchema.parse(input);
 
   const day = await db.routineDay.findFirst({
@@ -1851,6 +1880,7 @@ export const updateRoutineDayExercise = withLogging('updateRoutineDayExercise', 
       ...(plannedSets !== undefined ? { plannedSets } : {}),
       ...(plannedReps !== undefined ? { plannedReps } : {}),
       ...(plannedSeconds !== undefined ? { plannedSeconds } : {}),
+      ...(note !== undefined ? { note } : {}),
     },
   });
 
@@ -1960,6 +1990,73 @@ export const reorderRoutineDayExercise = withLogging(
   },
 );
 
+const SetRoutineDayExerciseOrderSchema = z.object({
+  routineDayId: z.string().min(1),
+  // Full desired order of the day's exercises, by exerciseId. Must contain
+  // exactly the exercises currently in the day — no additions, no removals.
+  // For partial reorders (just swapping two), use reorderRoutineDayExercise.
+  exerciseIds: z.array(z.string().min(1)).max(50),
+});
+
+/**
+ * Set the full order of a routine day's exercises in one shot. Used by the
+ * "Sort by module" affordance in the routine editor — it computes the
+ * canonical module-ordered sequence client-side and ships the whole list,
+ * which is cheaper and atomic compared to a chain of pairwise swaps.
+ * The two-pass write (everything to negative sentinels, then to the desired
+ * positions) avoids collisions with the (templateId, position) unique index.
+ */
+export const setRoutineDayExerciseOrder = withLogging(
+  'setRoutineDayExerciseOrder',
+  async (input: z.infer<typeof SetRoutineDayExerciseOrderSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, exerciseIds } = SetRoutineDayExerciseOrderSchema.parse(input);
+
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      select: { templateId: true },
+    });
+    if (!day) throw new Error('Routine day not found');
+
+    const entries = await db.templateExercise.findMany({
+      where: { templateId: day.templateId },
+      select: { id: true, exerciseId: true },
+    });
+
+    if (entries.length !== exerciseIds.length) {
+      throw new Error("Reorder list doesn't match the day's exercises.");
+    }
+    const idByExercise = new Map(entries.map((e) => [e.exerciseId, e.id] as const));
+    if (exerciseIds.some((id) => !idByExercise.has(id))) {
+      throw new Error("Reorder list doesn't match the day's exercises.");
+    }
+    if (new Set(exerciseIds).size !== exerciseIds.length) {
+      throw new Error('Reorder list has duplicate exercises.');
+    }
+
+    await db.$transaction([
+      // Park everything at distinct negative positions to free up the target
+      // range without violating the unique index.
+      ...entries.map((e, i) =>
+        db.templateExercise.update({
+          where: { id: e.id },
+          data: { position: -(i + 1) },
+        }),
+      ),
+      // Now place each entry at its new position based on exerciseIds order.
+      ...exerciseIds.map((exerciseId, position) =>
+        db.templateExercise.update({
+          where: { id: idByExercise.get(exerciseId)! },
+          data: { position },
+        }),
+      ),
+    ]);
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
+
 const ReorderRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
   direction: z.enum(['up', 'down']),
@@ -2013,6 +2110,82 @@ export const reorderRoutineDay = withLogging('reorderRoutineDay', async (
   revalidatePath('/');
   revalidatePath('/routine');
   revalidatePath('/settings');
+});
+
+const DuplicateRoutineDaySchema = z.object({
+  routineDayId: z.string().min(1),
+});
+
+/**
+ * Clone a routine day, appending a new day at the end of the routine. The
+ * new day always gets its own owned template (per the routine-day invariant)
+ * — we copy each TemplateExercise from the source's template, carrying
+ * planned numerics and the free-text note. The clone is intentionally
+ * weekday-unassigned even when the source was pinned: the user picks the new
+ * weekday explicitly to avoid silent overwrites or surprise re-orderings.
+ * Refuses past MAX_ROUTINE_DAYS.
+ */
+export const duplicateRoutineDay = withLogging('duplicateRoutineDay', async (
+  input: z.infer<typeof DuplicateRoutineDaySchema>,
+) => {
+  const userId = await requireUser();
+  const { routineDayId } = DuplicateRoutineDaySchema.parse(input);
+
+  const source = await db.routineDay.findFirst({
+    where: { id: routineDayId, routine: { userId } },
+    include: {
+      template: {
+        include: {
+          exercises: { orderBy: { position: 'asc' } },
+        },
+      },
+      routine: { select: { id: true, _count: { select: { days: true } } } },
+    },
+  });
+  if (!source) throw new Error('Routine day not found');
+
+  if (source.routine._count.days >= MAX_ROUTINE_DAYS) {
+    throw new Error(`Routine is already at the ${MAX_ROUTINE_DAYS}-day cap.`);
+  }
+
+  const nextPosition = source.routine._count.days;
+  const newTemplateName = await uniqueTemplateName(db, userId, source.template.name);
+
+  await db.$transaction(async (tx) => {
+    const newTemplate = await tx.workoutTemplate.create({
+      data: {
+        userId,
+        isBuiltin: false,
+        name: newTemplateName,
+        exercises: {
+          create: source.template.exercises.map((te) => ({
+            exerciseId: te.exerciseId,
+            position: te.position,
+            plannedSets: te.plannedSets,
+            plannedReps: te.plannedReps,
+            plannedSeconds: te.plannedSeconds,
+            plannedWeight: te.plannedWeight,
+            note: te.note,
+          })),
+        },
+      },
+    });
+    await tx.routineDay.create({
+      data: {
+        routineId: source.routine.id,
+        templateId: newTemplate.id,
+        position: nextPosition,
+        // Always unpinned — the user assigns a weekday explicitly. See the
+        // action's doc comment for why we don't carry source.weekday over.
+        weekday: null,
+        label: source.label,
+        description: source.description,
+      },
+    });
+  });
+
+  revalidatePath('/');
+  revalidatePath('/routine');
 });
 
 const SetPendingSwapSchema = z.object({
@@ -2174,6 +2347,7 @@ const DraftExerciseSchema = z.object({
   plannedSets: PlannedSetsSchema,
   plannedReps: PlannedRepsSchema,
   plannedSeconds: PlannedSecondsSchema,
+  note: RoutineExerciseNoteSchema,
 });
 
 const DraftDaySchema = z
@@ -2187,6 +2361,15 @@ const DraftDaySchema = z
     seedTemplateId: z.string().min(1).optional(),
     exercises: z.array(DraftExerciseSchema).max(50).optional(),
     label: z.string().trim().max(60).optional(),
+    description: z
+      .string()
+      .max(2000)
+      .transform((s) => {
+        const trimmed = s.trim();
+        return trimmed.length === 0 ? null : trimmed;
+      })
+      .nullable()
+      .optional(),
     weekday: z.number().int().min(0).max(6).nullable().optional(),
   })
   .refine((d) => !(d.seedTemplateId && d.exercises && d.exercises.length > 0), {
@@ -2271,6 +2454,7 @@ export const createRoutineFromDraft = withLogging('createRoutineFromDraft', asyn
               plannedSets: e.plannedSets ?? null,
               plannedReps: e.plannedReps ?? null,
               plannedSeconds: e.plannedSeconds ?? null,
+              note: e.note ?? null,
             })),
           );
 
@@ -2281,6 +2465,7 @@ export const createRoutineFromDraft = withLogging('createRoutineFromDraft', asyn
           position: i,
           weekday: effectiveWeekday,
           label: day.label?.trim() || null,
+          description: day.description ?? null,
         },
       });
     }

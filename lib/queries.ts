@@ -11,6 +11,12 @@ export type AvailableExercise = Awaited<ReturnType<typeof getAvailableExercises>
 /**
  * Get the user's currently in-progress session, if any.
  * Active = completedAt is null. By app convention there's at most one.
+ *
+ * Also pulls the routine-day template the session was started from (if any),
+ * so the active-session UI can surface per-exercise notes the user wrote on
+ * the routine. Notes are scoped to the day's template at start time — if the
+ * user edits the routine mid-session, the change shows up immediately because
+ * this loads live from the template, not a session-time snapshot.
  */
 export async function getActiveSession(userId: string) {
   return db.workoutSession.findFirst({
@@ -20,6 +26,17 @@ export async function getActiveSession(userId: string) {
       setLogs: {
         // Order by user-controlled position first, then set number within an exercise
         orderBy: [{ position: 'asc' }, { setNumber: 'asc' }],
+      },
+      startedFromRoutineDay: {
+        select: {
+          template: {
+            select: {
+              exercises: {
+                select: { exerciseId: true, note: true },
+              },
+            },
+          },
+        },
       },
     },
   });

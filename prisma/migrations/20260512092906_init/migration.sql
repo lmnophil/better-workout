@@ -151,6 +151,7 @@ CREATE TABLE "TemplateExercise" (
     "plannedReps" INTEGER,
     "plannedSeconds" INTEGER,
     "plannedWeight" DOUBLE PRECISION,
+    "note" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "TemplateExercise_pkey" PRIMARY KEY ("id")
@@ -193,6 +194,7 @@ CREATE TABLE "RoutineDay" (
     "position" INTEGER NOT NULL,
     "weekday" INTEGER,
     "label" TEXT,
+    "description" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

@@ -21,7 +21,12 @@ import { NotificationBell } from '@/components/layout/notification-bell';
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session?.user?.id) {
-    redirect('/signin');
+    // Route through the recover endpoint instead of straight to /signin so the
+    // stale session cookie gets cleared on the way. Otherwise middleware (which
+    // uses the Edge-safe auth config and can't see that the JWT's user no
+    // longer exists in the DB) keeps treating the cookie as valid and bounces
+    // the user back into the protected area — see app/api/auth/recover/route.ts.
+    redirect('/api/auth/recover');
   }
   const userId = session.user.id;
 

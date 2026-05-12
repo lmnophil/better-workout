@@ -24,10 +24,13 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  ArrowDownAZ,
   ChevronDown,
   ChevronUp,
+  Copy,
   Plus,
   Replace,
+  StickyNote,
   Trash2,
   X,
 } from 'lucide-react';
@@ -38,10 +41,12 @@ import {
   createRoutineFromDraft,
   deleteCustomExercise,
   deleteRoutine,
+  duplicateRoutineDay,
   removeExerciseFromRoutineDay,
   removeRoutineDay,
   reorderRoutineDay,
   reorderRoutineDayExercise,
+  setRoutineDayExerciseOrder,
   swapInRoutineTemplate,
   updateRoutine,
   updateRoutineDay,
@@ -53,7 +58,7 @@ import {
   WEEKDAY_LABELS,
   type ScheduleStyle,
 } from '@/lib/routine';
-import { moduleDescription } from '@/lib/exercises-data';
+import { EXERCISE_MODULES, moduleDescription } from '@/lib/exercises-data';
 import {
   buildStarterRoutine,
   EQUIPMENT_GROUPS,
@@ -83,21 +88,68 @@ type DayExercise = {
   plannedSets: number | null;
   plannedReps: number | null;
   plannedSeconds: number | null;
+  note: string | null;
 };
 
 type EditorDay = {
   id: string;
   name: string;
   label: string | null;
+  description: string | null;
   weekday: number | null;
   exercises: DayExercise[];
 };
+
+// Module → canonical rank (smaller = earlier in a session). Unknown / custom
+// modules fall through to the end, in first-appearance order.
+const MODULE_ORDER_MAP = new Map<string, number>(
+  EXERCISE_MODULES.map((m, i) => [m, i] as const),
+);
+const UNKNOWN_MODULE_RANK = EXERCISE_MODULES.length;
+function moduleRank(m: string): number {
+  return MODULE_ORDER_MAP.get(m) ?? UNKNOWN_MODULE_RANK;
+}
+
+type ModuleGroup<T extends { module: string }> = { module: string; exercises: T[] };
+
+// Group day exercises by module in canonical session order. Within each group
+// the original sequence is preserved — for a day whose exercises array is
+// position-sorted, that means user intent within a module is kept intact.
+// Modules with no exercises are not emitted.
+function groupExercisesByModule<T extends { module: string }>(exercises: T[]): ModuleGroup<T>[] {
+  const byModule = new Map<string, T[]>();
+  for (const ex of exercises) {
+    if (!byModule.has(ex.module)) byModule.set(ex.module, []);
+    byModule.get(ex.module)!.push(ex);
+  }
+  return Array.from(byModule.entries())
+    .sort((a, b) => moduleRank(a[0]) - moduleRank(b[0]))
+    .map(([module, exercises]) => ({ module, exercises }));
+}
+
+// Flatten the grouped view back to a flat list — the "sort by module" result.
+function sortExercisesByModule<T extends { module: string }>(exercises: T[]): T[] {
+  return groupExercisesByModule(exercises).flatMap((g) => g.exercises);
+}
+
+// Cheap "is the current order already canonical?" check so the Sort button
+// can disable itself when there's nothing to do.
+function isCanonicalModuleOrder<T extends { module: string }>(exercises: T[]): boolean {
+  let lastRank = -1;
+  for (const ex of exercises) {
+    const r = moduleRank(ex.module);
+    if (r < lastRank) return false;
+    lastRank = r;
+  }
+  return true;
+}
 
 export type DayClient = {
   id: string;
   position: number;
   weekday: number | null;
   label: string | null;
+  description: string | null;
   name: string;
   exercises: {
     templateExerciseId: string;
@@ -109,6 +161,7 @@ export type DayClient = {
     plannedSets: number | null;
     plannedReps: number | null;
     plannedSeconds: number | null;
+    note: string | null;
     primaryMuscles: string[];
     secondaryMuscles: string[];
   }[];
@@ -208,6 +261,7 @@ type DraftExercise = {
   plannedSets: number | null;
   plannedReps: number | null;
   plannedSeconds: number | null;
+  note: string | null;
 };
 
 type DraftDay = {
@@ -216,6 +270,7 @@ type DraftDay = {
   clientId: string;
   name: string;
   label: string | null;
+  description: string | null;
   weekday: number | null;
   exercises: DraftExercise[];
 };
@@ -228,6 +283,7 @@ function makeDraftDay(initial: Partial<DraftDay> = {}): DraftDay {
         : `${Date.now()}-${Math.random()}`,
     name: '',
     label: null,
+    description: null,
     weekday: null,
     exercises: [],
     ...initial,
@@ -419,6 +475,7 @@ function DraftEditor({
           id: d.clientId,
           name: d.name.trim() || fallback,
           label: d.label,
+          description: d.description,
           weekday: d.weekday,
           exercises: d.exercises
             .map((dx) => {
@@ -432,6 +489,7 @@ function DraftEditor({
                 plannedSets: dx.plannedSets,
                 plannedReps: dx.plannedReps,
                 plannedSeconds: dx.plannedSeconds,
+                note: dx.note,
               };
             })
             .filter((x): x is DayExercise => x !== null),
@@ -497,6 +555,7 @@ function DraftEditor({
         plannedSets: null,
         plannedReps: null,
         plannedSeconds: null,
+        note: null,
       }));
     updateDay(clientId, (d) => ({
       ...d,
@@ -538,8 +597,10 @@ function DraftEditor({
               plannedSets: e.plannedSets,
               plannedReps: e.plannedReps,
               plannedSeconds: e.plannedSeconds,
+              note: e.note,
             })),
             label: d.label?.trim() || undefined,
+            description: d.description ?? undefined,
             weekday: scheduleStyle === 'weekday' ? d.weekday : null,
           })),
         });
@@ -580,6 +641,7 @@ function DraftEditor({
       id: `preset-${idx}`,
       name: d.name,
       label: null,
+      description: null,
       weekday: null,
       exercises: d.exercises
         .map((ex): DayExercise | null => {
@@ -595,6 +657,7 @@ function DraftEditor({
             plannedSets: ex.plannedSets,
             plannedReps: ex.plannedReps,
             plannedSeconds: ex.plannedSeconds,
+            note: null,
           };
         })
         .filter((x): x is DayExercise => x !== null),
@@ -624,6 +687,7 @@ function DraftEditor({
             plannedSets: e.plannedSets,
             plannedReps: e.plannedReps,
             plannedSeconds: e.plannedSeconds,
+            note: null,
           });
         }
         return {
@@ -633,6 +697,7 @@ function DraftEditor({
               : `${Date.now()}-${Math.random()}`,
           name: d.name,
           label: null as string | null,
+          description: null as string | null,
           weekday: null as number | null,
           exercises,
         };
@@ -697,6 +762,36 @@ function DraftEditor({
               onSetWeekday={(id, weekday) =>
                 updateDay(id, (d) => ({ ...d, weekday }))
               }
+              onUpdateDayDescription={(id, description) =>
+                updateDay(id, (d) => ({ ...d, description }))
+              }
+              onSortDayByModule={(id, exerciseIds) =>
+                updateDay(id, (d) => {
+                  const byId = new Map(d.exercises.map((e) => [e.exerciseId, e]));
+                  const next = exerciseIds
+                    .map((eid) => byId.get(eid))
+                    .filter((e): e is DraftExercise => e !== undefined);
+                  return { ...d, exercises: next };
+                })
+              }
+              onDuplicateDay={(id) => {
+                if (days.length >= MAX_ROUTINE_DAYS) return;
+                const source = days.find((d) => d.clientId === id);
+                if (!source) return;
+                // Same semantics as the server-side duplicate: clone everything
+                // except the weekday pin so the user can place the duplicate
+                // explicitly. Fresh clientId keeps React keys unique.
+                setDays((prev) => [
+                  ...prev,
+                  makeDraftDay({
+                    name: source.name,
+                    label: source.label,
+                    description: source.description,
+                    weekday: null,
+                    exercises: source.exercises.map((e) => ({ ...e })),
+                  }),
+                ]);
+              }}
               onRemoveDay={removeDay}
               onMoveDay={moveDay}
               onOpenExercisePicker={setPickerForDayClientId}
@@ -782,6 +877,7 @@ function DraftEditor({
                       plannedSets: null,
                       plannedReps: null,
                       plannedSeconds: null,
+                      note: null,
                     }));
                   return { ...d, exercises: [...d.exercises, ...additions] };
                 });
@@ -1176,6 +1272,7 @@ function LiveEditor({
           id: d.id,
           name: d.name,
           label: d.label,
+          description: d.description,
           weekday: d.weekday,
           exercises: d.exercises
             .slice()
@@ -1188,6 +1285,7 @@ function LiveEditor({
               plannedSets: e.plannedSets,
               plannedReps: e.plannedReps,
               plannedSeconds: e.plannedSeconds,
+              note: e.note,
             })),
         })),
     [routine.days],
@@ -1239,6 +1337,21 @@ function LiveEditor({
         onSetWeekday={(id, weekday) => {
           startTransition(() => {
             updateRoutineDay({ routineDayId: id, weekday }).catch(() => {});
+          });
+        }}
+        onUpdateDayDescription={(id, description) => {
+          startTransition(() => {
+            updateRoutineDay({ routineDayId: id, description }).catch(() => {});
+          });
+        }}
+        onSortDayByModule={(id, exerciseIds) => {
+          startTransition(() => {
+            setRoutineDayExerciseOrder({ routineDayId: id, exerciseIds }).catch(() => {});
+          });
+        }}
+        onDuplicateDay={(id) => {
+          startTransition(() => {
+            duplicateRoutineDay({ routineDayId: id }).catch(() => {});
           });
         }}
         onRemoveDay={async (id) => {
@@ -1600,10 +1713,14 @@ function ToggleOption({
 
 // ============ DAYS SECTION (shared by both modes) ============
 
+// Patches the editor row sends back to its parent. Misnamed historically —
+// covers the free-text note too, not just the planned numerics — kept as one
+// shape so the action layer can apply set/rep/second/note edits uniformly.
 type PlannedPatch = {
   plannedSets?: number | null;
   plannedReps?: number | null;
   plannedSeconds?: number | null;
+  note?: string | null;
 };
 
 type DaysSectionProps = {
@@ -1616,6 +1733,13 @@ type DaysSectionProps = {
   onAddDay: (weekday: number | null) => void;
   onRenameDay: (id: string, name: string) => void;
   onSetWeekday: (id: string, weekday: number | null) => void;
+  onUpdateDayDescription: (id: string, description: string | null) => void;
+  // Reorder the day's exercises in bulk to match canonical module order. The
+  // caller already has the full day data and can compute the new sequence;
+  // this just commits it.
+  onSortDayByModule: (id: string, exerciseIds: string[]) => void;
+  // Append a clone of the day at the end of the routine, up to the day cap.
+  onDuplicateDay: (id: string) => void;
   onRemoveDay: (id: string) => void;
   onMoveDay: (id: string, direction: 'up' | 'down') => void;
   onOpenExercisePicker: (id: string) => void;
@@ -1773,7 +1897,11 @@ function dispatchProps(p: DaysSectionProps) {
     seedTemplates: p.seedTemplates,
     onRename: p.onRenameDay,
     onSetWeekday: p.onSetWeekday,
+    onUpdateDescription: p.onUpdateDayDescription,
+    onSortByModule: p.onSortDayByModule,
+    onDuplicate: p.onDuplicateDay,
     onRemove: p.onRemoveDay,
+    atCap: p.atCap,
     onMove: p.onMoveDay,
     onOpenExercisePicker: p.onOpenExercisePicker,
     onSeedFromTemplate: p.onSeedFromTemplate,
@@ -1796,6 +1924,11 @@ type DayCardProps = {
   seedTemplates: SeedTemplateClient[];
   onRename: (id: string, name: string) => void;
   onSetWeekday: (id: string, weekday: number | null) => void;
+  onUpdateDescription: (id: string, description: string | null) => void;
+  onSortByModule: (id: string, exerciseIds: string[]) => void;
+  onDuplicate: (id: string) => void;
+  // Routine is at the day cap — duplicate is disabled.
+  atCap: boolean;
   onRemove: (id: string) => void;
   onMove: (id: string, direction: 'up' | 'down') => void;
   onOpenExercisePicker: (id: string) => void;
@@ -1816,6 +1949,10 @@ function DayCard({
   seedTemplates,
   onRename,
   onSetWeekday,
+  onUpdateDescription,
+  onSortByModule,
+  onDuplicate,
+  atCap,
   onRemove,
   onMove,
   onOpenExercisePicker,
@@ -1832,6 +1969,36 @@ function DayCard({
   useEffect(() => {
     setName(day.name);
   }, [day.name]);
+
+  // Day-level description editor. Collapsed by default; click-to-expand. Same
+  // commit-on-blur pattern as the per-exercise note. Local string state while
+  // focused, sync from upstream only when not editing.
+  const [descOpen, setDescOpen] = useState(false);
+  const [descText, setDescText] = useState(day.description ?? '');
+  useEffect(() => {
+    if (!descOpen) setDescText(day.description ?? '');
+  }, [day.description, descOpen]);
+  const descHasContent = (day.description ?? '').trim().length > 0;
+
+  function commitDescription() {
+    const trimmed = descText.trim();
+    const next = trimmed.length === 0 ? null : trimmed;
+    if (next !== day.description) onUpdateDescription(day.id, next);
+  }
+
+  // Module-aware grouping for the rendered exercise list. Within-group order
+  // preserves the user's intent (position order of items sharing a module);
+  // group order follows the canonical SMR→Mobility→Activation→Strength→
+  // Balance→Rev Up sequence defined in lib/exercises-data.ts. Sort button
+  // below uses the same flattening to write canonical positions in one shot.
+  const moduleGroups = useMemo(
+    () => groupExercisesByModule(day.exercises),
+    [day.exercises],
+  );
+  const alreadySorted = useMemo(
+    () => isCanonicalModuleOrder(day.exercises),
+    [day.exercises],
+  );
 
   const takenWeekdays = new Set(
     allDays
@@ -1898,14 +2065,48 @@ function DayCard({
             </button>
           )}
         </div>
-        <button
-          onClick={() => onRemove(day.id)}
-          disabled={isPending}
-          className="text-ink-500 hover:text-bad transition shrink-0 ml-2"
-          aria-label="Remove day"
-        >
-          <Trash2 size={13} />
-        </button>
+        <div className="flex items-center gap-2 shrink-0 ml-2">
+          {/* Sort-by-module: writes positions to canonical SMR→…→Rev Up order
+              with intra-module sequence preserved. Disabled when already
+              canonical or when there's nothing to sort. */}
+          {day.exercises.length > 1 && (
+            <button
+              onClick={() =>
+                onSortByModule(
+                  day.id,
+                  sortExercisesByModule(day.exercises).map((e) => e.exerciseId),
+                )
+              }
+              disabled={isPending || alreadySorted}
+              className="text-ink-500 hover:text-ink-100 transition disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Sort exercises by module"
+              title={
+                alreadySorted
+                  ? 'Already in module order'
+                  : 'Sort by module (SMR → Mobility → Activation → Strength → Balance → Rev Up)'
+              }
+            >
+              <ArrowDownAZ size={13} />
+            </button>
+          )}
+          <button
+            onClick={() => onDuplicate(day.id)}
+            disabled={isPending || atCap}
+            className="text-ink-500 hover:text-ink-100 transition disabled:opacity-30 disabled:cursor-not-allowed"
+            aria-label="Duplicate this day"
+            title={atCap ? `Routine is at the ${MAX_ROUTINE_DAYS}-day cap` : 'Duplicate this day'}
+          >
+            <Copy size={13} />
+          </button>
+          <button
+            onClick={() => onRemove(day.id)}
+            disabled={isPending}
+            className="text-ink-500 hover:text-bad transition"
+            aria-label="Remove day"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="p-3 space-y-2.5">
@@ -1918,26 +2119,89 @@ function DayCard({
           />
         )}
 
+        {/* Day-level description. Collapsed by default; click "+ Add note for
+            this day" to expand. When populated, shows the full text (italic,
+            dimmed) and tapping reopens the editor. */}
+        {descOpen ? (
+          <textarea
+            value={descText}
+            onChange={(e) => setDescText(e.target.value)}
+            onBlur={() => {
+              commitDescription();
+              setDescOpen(false);
+            }}
+            autoFocus
+            rows={3}
+            placeholder="Frame the day — e.g. Lower emphasis (glute drive), stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up."
+            disabled={isPending}
+            className="block w-full bg-ink-950 border border-ink-800 rounded px-2 py-1.5 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none focus:border-accent/50 resize-none"
+          />
+        ) : descHasContent ? (
+          <button
+            type="button"
+            onClick={() => setDescOpen(true)}
+            className="block w-full text-left text-[11px] text-ink-400 italic font-display whitespace-pre-wrap break-words leading-snug hover:text-ink-100 transition"
+          >
+            {day.description}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setDescOpen(true)}
+            disabled={isPending}
+            className="text-[11px] text-ink-500 italic font-display hover:text-ink-300 transition disabled:opacity-50"
+          >
+            + Add a note for this day
+          </button>
+        )}
+
         {day.exercises.length > 0 ? (
-          <div className="space-y-1">
-            {day.exercises.map((ex, idx) => (
-              <ExerciseRow
-                key={ex.exerciseId}
-                exercise={ex}
-                canMoveUp={idx > 0}
-                canMoveDown={idx < day.exercises.length - 1}
-                isPending={isPending}
-                onRemove={() => onRemoveExercise(day.id, ex.exerciseId)}
-                onMove={(dir) => onReorderExercise(day.id, ex.exerciseId, dir)}
-                onUpdatePlanned={(patch) =>
-                  onUpdateExercisePlanned(day.id, ex.exerciseId, patch)
-                }
-                onSwap={
-                  onSwapExercise
-                    ? () => onSwapExercise(day.id, ex.exerciseId)
-                    : null
-                }
-              />
+          <div className="space-y-2.5">
+            {moduleGroups.map((group) => (
+              <div key={group.module} className="space-y-1">
+                <div
+                  className="text-[10px] tracking-[0.2em] uppercase text-ink-500 px-0.5 cursor-help"
+                  title={moduleDescription(group.module) || group.module}
+                >
+                  {group.module}
+                </div>
+                {group.exercises.map((ex) => {
+                  // Position-order index lookup so move-up/down logic stays in
+                  // step with the underlying data even when modules interleave.
+                  const dataIdx = day.exercises.findIndex(
+                    (e) => e.exerciseId === ex.exerciseId,
+                  );
+                  const prev = dataIdx > 0 ? day.exercises[dataIdx - 1] : null;
+                  const next =
+                    dataIdx >= 0 && dataIdx < day.exercises.length - 1
+                      ? day.exercises[dataIdx + 1]
+                      : null;
+                  // Disable across-module swaps so move-up/down in the grouped
+                  // view never visually jumps an exercise out of its header.
+                  // Sort handles cross-module cleanup in one shot.
+                  const canMoveUp = prev !== null && prev.module === ex.module;
+                  const canMoveDown = next !== null && next.module === ex.module;
+                  return (
+                    <ExerciseRow
+                      key={ex.exerciseId}
+                      exercise={ex}
+                      canMoveUp={canMoveUp}
+                      canMoveDown={canMoveDown}
+                      isPending={isPending}
+                      onRemove={() => onRemoveExercise(day.id, ex.exerciseId)}
+                      onMove={(dir) => onReorderExercise(day.id, ex.exerciseId, dir)}
+                      onUpdatePlanned={(patch) =>
+                        onUpdateExercisePlanned(day.id, ex.exerciseId, patch)
+                      }
+                      onSwap={
+                        onSwapExercise
+                          ? () => onSwapExercise(day.id, ex.exerciseId)
+                          : null
+                      }
+                    />
+                  );
+                })}
+              </div>
             ))}
           </div>
         ) : (
@@ -2070,61 +2334,131 @@ function ExerciseRow({
   onMove: (direction: 'up' | 'down') => void;
   onUpdatePlanned: (patch: PlannedPatch) => void;
 }) {
+  // Note editing follows the same commit-on-blur pattern as PlannedInputs:
+  // local string state while focused, commit when the textarea loses focus,
+  // sync from upstream only when not actively editing so a server-side
+  // revalidation doesn't yank text mid-type. Empty (trimmed) clears the
+  // column to null via the action's RoutineExerciseNoteSchema.
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState(exercise.note ?? '');
+  useEffect(() => {
+    if (!noteOpen) setNoteText(exercise.note ?? '');
+  }, [exercise.note, noteOpen]);
+
+  const noteHasContent = (exercise.note ?? '').trim().length > 0;
+
+  function commitNote() {
+    const trimmed = noteText.trim();
+    const next = trimmed.length === 0 ? null : trimmed;
+    if (next !== exercise.note) onUpdatePlanned({ note: next });
+  }
+
   return (
-    <div className="bg-ink-900/40 border border-ink-900 rounded px-2.5 py-2 flex items-center gap-2">
-      <div className="flex flex-col gap-0.5 shrink-0">
-        <button
-          onClick={() => onMove('up')}
-          disabled={!canMoveUp || isPending}
-          className="text-ink-500 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
-          aria-label="Move exercise up"
-        >
-          <ChevronUp size={11} />
-        </button>
-        <button
-          onClick={() => onMove('down')}
-          disabled={!canMoveDown || isPending}
-          className="text-ink-500 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
-          aria-label="Move exercise down"
-        >
-          <ChevronDown size={11} />
-        </button>
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-[13px] text-ink-100 truncate">{exercise.name}</div>
-        <div
-          className="text-[10px] text-ink-500 truncate cursor-help"
-          title={moduleDescription(exercise.module) || exercise.module}
-        >
-          {exercise.module}
+    <div className="bg-ink-900/40 border border-ink-900 rounded px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-0.5 shrink-0">
+          <button
+            onClick={() => onMove('up')}
+            disabled={!canMoveUp || isPending}
+            className="text-ink-500 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+            aria-label="Move exercise up"
+          >
+            <ChevronUp size={11} />
+          </button>
+          <button
+            onClick={() => onMove('down')}
+            disabled={!canMoveDown || isPending}
+            className="text-ink-500 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
+            aria-label="Move exercise down"
+          >
+            <ChevronDown size={11} />
+          </button>
         </div>
-      </div>
-      <PlannedInputs
-        metric={exercise.metric}
-        plannedSets={exercise.plannedSets}
-        plannedReps={exercise.plannedReps}
-        plannedSeconds={exercise.plannedSeconds}
-        disabled={isPending}
-        onChange={onUpdatePlanned}
-      />
-      {onSwap && (
-        <button
-          onClick={onSwap}
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] text-ink-100 truncate">{exercise.name}</div>
+          <div
+            className="text-[10px] text-ink-500 truncate cursor-help"
+            title={moduleDescription(exercise.module) || exercise.module}
+          >
+            {exercise.module}
+          </div>
+        </div>
+        <PlannedInputs
+          metric={exercise.metric}
+          plannedSets={exercise.plannedSets}
+          plannedReps={exercise.plannedReps}
+          plannedSeconds={exercise.plannedSeconds}
           disabled={isPending}
-          className="text-ink-500 hover:text-ink-100 transition disabled:opacity-50 shrink-0"
-          aria-label={`Swap ${exercise.name}`}
+          onChange={onUpdatePlanned}
+        />
+        <button
+          type="button"
+          onClick={() => setNoteOpen((v) => !v)}
+          disabled={isPending}
+          aria-label={
+            noteHasContent
+              ? `Edit note for ${exercise.name}`
+              : `Add note for ${exercise.name}`
+          }
+          aria-expanded={noteOpen}
+          title={noteHasContent ? 'Edit note' : 'Add a note'}
+          className={`transition disabled:opacity-50 shrink-0 ${
+            noteHasContent
+              ? 'accent-text hover:brightness-110'
+              : 'text-ink-500 hover:text-ink-100'
+          }`}
         >
-          <Replace size={13} />
+          <StickyNote size={13} />
+        </button>
+        {onSwap && (
+          <button
+            onClick={onSwap}
+            disabled={isPending}
+            className="text-ink-500 hover:text-ink-100 transition disabled:opacity-50 shrink-0"
+            aria-label={`Swap ${exercise.name}`}
+          >
+            <Replace size={13} />
+          </button>
+        )}
+        <button
+          onClick={onRemove}
+          disabled={isPending}
+          className="text-ink-500 hover:text-bad transition disabled:opacity-50 shrink-0"
+          aria-label={`Remove ${exercise.name}`}
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      {/* Collapsed preview — only when there's a note and the editor isn't open.
+          Tapping the preview reopens the editor so the user doesn't have to
+          aim at the small icon. */}
+      {!noteOpen && noteHasContent && (
+        <button
+          type="button"
+          onClick={() => setNoteOpen(true)}
+          className="block w-full text-left mt-1 pl-[18px] text-[10px] text-ink-400 italic font-display truncate hover:text-ink-100 transition"
+        >
+          {exercise.note}
         </button>
       )}
-      <button
-        onClick={onRemove}
-        disabled={isPending}
-        className="text-ink-500 hover:text-bad transition disabled:opacity-50 shrink-0"
-        aria-label={`Remove ${exercise.name}`}
-      >
-        <X size={13} />
-      </button>
+
+      {/* Inline editor. Auto-focuses on open; commits and collapses on blur. */}
+      {noteOpen && (
+        <textarea
+          value={noteText}
+          onChange={(e) => setNoteText(e.target.value)}
+          onBlur={() => {
+            commitNote();
+            setNoteOpen(false);
+          }}
+          autoFocus
+          rows={3}
+          placeholder="Tempo, breathing, cues — anything you want to see while lifting."
+          disabled={isPending}
+          className="block w-full mt-1.5 bg-ink-950 border border-ink-800 rounded px-2 py-1.5 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none focus:border-accent/50 resize-none"
+        />
+      )}
     </div>
   );
 }

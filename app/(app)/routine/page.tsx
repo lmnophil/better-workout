@@ -60,6 +60,7 @@ export default async function RoutinePage() {
           position: d.position,
           weekday: d.weekday,
           label: d.label,
+          description: d.description,
           name: d.template.name,
           exercises: d.template.exercises
             .filter((te) => te.exercise.deletedAt === null)
@@ -72,6 +73,7 @@ export default async function RoutinePage() {
               plannedSets: te.plannedSets,
               plannedReps: te.plannedReps,
               plannedSeconds: te.plannedSeconds,
+              note: te.note,
               metric: te.exercise.metric,
               primaryMuscles: te.exercise.primaryMuscles,
               secondaryMuscles: te.exercise.secondaryMuscles,

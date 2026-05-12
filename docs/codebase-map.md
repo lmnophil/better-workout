@@ -63,9 +63,9 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 ### Templates and routines
 - **WorkoutTemplate** — `userId` nullable + `isBuiltin` bool. Built-ins: `userId=null, isBuiltin=true`. User templates: `userId=set, isBuiltin=false`. Unique (userId, name) — same NULL trick as exercises.
 - **UserHiddenTemplate** — per-user marker that the user has hidden a built-in template. Unique (userId, templateId), both Cascade.
-- **TemplateExercise** — junction. `position`, `plannedSets`, `plannedReps` (used when exercise.metric='reps'), `plannedSeconds` (used when metric='time'). Unique (templateId, exerciseId).
+- **TemplateExercise** — junction. `position`, `plannedSets`, `plannedReps` (used when exercise.metric='reps'), `plannedSeconds` (used when metric='time'), `plannedWeight`, free-text `note` (per-(day, exercise) cues — tempo, breathing, coach annotations). Unique (templateId, exerciseId).
 - **Routine** — one per user (`userId` is `@unique`). `scheduleStyle` `'sequence' | 'weekday'`. `lastCompletedPosition` cursor for sequence mode. App-enforced cap of `MAX_ROUTINE_DAYS = 7`.
-- **RoutineDay** — `position` (contiguous), `weekday` (nullable, unique within routine for weekday mode), `label`. Unique (routineId, position) and (routineId, weekday).
+- **RoutineDay** — `position` (contiguous), `weekday` (nullable, unique within routine for weekday mode), `label` (short tag), `description` (free-text paragraph framing the day). Unique (routineId, position) and (routineId, weekday).
 - **RoutineDayPendingSwap** — staged one-time exercise substitution applied on session start. Unique (routineDayId, outExerciseId). All FKs Cascade.
 
 ---

@@ -16,15 +16,6 @@ import { logger } from '@/lib/logger';
 import { metrics } from '@/lib/metrics';
 import authConfig from './auth.config';
 
-// How often we re-check that the JWT's userId still maps to a real user. Once
-// per day matches `updateAge` so the cost amortizes against existing token
-// refresh activity. Without this guard, a JWT signed against a now-deleted
-// user (common during local-dev `prisma migrate reset` cycles) sails through
-// every action until the underlying FK violation surfaces — confusing because
-// the auth layer says the user is fine. With it, the next request after a
-// reset cleanly returns to /signin.
-const USER_VALIDATION_INTERVAL_SECONDS = 60 * 60 * 24;
-
 export const { auth, handlers, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
   session: {
@@ -40,35 +31,30 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
   ...authConfig,
   callbacks: {
     ...authConfig.callbacks,
-    // Override the Edge-side jwt callback so we can hit the DB. We still need
-    // to mirror the userId-set behavior from auth.config.ts on initial sign-in
-    // (the spread above brings the Edge callback in scope but we override the
-    // whole jwt key here). The validation step is throttled to once per
-    // USER_VALIDATION_INTERVAL_SECONDS via a `verifiedAt` epoch stamped onto
-    // the token. Returning null invalidates the session, which forces the
-    // next request through /signin instead of failing with an FK violation.
-    async jwt({ token, user, trigger }) {
+    // Override the Edge-side jwt callback so we can hit the DB. The spread
+    // above brings the Edge callback in scope but the whole jwt key is
+    // overridden here, so the userId-set behavior from auth.config.ts is
+    // mirrored explicitly. Every request: confirm the JWT's userId still maps
+    // to a real user — covers the `prisma migrate reset` case where the cookie
+    // outlives the user row. A single indexed PK lookup per request is cheap.
+    // Returning null makes `auth()` see no session, which the (app) layout
+    // routes to `/api/auth/recover` — the cookie clearing happens there, not
+    // here, because the JWT callback can't set response cookies directly.
+    async jwt({ token, user }) {
       if (user) {
         token.userId = user.id;
       }
       if (token.userId) {
-        const now = Math.floor(Date.now() / 1000);
-        const stale =
-          !token.verifiedAt ||
-          now - token.verifiedAt > USER_VALIDATION_INTERVAL_SECONDS;
-        if (trigger === 'update' || stale) {
-          const exists = await db.user.findUnique({
-            where: { id: token.userId },
-            select: { id: true },
-          });
-          if (!exists) {
-            logger.info(
-              { userId: token.userId },
-              'auth.jwt_invalidated_user_missing',
-            );
-            return null;
-          }
-          token.verifiedAt = now;
+        const exists = await db.user.findUnique({
+          where: { id: token.userId },
+          select: { id: true },
+        });
+        if (!exists) {
+          logger.info(
+            { userId: token.userId },
+            'auth.jwt_invalidated_user_missing',
+          );
+          return null;
         }
       }
       return token;
@@ -141,8 +127,5 @@ import type {} from 'next-auth/jwt';
 declare module 'next-auth/jwt' {
   interface JWT {
     userId?: string;
-    // Epoch seconds of the last successful "user still exists" check. Used by
-    // the jwt callback in auth.ts to throttle DB hits to once per day.
-    verifiedAt?: number;
   }
 }

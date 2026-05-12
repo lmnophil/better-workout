@@ -30,6 +30,10 @@ import {
 type Props = {
   exercise: ExerciseInfo;
   sets: SetLogClient[];
+  // Per-day, per-exercise free-text note the user wrote on the routine.
+  // Read-only here — edits happen on the routine editor page. Null when
+  // either the session wasn't started from a routine day or no note was set.
+  routineNote: string | null;
   lastTime: {
     when: string; // "today" | "1d ago" | "3d ago" ...
     sets: {
@@ -79,6 +83,7 @@ const INCREMENT_PRESETS = [1, 2.5, 5, 10];
 export function ExerciseInSession({
   exercise,
   sets,
+  routineNote,
   lastTime,
   canMoveUp,
   canMoveDown,
@@ -173,6 +178,12 @@ export function ExerciseInSession({
               {incrementOverridden && <span className="accent-text">·custom</span>}
             </button>
           </div>
+
+          {routineNote && (
+            <p className="text-[11px] text-ink-300 italic font-display leading-snug mt-1 whitespace-pre-wrap break-words">
+              {routineNote}
+            </p>
+          )}
         </div>
 
         <div className="flex items-start gap-0 -mt-1.5 -mr-1.5 shrink-0">

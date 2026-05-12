@@ -334,6 +334,13 @@ model TemplateExercise {
   // during the session — it is *not* a prescription the app polices.
   plannedWeight Float?
 
+  // Free-text per-exercise note scoped to this routine day. The user types
+  // tempo cues, breathing protocols, coach annotations — anything the
+  // planned* numerics can't carry. Surfaced read-only in the active session
+  // so the user sees it while lifting. Deliberately unstructured to keep
+  // the app from re-prescribing what the user wrote.
+  note String?
+
   createdAt DateTime @default(now())
 
   @@unique([templateId, exerciseId])
@@ -426,6 +433,11 @@ model RoutineDay {
   // Optional user-defined label (e.g. "Heavy day"). The template name is
   // primary; this is auxiliary display text.
   label    String?
+  // Longer free-text framing for the whole day (e.g. "Lower emphasis (glute
+  // drive). Stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up.").
+  // Sibling to `label`: label is a short tag, description is a paragraph.
+  // Routine.description covers the whole routine; this is per-day.
+  description String?
 
   pendingSwaps RoutineDayPendingSwap[]
   // Sessions started from this day. SetNull on session.startedFromRoutineDayId

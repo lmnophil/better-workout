@@ -125,6 +125,15 @@ export default async function WorkoutPage() {
     }),
   );
 
+  // Per-exercise notes from the routine day this session was started from, if
+  // any. Surfaced read-only in ExerciseInSession so the user sees the cues
+  // they wrote (tempo, breathing, coach annotations) while lifting. Only
+  // non-empty notes flow through.
+  const routineExerciseNotes =
+    activeSession?.startedFromRoutineDay?.template.exercises
+      .filter((e): e is { exerciseId: string; note: string } => e.note !== null)
+      .map((e) => ({ exerciseId: e.exerciseId, note: e.note })) ?? [];
+
   return (
     <WorkoutView
       activeSession={
@@ -159,6 +168,7 @@ export default async function WorkoutPage() {
         weightIncrementOverride: e.weightIncrementOverride,
       }))}
       lastSets={lastSetsArray}
+      routineExerciseNotes={routineExerciseNotes}
       templates={templates.map((t) => ({
         id: t.id,
         name: t.name,

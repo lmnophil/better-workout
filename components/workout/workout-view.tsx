@@ -124,6 +124,11 @@ type Props = {
   activeSession: ActiveSessionClient | null;
   availableExercises: ExerciseInfo[];
   lastSets: LastSetsForExercise[];
+  // Per-exercise notes lifted from the routine-day the active session was
+  // started from (if any). Read-only at the session level; the user edits
+  // them on the routine editor page. Empty array when there's no active
+  // session or it wasn't started from a routine.
+  routineExerciseNotes: { exerciseId: string; note: string }[];
   templates: TemplateClient[];
   // Null when the user hasn't created a routine. Otherwise drives the
   // timeline panel above the empty state.
@@ -136,6 +141,7 @@ export function WorkoutView({
   activeSession,
   availableExercises,
   lastSets,
+  routineExerciseNotes,
   templates,
   routine,
 }: Props) {
@@ -165,6 +171,9 @@ export function WorkoutView({
   // Quick lookups
   const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
   const lastByExercise = new Map(lastSets.map((l) => [l.exerciseId, l]));
+  const routineNoteByExercise = new Map(
+    routineExerciseNotes.map((n) => [n.exerciseId, n.note]),
+  );
 
   // Group active session's setLogs by exerciseId, preserving order of first appearance
   const setLogsByExercise = groupBy(activeSession?.setLogs ?? [], (s) => s.exerciseId);
@@ -546,6 +555,7 @@ export function WorkoutView({
                   key={exerciseId}
                   exercise={exercise}
                   sets={sets}
+                  routineNote={routineNoteByExercise.get(exerciseId) ?? null}
                   lastTime={
                     last
                       ? {

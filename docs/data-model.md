@@ -162,6 +162,8 @@ The `@@unique([userId, name])` constraint relies on Postgres NULL semantics — 
 
 `TemplateExercise` is the junction row with a `position` field. If the source `Exercise` is later (hard-)deleted, the junction goes with it (Cascade) — the template degrades gracefully. In practice exercises soft-delete, so this only fires for built-ins.
 
+The junction also carries optional `plannedSets` / `plannedReps` / `plannedSeconds` / `plannedWeight` numerics and a free-text `note` column. The numerics are hints the session seeds from; the note holds whatever the user wants to see while lifting (tempo cues, breathing protocols, coach annotations) — no structured tempo/hold/breathing fields, because surfacing them would push the app toward prescribing rather than reflecting. See [`docs/decisions.md`](./decisions.md) for the structured-vs-free-text trade-off. The note is read-only inside `ExerciseInSession` and edited on the routine page only.
+
 ### `UserHiddenTemplate`
 
 Per-user hide marker for built-in templates. A user can't delete a built-in (it's shared), but they can hide it from their own list by inserting a row here. `getTemplates` filters built-ins by `hiddenBy: { none: { userId } }`. Settings page exposes an unhide control.
@@ -202,6 +204,8 @@ Switching styles in `updateRoutine` clears state that doesn't apply to the new m
 ### `RoutineDay`
 
 A position within the cycle. Always has a `position` (0-indexed, contiguous, unique per routine). The `templateId` is a *reference*, not a copy — editing the template propagates to every routine day that uses it. The `label` is optional auxiliary text ("Heavy day", "Light day"); the template name is the primary display.
+
+The `description` field is a longer free-text paragraph framing the whole day (e.g. "Lower emphasis (glute drive). Stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up."). It's the day-level companion to `TemplateExercise.note`'s per-exercise scope: `description` is "what is this day for?" while `note` is "how do I perform this exercise here?". Same neutral-tool rationale — user types it, the app stores and renders verbatim.
 
 Weekday is only meaningful in weekday mode; in sequence mode it's null. The `(routineId, weekday)` unique constraint relies on Postgres NULL semantics — multiple sequence-mode rows with weekday=null don't collide.
 
