@@ -59,6 +59,8 @@ import {
   type ScheduleStyle,
 } from '@/lib/routine';
 import { EXERCISE_MODULES, moduleDescription } from '@/lib/exercises-data';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { ExplainModuleSequence } from '@/lib/explanations';
 import {
   ESTIMATED_SETS_FALLBACK,
   TIER_VISUALS,
@@ -2206,19 +2208,29 @@ function DayCard({
             this day" to expand. When populated, shows the full text (italic,
             dimmed) and tapping reopens the editor. */}
         {descOpen ? (
-          <textarea
-            value={descText}
-            onChange={(e) => setDescText(e.target.value)}
-            onBlur={() => {
-              commitDescription();
-              setDescOpen(false);
-            }}
-            autoFocus
-            rows={3}
-            placeholder="Frame the day — e.g. Lower emphasis (glute drive), stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up."
-            disabled={isPending}
-            className="block w-full bg-ink-950 border border-ink-800 rounded px-2 py-1.5 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none focus:border-accent/50 resize-none"
-          />
+          <div className="space-y-1">
+            <textarea
+              value={descText}
+              onChange={(e) => setDescText(e.target.value)}
+              onBlur={() => {
+                commitDescription();
+                setDescOpen(false);
+              }}
+              autoFocus
+              rows={3}
+              placeholder="Frame the day — e.g. Lower emphasis (glute drive), stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up."
+              disabled={isPending}
+              className="block w-full bg-ink-950 border border-ink-800 rounded px-2 py-1.5 text-[12px] text-ink-100 placeholder:text-ink-600 focus:outline-none focus:border-accent/50 resize-none"
+            />
+            {/* Hover/tap the icon to learn what each module in the suggested
+                stack actually means — beginners shouldn't have to guess SMR. */}
+            <div className="text-[10px] text-ink-600 inline-flex items-center gap-1">
+              <InfoTooltip label="Module sequence" size={11} align="start">
+                {ExplainModuleSequence}
+              </InfoTooltip>
+              What are SMR / Mobility / Activation / Rev Up?
+            </div>
+          </div>
         ) : descHasContent ? (
           <button
             type="button"

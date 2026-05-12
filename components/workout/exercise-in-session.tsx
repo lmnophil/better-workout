@@ -23,6 +23,13 @@ import {
 } from 'lucide-react';
 import type { ExerciseInfo, SetLogClient } from './workout-view';
 import { estimateActiveExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
+import {
+  ExplainRestRanges,
+  ExplainRIR,
+  ExplainRPE,
+  ExplainWeightIncrement,
+} from '@/lib/explanations';
 
 type Props = {
   exercise: ExerciseInfo;
@@ -223,8 +230,11 @@ export function ExerciseInSession({
       {settingsOpen && (
         <div className="px-4 pb-3 space-y-2">
           <div className="bg-ink-950/60 rounded-lg p-2.5 space-y-2">
-            <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500">
+            <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500 inline-flex items-center gap-1">
               Rest after each set
+              <InfoTooltip label="Rest by goal" size={11}>
+                {ExplainRestRanges}
+              </InfoTooltip>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {REST_PRESETS.map((s) => {
@@ -261,8 +271,11 @@ export function ExerciseInSession({
           </div>
 
           <div className="bg-ink-950/60 rounded-lg p-2.5 space-y-2">
-            <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500">
+            <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500 inline-flex items-center gap-1">
               Weight increment
+              <InfoTooltip label="Weight increment" size={11}>
+                {ExplainWeightIncrement}
+              </InfoTooltip>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {INCREMENT_PRESETS.map((n) => {
@@ -604,6 +617,22 @@ function SetRow({
             maxLength={500}
             className="w-full bg-ink-950 border border-ink-800 rounded px-2 py-1.5 text-[12px] font-mono text-ink-200 resize-y focus:outline-none focus:border-accent/50"
           />
+          {/* Quick reference for the two effort scales most users want to jot
+              down. Click either to read what the number means. */}
+          <div className="mt-1 flex items-center gap-3 text-[10px] tracking-wider uppercase text-ink-600">
+            <span className="inline-flex items-center gap-1">
+              <InfoTooltip label="RPE" size={11} align="start">
+                {ExplainRPE}
+              </InfoTooltip>
+              RPE
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <InfoTooltip label="RIR" size={11} align="start">
+                {ExplainRIR}
+              </InfoTooltip>
+              RIR
+            </span>
+          </div>
         </div>
       )}
     </div>

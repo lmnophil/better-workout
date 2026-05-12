@@ -10,6 +10,13 @@ import { VolumeTierEditor } from '@/components/settings/volume-tier-editor';
 import { RestTimerEditor } from '@/components/settings/rest-timer-editor';
 import { WorkoutDefaultsEditor } from '@/components/settings/workout-defaults-editor';
 import { HiddenTemplatesEditor } from '@/components/settings/hidden-templates-editor';
+import { InfoTooltip } from '@/components/ui/info-tooltip';
+import {
+  ExplainMinTarget,
+  ExplainRestRanges,
+  ExplainVolumeTiers,
+  ExplainWeightIncrement,
+} from '@/lib/explanations';
 
 export const metadata = { title: 'Settings — Tracker' };
 
@@ -56,7 +63,10 @@ export default async function SettingsPage() {
 
       <section className="mb-8">
         <div className="mb-3">
-          <h2 className="font-display text-xl">Rest timer</h2>
+          <h2 className="font-display text-xl inline-flex items-center gap-2">
+            Rest timer
+            <InfoTooltip label="Rest by goal">{ExplainRestRanges}</InfoTooltip>
+          </h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
             Auto-starts when you log reps for a set. Tap the bar at the top of the workout to skip
             or extend.
@@ -67,7 +77,10 @@ export default async function SettingsPage() {
 
       <section className="mb-8">
         <div className="mb-3">
-          <h2 className="font-display text-xl">Workout defaults</h2>
+          <h2 className="font-display text-xl inline-flex items-center gap-2">
+            Workout defaults
+            <InfoTooltip label="Weight increment">{ExplainWeightIncrement}</InfoTooltip>
+          </h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
             How sets get seeded for new exercises and how big the weight stepper&apos;s +/- buttons
             jump. Override per-exercise from the workout view.
@@ -78,7 +91,10 @@ export default async function SettingsPage() {
 
       <section className="mb-8">
         <div className="mb-3">
-          <h2 className="font-display text-xl">Volume tier</h2>
+          <h2 className="font-display text-xl inline-flex items-center gap-2">
+            Volume tier
+            <InfoTooltip label="Volume tiers">{ExplainVolumeTiers}</InfoTooltip>
+          </h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
             Scales every muscle&apos;s (minimum, target) bounds. Pick the level that matches the
             volume you want to chase. Per-muscle overrides below override this for individual
@@ -90,7 +106,10 @@ export default async function SettingsPage() {
 
       <section className="mb-8">
         <div className="mb-3">
-          <h2 className="font-display text-xl">Weekly volume targets</h2>
+          <h2 className="font-display text-xl inline-flex items-center gap-2">
+            Weekly volume targets
+            <InfoTooltip label="Min &amp; target">{ExplainMinTarget}</InfoTooltip>
+          </h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
             Per-muscle target overrides. Defaults come from your volume tier above; set a number
             here for any muscle you want pinned specifically. The minimum auto-derives as ~50% of
