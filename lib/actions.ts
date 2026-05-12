@@ -3520,3 +3520,57 @@ export const toggleShareReaction = withLogging(
     revalidatePath(`/share/${token}`);
   },
 );
+
+// Reviewers can retract their own pending suggestions and unresolved comments.
+// Hard delete (no soft-delete pattern exists yet for share content); the owner
+// inbox simply stops listing them. Once the owner has acted (resolved/applied/
+// rejected on a suggestion, resolved on a comment), the row is locked — the
+// reviewer can't yank context the owner already responded to.
+
+const DeleteSuggestionSchema = z.object({
+  token: z.string().min(1),
+  suggestionId: z.string().min(1),
+});
+
+export const deleteShareSuggestion = withLogging(
+  'deleteShareSuggestion',
+  async (input: z.infer<typeof DeleteSuggestionSchema>) => {
+    const { token, suggestionId } = DeleteSuggestionSchema.parse(input);
+    const share = await requireActiveShare(token);
+    const reviewer = await requireReviewer(share.id);
+
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, shareId: share.id, reviewerId: reviewer.id },
+      select: { id: true, state: true },
+    });
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+
+    await db.shareSuggestion.delete({ where: { id: s.id } });
+    revalidatePath(`/share/${token}`);
+  },
+);
+
+const DeleteCommentSchema = z.object({
+  token: z.string().min(1),
+  commentId: z.string().min(1),
+});
+
+export const deleteShareComment = withLogging(
+  'deleteShareComment',
+  async (input: z.infer<typeof DeleteCommentSchema>) => {
+    const { token, commentId } = DeleteCommentSchema.parse(input);
+    const share = await requireActiveShare(token);
+    const reviewer = await requireReviewer(share.id);
+
+    const c = await db.shareComment.findFirst({
+      where: { id: commentId, shareId: share.id, reviewerId: reviewer.id },
+      select: { id: true, resolvedAt: true },
+    });
+    if (!c) throw new Error('Comment not found');
+    if (c.resolvedAt) throw new Error('Comment already resolved');
+
+    await db.shareComment.delete({ where: { id: c.id } });
+    revalidatePath(`/share/${token}`);
+  },
+);

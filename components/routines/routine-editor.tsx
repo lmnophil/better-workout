@@ -2100,7 +2100,7 @@ function DayCard({
           ) : (
             <button
               onClick={() => setRenaming(true)}
-              className="text-sm text-ink-100 hover:text-accent transition truncate text-left flex-1 min-w-0"
+              className="text-sm text-ink-100 hover:text-accent transition truncate text-left min-w-0"
             >
               {day.name}
             </button>

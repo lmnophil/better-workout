@@ -9,7 +9,8 @@
 // which keeps the surface honest: "the owner sees X."
 
 import { useState, useTransition } from 'react';
-import { postShareComment } from '@/lib/actions';
+import { X } from 'lucide-react';
+import { postShareComment, deleteShareComment, deleteShareSuggestion } from '@/lib/actions';
 import type { LibraryExercise } from './reviewer-picker';
 
 type Comment = {
@@ -45,6 +46,7 @@ type Props = {
 
 export function TargetThread({
   token,
+  reviewer,
   targetType,
   targetId,
   comments,
@@ -75,31 +77,55 @@ export function TargetThread({
     <div className={compact ? 'mt-2' : ''}>
       {hasContent && (
         <ul className="space-y-1 mb-2">
-          {suggestions.map((s) => (
-            <li
-              key={s.id}
-              className="text-xs bg-ink-900/60 border border-ink-800 rounded-md px-2 py-1.5 flex items-baseline justify-between gap-2"
-            >
-              <span className="text-ink-300">
-                <span className="text-ink-100 font-medium">{s.reviewerName}</span>{' '}
-                <SuggestionInline kind={s.kind} payload={s.payload} libraryById={libraryById} />
-              </span>
-              <SuggestionState state={s.state} />
-            </li>
-          ))}
-          {comments.map((c) => (
-            <li
-              key={c.id}
-              className="text-xs bg-ink-900/40 border border-ink-800 rounded-md px-2 py-1.5"
-            >
-              <div className="text-ink-200">
-                <span className="text-ink-100 font-medium">{c.reviewerName}:</span> {c.body}
-              </div>
-              {c.resolvedAt && (
-                <div className="text-[10px] text-ink-500 mt-0.5">resolved by owner</div>
-              )}
-            </li>
-          ))}
+          {suggestions.map((s) => {
+            const mine = s.reviewerId === reviewer.id;
+            const canDelete = mine && s.state === 'open';
+            return (
+              <li
+                key={s.id}
+                className="text-xs bg-ink-900/60 border border-ink-800 rounded-md px-2 py-1.5 flex items-baseline justify-between gap-2"
+              >
+                <span className="text-ink-300">
+                  <span className="text-ink-100 font-medium">{s.reviewerName}</span>{' '}
+                  <SuggestionInline kind={s.kind} payload={s.payload} libraryById={libraryById} />
+                </span>
+                <span className="flex items-center gap-2 shrink-0">
+                  <SuggestionState state={s.state} />
+                  {canDelete && (
+                    <DeleteButton
+                      label="Remove your suggestion"
+                      onConfirm={() => deleteShareSuggestion({ token, suggestionId: s.id })}
+                    />
+                  )}
+                </span>
+              </li>
+            );
+          })}
+          {comments.map((c) => {
+            const mine = c.reviewerId === reviewer.id;
+            const canDelete = mine && c.resolvedAt === null;
+            return (
+              <li
+                key={c.id}
+                className="text-xs bg-ink-900/40 border border-ink-800 rounded-md px-2 py-1.5"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="text-ink-200 min-w-0">
+                    <span className="text-ink-100 font-medium">{c.reviewerName}:</span> {c.body}
+                  </div>
+                  {canDelete && (
+                    <DeleteButton
+                      label="Remove your comment"
+                      onConfirm={() => deleteShareComment({ token, commentId: c.id })}
+                    />
+                  )}
+                </div>
+                {c.resolvedAt && (
+                  <div className="text-[10px] text-ink-500 mt-0.5">resolved by owner</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {allowComment && (
@@ -190,6 +216,30 @@ function SuggestionInline({
     default:
       return <>{kind}</>;
   }
+}
+
+function DeleteButton({ label, onConfirm }: { label: string; onConfirm: () => Promise<void> }) {
+  const [pending, startTransition] = useTransition();
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={pending}
+      onClick={() => {
+        startTransition(async () => {
+          try {
+            await onConfirm();
+          } catch {
+            /* silent — page revalidates on success */
+          }
+        });
+      }}
+      className="shrink-0 text-ink-500 hover:text-rose-300 transition disabled:opacity-40"
+    >
+      <X size={12} />
+    </button>
+  );
 }
 
 function SuggestionState({ state }: { state: string }) {

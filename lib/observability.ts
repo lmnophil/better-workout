@@ -71,6 +71,7 @@ const EXPECTED_MESSAGES = [
   'Comment not found',
   'Suggestion not found',
   'Suggestion already resolved',
+  'Comment already resolved',
   'Notification not found',
   'Display name',
   'Comment body',

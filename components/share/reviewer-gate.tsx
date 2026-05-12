@@ -74,7 +74,7 @@ export function ReviewerGate({ token, ownerName, routineName }: Props) {
 
       <p className="text-xs text-ink-500 mt-4">
         Your name is local to this share link — clearing browser cookies will ask again. No account
-        required.
+        required. You can change it later from the share page.
       </p>
     </div>
   );
