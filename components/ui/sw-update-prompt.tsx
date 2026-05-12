@@ -47,10 +47,7 @@ export function SwUpdatePrompt() {
           installing.addEventListener('statechange', () => {
             // Only surface the prompt when there's an existing controller —
             // first-ever install isn't an "update."
-            if (
-              installing.state === 'installed' &&
-              navigator.serviceWorker.controller
-            ) {
+            if (installing.state === 'installed' && navigator.serviceWorker.controller) {
               setWaitingWorker(installing);
             }
           });
@@ -67,17 +64,11 @@ export function SwUpdatePrompt() {
       if (cancelled) return;
       window.location.reload();
     };
-    navigator.serviceWorker.addEventListener(
-      'controllerchange',
-      onControllerChange,
-    );
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
 
     return () => {
       cancelled = true;
-      navigator.serviceWorker.removeEventListener(
-        'controllerchange',
-        onControllerChange,
-      );
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
     };
   }, []);
 

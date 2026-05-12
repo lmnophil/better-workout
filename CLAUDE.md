@@ -12,7 +12,7 @@ A few stances that matter more than any specific fact in this document:
 
 **Do quality work, but don't gold-plate.** Solves the actual problem, fits the existing style, doesn't introduce premature abstraction. Stay in scope: don't refactor things that weren't part of the request, don't add features that weren't asked for. If you find an unrelated issue, surface it ("I noticed X — want me to handle it now or leave it for later?") rather than silently fixing it.
 
-**Verify, don't assume.** Read the file before editing. Run `npm run typecheck` after meaningful changes. Don't assume library APIs from training data — check `package.json` and how the API is used elsewhere. The Next.js 15 + React 19 + Auth.js v5 + Prisma 7 stack has real footguns around older patterns.
+**Verify, don't assume.** Read the file before editing. Run `npm run typecheck` and `npm run lint` after meaningful changes. Don't assume library APIs from training data — check `package.json` and how the API is used elsewhere. The Next.js 15 + React 19 + Auth.js v5 + Prisma 7 stack has real footguns around older patterns.
 
 **The previous session can be wrong too.** Inheriting a session's direction doesn't mean inheriting its mistakes. If the last thing that happened was a half-finished refactor or a questionable design call, push back rather than continuing it.
 
@@ -47,7 +47,7 @@ If you genuinely can't verify something (no MCP, blocked by an OAuth flow), say 
 
 A short rule to keep docs from rotting:
 
-- **In docs:** the *why* behind a non-obvious choice; invariants that the code can't enforce; gotchas a fresh session would hit blind.
+- **In docs:** the _why_ behind a non-obvious choice; invariants that the code can't enforce; gotchas a fresh session would hit blind.
 - **Not in docs:** anything `git log` or a `grep` can answer (file paths, action lists, exercise counts, recent changes). Lists like that drift the moment the code moves and quietly mislead future sessions.
 - **Rationale that survives a refactor** goes in [`docs/decisions.md`](docs/decisions.md) as an ADR.
 - **Operational gotchas** go in the nearest subdirectory `CLAUDE.md`.
@@ -76,9 +76,11 @@ If a fact lives in one doc and is only referenced from others, that's the goal. 
 
 **Errors.** Server-side: throw expected errors as `Error` with stable prefixes. They bubble to the nearest `error.tsx` boundary. All boundaries use `useReportError` to ship to `/api/log/client-error`.
 
-**Comments.** Prose paragraphs that explain *why*, not bullets that restate *what*. Match the surrounding voice — direct, doesn't hedge.
+**Comments.** Prose paragraphs that explain _why_, not bullets that restate _what_. Match the surrounding voice — direct, doesn't hedge.
 
-**Formatting.** No tooling enforced. Match what's around you.
+**Formatting.** Prettier owns whitespace; ESLint owns rules. Run `npm run format` before committing if you've been editing by hand, or let your editor's Prettier-on-save handle it. The config (`prettier.config.mjs`) is intentionally minimal — single quotes, semis, trailing commas, 100-char lines — to match the existing voice. Don't argue with Prettier; if the output is uglier than the input, the input was usually wrong about line breaks.
+
+**Linting.** `npm run lint` runs ESLint with `next/core-web-vitals` + `next/typescript` + `typescript-eslint` strict + `eslint-config-prettier`. The strict ruleset disallows `!` (non-null assertion) — narrow with a local variable, type predicate, or guard clause instead. If you really need a `!`, you're probably masking a real bug. Use `npm run lint:fix` for autofixes; the rest the rule expects you to fix by hand. New unused vars should be prefixed `_` to opt out of `no-unused-vars`.
 
 ## Things you might want to do that would be wrong
 

@@ -16,11 +16,7 @@ import {
   getRoutineForUser,
   getRoutineRecentSessions,
 } from '@/lib/queries';
-import {
-  pickTodaysRoutineDay,
-  pickUpcomingRoutineDays,
-  isScheduleStyle,
-} from '@/lib/routine';
+import { pickTodaysRoutineDay, pickUpcomingRoutineDays, isScheduleStyle } from '@/lib/routine';
 import { WorkoutView } from '@/components/workout/workout-view';
 import type {
   RoutineDayClient,
@@ -89,9 +85,10 @@ export default async function WorkoutPage() {
     };
   }
 
-  const scheduleStyle = routine && isScheduleStyle(routine.scheduleStyle)
-    ? routine.scheduleStyle
-    : ('sequence' as const);
+  const scheduleStyle =
+    routine && isScheduleStyle(routine.scheduleStyle)
+      ? routine.scheduleStyle
+      : ('sequence' as const);
 
   const todaysDay = routine ? pickTodaysRoutineDay(routine) : null;
   const upcomingRaw = routine ? pickUpcomingRoutineDays(routine, todaysDay) : [];
@@ -117,13 +114,11 @@ export default async function WorkoutPage() {
     : null;
 
   // Convert Map to a serializable structure for the client component boundary
-  const lastSetsArray = Array.from(lastSetsByExercise.entries()).map(
-    ([exerciseId, data]) => ({
-      exerciseId,
-      sessionDate: data.sessionDate.toISOString(),
-      sets: data.sets,
-    }),
-  );
+  const lastSetsArray = Array.from(lastSetsByExercise.entries()).map(([exerciseId, data]) => ({
+    exerciseId,
+    sessionDate: data.sessionDate.toISOString(),
+    sets: data.sets,
+  }));
 
   // Per-exercise notes from the routine day this session was started from, if
   // any. Surfaced read-only in ExerciseInSession so the user sees the cues

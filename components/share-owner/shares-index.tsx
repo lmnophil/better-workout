@@ -19,13 +19,7 @@ type Share = {
   };
 };
 
-export function SharesIndex({
-  shares,
-  baseUrl,
-}: {
-  shares: Share[];
-  baseUrl: string;
-}) {
+export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: string }) {
   const [label, setLabel] = useState('');
   const [pending, startTransition] = useTransition();
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -95,10 +89,7 @@ export function SharesIndex({
       {active.length > 0 && (
         <ul className="space-y-2 mb-6">
           {active.map((s) => (
-            <li
-              key={s.id}
-              className="bg-ink-900/40 border border-ink-800 rounded-lg p-3"
-            >
+            <li key={s.id} className="bg-ink-900/40 border border-ink-800 rounded-lg p-3">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <Link
@@ -110,9 +101,8 @@ export function SharesIndex({
                   <div className="text-[11px] text-ink-400 mt-0.5">
                     {s.counts.reviewers} reviewer{s.counts.reviewers === 1 ? '' : 's'} ·{' '}
                     {s.counts.comments} unresolved comment
-                    {s.counts.comments === 1 ? '' : 's'} · {s.counts.suggestions} open
-                    suggestion{s.counts.suggestions === 1 ? '' : 's'} ·{' '}
-                    {s.counts.reactions} 👍
+                    {s.counts.comments === 1 ? '' : 's'} · {s.counts.suggestions} open suggestion
+                    {s.counts.suggestions === 1 ? '' : 's'} · {s.counts.reactions} 👍
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
@@ -144,9 +134,7 @@ export function SharesIndex({
         </ul>
       )}
 
-      {active.length === 0 && (
-        <p className="text-ink-400 text-sm">No active share links yet.</p>
-      )}
+      {active.length === 0 && <p className="text-ink-400 text-sm">No active share links yet.</p>}
 
       {revoked.length > 0 && (
         <details className="mt-6">
@@ -156,8 +144,8 @@ export function SharesIndex({
           <ul className="mt-2 space-y-1">
             {revoked.map((s) => (
               <li key={s.id} className="text-xs text-ink-500">
-                {s.label ?? 'Share link'} —{' '}
-                revoked {new Date(s.revokedAt as string).toLocaleDateString()}
+                {s.label ?? 'Share link'} — revoked{' '}
+                {new Date(s.revokedAt as string).toLocaleDateString()}
               </li>
             ))}
           </ul>

@@ -18,11 +18,7 @@ export const metadata = { title: 'Shared routine' };
 // the name shape here.
 const SHARE_COOKIE_PREFIX = 'share_reviewer_';
 
-export default async function SharePage({
-  params,
-}: {
-  params: Promise<{ token: string }>;
-}) {
+export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
 
   const share = await getShareByToken(token);

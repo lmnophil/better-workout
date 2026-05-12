@@ -14,17 +14,11 @@ import {
   swapInRoutineTemplate,
 } from '@/lib/actions';
 import { ExercisePicker } from '@/components/workout/exercise-picker';
-import {
-  WEEKDAY_FULL_LABELS,
-  type ScheduleStyle,
-} from '@/lib/routine';
+import { WEEKDAY_FULL_LABELS, type ScheduleStyle } from '@/lib/routine';
 import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { moduleDescription } from '@/lib/exercises-data';
 import { usePrefs } from '@/components/ui/prefs-context';
-import {
-  estimatePlannedTotalSeconds,
-  formatEstimate,
-} from '@/lib/time-estimate';
+import { estimatePlannedTotalSeconds, formatEstimate } from '@/lib/time-estimate';
 
 export type RoutineDayExerciseClient = {
   exerciseId: string;
@@ -93,15 +87,11 @@ export function RoutineTimeline({
         </div>
         <div className="font-display text-2xl tracking-tight">{routine.name}</div>
         {routine.description && (
-          <p className="text-xs text-ink-500 italic font-display mt-0.5">
-            {routine.description}
-          </p>
+          <p className="text-xs text-ink-500 italic font-display mt-0.5">{routine.description}</p>
         )}
       </div>
 
-      {recentSessions.length > 0 && (
-        <RecentSection sessions={recentSessions} />
-      )}
+      {recentSessions.length > 0 && <RecentSection sessions={recentSessions} />}
 
       <TodaySection
         scheduleStyle={routine.scheduleStyle}
@@ -139,9 +129,7 @@ function RecentSection({ sessions }: { sessions: RoutineRecentSessionClient[] })
               key={s.id}
               className="flex items-center justify-between gap-2 px-3 py-2 bg-ink-900/30 rounded-lg"
             >
-              <div className="text-[11px] text-ink-500 font-mono w-12 shrink-0">
-                {dateLabel}
-              </div>
+              <div className="text-[11px] text-ink-500 font-mono w-12 shrink-0">{dateLabel}</div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-ink-100 truncate">{dayName}</div>
                 {s.dayLabel && (
@@ -174,9 +162,7 @@ function TodaySection({
 }) {
   return (
     <div>
-      <SectionHeader>
-        {scheduleStyle === 'weekday' ? 'Today' : 'Up next'}
-      </SectionHeader>
+      <SectionHeader>{scheduleStyle === 'weekday' ? 'Today' : 'Up next'}</SectionHeader>
       {todaysDay ? (
         <DayCard
           day={todaysDay}
@@ -187,9 +173,7 @@ function TodaySection({
       ) : (
         <div className="px-4 py-6 border border-ink-800 rounded-lg text-center">
           <div className="text-sm text-ink-300">
-            {scheduleStyle === 'weekday'
-              ? 'Nothing pinned for today.'
-              : 'No days yet.'}
+            {scheduleStyle === 'weekday' ? 'Nothing pinned for today.' : 'No days yet.'}
           </div>
           <div className="text-[11px] text-ink-500 italic font-display mt-1">
             {scheduleStyle === 'weekday'
@@ -215,9 +199,7 @@ function UpcomingSection({
 }) {
   return (
     <div>
-      <SectionHeader>
-        {scheduleStyle === 'weekday' ? 'Coming up' : 'Then'}
-      </SectionHeader>
+      <SectionHeader>{scheduleStyle === 'weekday' ? 'Coming up' : 'Then'}</SectionHeader>
       <div className="space-y-1.5">
         {days.map((d, idx) => (
           <DayCard
@@ -227,9 +209,7 @@ function UpcomingSection({
             defaultExpanded={false}
             availableExercises={availableExercises}
             // Sequence mode: mark the last upcoming entry as the loop indicator.
-            isLoopBack={
-              scheduleStyle === 'sequence' && idx === days.length - 1
-            }
+            isLoopBack={scheduleStyle === 'sequence' && idx === days.length - 1}
           />
         ))}
       </div>
@@ -269,8 +249,7 @@ function DayCard({
     return [
       {
         metric: ex.metric,
-        restSeconds:
-          ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
+        restSeconds: ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
         plannedSets: e.plannedSets,
         plannedReps: e.plannedReps,
         plannedSeconds: e.plannedSeconds,
@@ -346,7 +325,7 @@ function DayCard({
     if (!pendingChoice) return;
     if (day.templateIsBuiltin) {
       setError(
-        "This day uses a default template, which can’t be edited directly. Build your own copy first.",
+        'This day uses a default template, which can’t be edited directly. Build your own copy first.',
       );
       return;
     }
@@ -380,15 +359,11 @@ function DayCard({
   }
 
   const weekdayLabel =
-    day.weekday !== null && day.weekday !== undefined
-      ? WEEKDAY_FULL_LABELS[day.weekday]
-      : null;
+    day.weekday !== null && day.weekday !== undefined ? WEEKDAY_FULL_LABELS[day.weekday] : null;
 
   return (
     <div
-      className={`border rounded-lg ${
-        isToday ? 'accent-border bg-ink-900/40' : 'border-ink-800'
-      }`}
+      className={`border rounded-lg ${isToday ? 'accent-border bg-ink-900/40' : 'border-ink-800'}`}
     >
       <button
         type="button"
@@ -497,9 +472,7 @@ function ExerciseList({
 }) {
   if (exercises.length === 0) {
     return (
-      <p className="text-[11px] text-ink-500 italic font-display">
-        No exercises in this template.
-      </p>
+      <p className="text-[11px] text-ink-500 italic font-display">No exercises in this template.</p>
     );
   }
   // Group by module like the active session does — reads as the same
@@ -511,9 +484,7 @@ function ExerciseList({
       const description = moduleDescription(ex.module);
       elements.push(
         <div key={`hdr-${idx}`} className="pt-2 first:pt-0">
-          <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
-            {ex.module}
-          </div>
+          <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">{ex.module}</div>
           {description && (
             <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
               {description}
@@ -525,19 +496,14 @@ function ExerciseList({
     }
     const swapped = !!ex.pendingSwapInExerciseId;
     elements.push(
-      <div
-        key={`${ex.exerciseId}-${idx}`}
-        className="flex items-center justify-between gap-2 py-1"
-      >
+      <div key={`${ex.exerciseId}-${idx}`} className="flex items-center justify-between gap-2 py-1">
         <div className="text-sm text-ink-100 min-w-0 flex items-center gap-2 flex-wrap">
           {swapped ? (
             <>
               <span className="line-through text-ink-600">{ex.name}</span>
               <span className="text-ink-500">→</span>
               <span>{ex.pendingSwapInExerciseName}</span>
-              <span className="text-[9px] tracking-[0.2em] uppercase accent-text">
-                one-time
-              </span>
+              <span className="text-[9px] tracking-[0.2em] uppercase accent-text">one-time</span>
             </>
           ) : (
             <span>{ex.name}</span>
@@ -619,8 +585,8 @@ function SwapChoiceDialog({
         >
           <div className="text-sm text-ink-100">Just next time</div>
           <div className="text-[11px] text-ink-500 italic font-display mt-0.5">
-            The swap applies the next time you start this day, then clears.
-            Doesn&apos;t change the underlying template.
+            The swap applies the next time you start this day, then clears. Doesn&apos;t change the
+            underlying template.
           </div>
         </button>
 
@@ -655,8 +621,6 @@ function SwapChoiceDialog({
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-2">
-      {children}
-    </div>
+    <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-2">{children}</div>
   );
 }

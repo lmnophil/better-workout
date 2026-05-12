@@ -51,11 +51,7 @@ export const viewport: Viewport = {
   // inputs to >=16px on touch devices; see globals.css.
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"

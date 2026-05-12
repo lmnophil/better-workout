@@ -103,18 +103,13 @@ export default async function ShareDetailPage({
   return (
     <main className="px-5 py-6 max-w-3xl mx-auto">
       <div className="mb-4">
-        <Link
-          href="/routine/shares"
-          className="text-xs text-ink-400 hover:text-ink-200"
-        >
+        <Link href="/routine/shares" className="text-xs text-ink-400 hover:text-ink-200">
           ← all share links
         </Link>
         <h1 className="font-display text-2xl mt-1">
           {share.label ?? 'Share link'}
           {share.revokedAt && (
-            <span className="ml-2 text-xs text-rose-300/80 uppercase tracking-wider">
-              revoked
-            </span>
+            <span className="ml-2 text-xs text-rose-300/80 uppercase tracking-wider">revoked</span>
           )}
         </h1>
         <div className="text-[11px] text-ink-500 mt-1 break-all">/share/{share.token}</div>

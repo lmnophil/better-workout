@@ -8,12 +8,7 @@
 // "metric already registered" errors on every change. We stash on globalThis
 // so we reuse the same registry across reloads.
 
-import {
-  Counter,
-  Histogram,
-  Registry,
-  collectDefaultMetrics,
-} from 'prom-client';
+import { Counter, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
 
 type MetricsState = {
   registry: Registry;

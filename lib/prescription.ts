@@ -22,9 +22,7 @@ const COUNT_AT_LEAD = /^\s*(\d+)\s*[×x*]/;
  *   "30s, controlled"    → null
  *   undefined / empty    → null
  */
-export function parsePrescriptionSetCount(
-  prescription: string | null | undefined,
-): number | null {
+export function parsePrescriptionSetCount(prescription: string | null | undefined): number | null {
   if (!prescription) return null;
   const match = COUNT_AT_LEAD.exec(prescription);
   if (!match) return null;

@@ -21,9 +21,7 @@ export function WorkoutDefaultsEditor() {
   const [customIncrementOpen, setCustomIncrementOpen] = useState(
     !INCREMENT_PRESETS.includes(prefs.defaultWeightIncrement),
   );
-  const [customIncrement, setCustomIncrement] = useState(
-    String(prefs.defaultWeightIncrement),
-  );
+  const [customIncrement, setCustomIncrement] = useState(String(prefs.defaultWeightIncrement));
 
   function pickSets(n: number) {
     updatePrefs({ defaultSetsPerExercise: n });
@@ -148,9 +146,7 @@ function Row({
       <div className="min-w-0">
         <div className="text-sm text-ink-100">{label}</div>
         {description && (
-          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">
-            {description}
-          </div>
+          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">{description}</div>
         )}
       </div>
       <div className="shrink-0">{children}</div>

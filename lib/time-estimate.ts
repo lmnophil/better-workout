@@ -55,9 +55,7 @@ export function workTimePerSet(input: SetWorkInput): number {
       : TIME_ESTIMATE.DEFAULT_TIME_SET_S;
   }
   const reps =
-    input.plannedReps && input.plannedReps > 0
-      ? input.plannedReps
-      : TIME_ESTIMATE.DEFAULT_REPS;
+    input.plannedReps && input.plannedReps > 0 ? input.plannedReps : TIME_ESTIMATE.DEFAULT_REPS;
   return reps * TIME_ESTIMATE.WORK_PER_REP_S + TIME_ESTIMATE.SET_OVERHEAD_S;
 }
 
@@ -73,10 +71,7 @@ type PlannedExercise = SetWorkInput & {
  * count, plus rest between (but not after) sets.
  */
 export function estimatePlannedExerciseSeconds(ex: PlannedExercise): number {
-  const sets =
-    ex.plannedSets && ex.plannedSets > 0
-      ? ex.plannedSets
-      : TIME_ESTIMATE.DEFAULT_SETS;
+  const sets = ex.plannedSets && ex.plannedSets > 0 ? ex.plannedSets : TIME_ESTIMATE.DEFAULT_SETS;
   if (sets <= 0) return 0;
   const work = workTimePerSet(ex);
   return sets * work + Math.max(0, sets - 1) * ex.restSeconds;
@@ -113,12 +108,9 @@ function workTimeForSet(set: ActiveSet, metric: string): number {
   // Prefer the user's actual logged value when present — a 3-rep heavy set
   // shouldn't be estimated like a 12-rep accessory.
   if (metric === 'time') {
-    return set.seconds && set.seconds > 0
-      ? set.seconds
-      : TIME_ESTIMATE.DEFAULT_TIME_SET_S;
+    return set.seconds && set.seconds > 0 ? set.seconds : TIME_ESTIMATE.DEFAULT_TIME_SET_S;
   }
-  const reps =
-    set.reps && set.reps > 0 ? set.reps : TIME_ESTIMATE.DEFAULT_REPS;
+  const reps = set.reps && set.reps > 0 ? set.reps : TIME_ESTIMATE.DEFAULT_REPS;
   return reps * TIME_ESTIMATE.WORK_PER_REP_S + TIME_ESTIMATE.SET_OVERHEAD_S;
 }
 

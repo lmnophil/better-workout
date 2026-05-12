@@ -135,10 +135,10 @@ docker compose exec backup sh /usr/local/bin/backup.sh   # manual backup
 
 Both modes call the same seed (`prisma/seed.ts`) but invoke it differently:
 
-| Mode    | Command                                           | What runs                                     |
-|---------|---------------------------------------------------|-----------------------------------------------|
-| npm     | `npm run db:seed`                                 | `tsx prisma/seed.ts` (devDep `tsx` required)  |
-| compose | `docker compose exec app node prisma/seed.js`     | Bundled output from the Docker build (no tsx) |
+| Mode    | Command                                       | What runs                                     |
+| ------- | --------------------------------------------- | --------------------------------------------- |
+| npm     | `npm run db:seed`                             | `tsx prisma/seed.ts` (devDep `tsx` required)  |
+| compose | `docker compose exec app node prisma/seed.js` | Bundled output from the Docker build (no tsx) |
 
 Both are **idempotent**. The seed upserts by `(ownerId=null, name)` for built-in exercises and by `(userId=null, isBuiltin=true, name)` for starter templates. Re-running after edits to `lib/exercises-data.ts` updates built-ins in place; re-running with no edits is a no-op.
 
@@ -285,7 +285,7 @@ If you do want npm mode to use the compose Postgres instead of the standalone on
 
 ## What's different between local and a real prod deploy
 
-In case you're wondering what your local rehearsal *doesn't* catch:
+In case you're wondering what your local rehearsal _doesn't_ catch:
 
 - **Reverse proxy / TLS** — local has none; prod has Caddy/nginx/Traefik in front (see [`docs/caddy-snippet.example`](docs/caddy-snippet.example)).
 - **OAuth callback URL** — local uses `http://localhost:3000/api/auth/callback/google`; prod uses your real domain. Both must be registered in Google Cloud Console for the matching `AUTH_URL`.

@@ -6,12 +6,12 @@ These are placeholder icons — three horizontal bars (the "stack of sets" motif
 
 The web manifest references these exact filenames, so keep them:
 
-| File | Size | Purpose |
-| --- | --- | --- |
-| `icon-192.png` | 192×192 | Android home screen |
-| `icon-512.png` | 512×512 | High-density displays, splash screen |
+| File                | Size    | Purpose                                                                  |
+| ------------------- | ------- | ------------------------------------------------------------------------ |
+| `icon-192.png`      | 192×192 | Android home screen                                                      |
+| `icon-512.png`      | 512×512 | High-density displays, splash screen                                     |
 | `icon-maskable.png` | 512×512 | Android adaptive icon (must keep important content within the inner 80%) |
-| `icon-180.png` | 180×180 | Apple touch icon (iOS home screen) |
+| `icon-180.png`      | 180×180 | Apple touch icon (iOS home screen)                                       |
 
 ## Generating from a logo
 

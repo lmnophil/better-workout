@@ -3,10 +3,7 @@
 
 import { auth } from '@/auth';
 import { redirect } from 'next/navigation';
-import {
-  getUserVolumeTargets,
-  getHiddenBuiltinTemplates,
-} from '@/lib/queries';
+import { getUserVolumeTargets, getHiddenBuiltinTemplates } from '@/lib/queries';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { VolumeTargetsEditor } from '@/components/settings/volume-targets-editor';
 import { RestTimerEditor } from '@/components/settings/rest-timer-editor';
@@ -33,23 +30,21 @@ export default async function SettingsPage() {
   }));
 
   // Only show muscles that have a default target (lifting muscles, not mobility/balance)
-  const trackable = MUSCLE_GROUPS.filter((m) => m.weeklyVolumeTarget !== undefined).map(
-    (m) => ({
-      id: m.id,
-      label: m.label,
-      category: m.category,
-      defaultTarget: m.weeklyVolumeTarget!,
-      currentTarget: overrides.get(m.id) ?? m.weeklyVolumeTarget!,
-      isOverridden: overrides.has(m.id),
-    }),
-  );
+  const trackable = MUSCLE_GROUPS.filter(
+    (m): m is typeof m & { weeklyVolumeTarget: number } => m.weeklyVolumeTarget !== undefined,
+  ).map((m) => ({
+    id: m.id,
+    label: m.label,
+    category: m.category,
+    defaultTarget: m.weeklyVolumeTarget,
+    currentTarget: overrides.get(m.id) ?? m.weeklyVolumeTarget,
+    isOverridden: overrides.has(m.id),
+  }));
 
   return (
     <div className="px-5 pt-6 pb-10">
       <div className="mb-6">
-        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1">
-          Preferences
-        </div>
+        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1">Preferences</div>
         <h1
           className="font-display text-3xl tracking-tight"
           style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 30" }}
@@ -62,8 +57,8 @@ export default async function SettingsPage() {
         <div className="mb-3">
           <h2 className="font-display text-xl">Rest timer</h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
-            Auto-starts when you log reps for a set. Tap the bar at the top of the
-            workout to skip or extend.
+            Auto-starts when you log reps for a set. Tap the bar at the top of the workout to skip
+            or extend.
           </p>
         </div>
         <RestTimerEditor />
@@ -73,8 +68,8 @@ export default async function SettingsPage() {
         <div className="mb-3">
           <h2 className="font-display text-xl">Workout defaults</h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
-            How sets get seeded for new exercises and how big the weight stepper&apos;s
-            +/- buttons jump. Override per-exercise from the workout view.
+            How sets get seeded for new exercises and how big the weight stepper&apos;s +/- buttons
+            jump. Override per-exercise from the workout view.
           </p>
         </div>
         <WorkoutDefaultsEditor />

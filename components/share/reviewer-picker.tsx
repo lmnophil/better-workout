@@ -76,19 +76,19 @@ export function ReviewerPicker({
 
     const byModule = new Map<string, LibraryExercise[]>();
     for (const e of filtered) {
-      if (!byModule.has(e.module)) byModule.set(e.module, []);
-      byModule.get(e.module)!.push(e);
+      let bucket = byModule.get(e.module);
+      if (!bucket) {
+        bucket = [];
+        byModule.set(e.module, bucket);
+      }
+      bucket.push(e);
     }
     // Within each module: sort by primary muscle, then name. If a muscle hint
     // is provided, surface matching exercises first within their module.
     for (const [, arr] of byModule) {
       arr.sort((a, b) => {
-        const aHit = primaryMuscleHint
-          ? a.primaryMuscles.includes(primaryMuscleHint) ? 0 : 1
-          : 0;
-        const bHit = primaryMuscleHint
-          ? b.primaryMuscles.includes(primaryMuscleHint) ? 0 : 1
-          : 0;
+        const aHit = primaryMuscleHint ? (a.primaryMuscles.includes(primaryMuscleHint) ? 0 : 1) : 0;
+        const bHit = primaryMuscleHint ? (b.primaryMuscles.includes(primaryMuscleHint) ? 0 : 1) : 0;
         if (aHit !== bHit) return aHit - bHit;
         const am = a.primaryMuscles[0] ?? '';
         const bm = b.primaryMuscles[0] ?? '';
@@ -99,21 +99,17 @@ export function ReviewerPicker({
     // Order modules: any module with a primary-muscle-hit comes first if a
     // hint is set. Otherwise, preserve insertion order (which mirrors the
     // library's sort order).
-    const moduleOrder = Array.from(byModule.keys());
+    const entries = Array.from(byModule.entries());
     if (primaryMuscleHint) {
-      moduleOrder.sort((a, b) => {
-        const aHit = byModule
-          .get(a)!
-          .some((e) => e.primaryMuscles.includes(primaryMuscleHint));
-        const bHit = byModule
-          .get(b)!
-          .some((e) => e.primaryMuscles.includes(primaryMuscleHint));
+      entries.sort(([, a], [, b]) => {
+        const aHit = a.some((e) => e.primaryMuscles.includes(primaryMuscleHint));
+        const bHit = b.some((e) => e.primaryMuscles.includes(primaryMuscleHint));
         if (aHit && !bHit) return -1;
         if (!aHit && bHit) return 1;
         return 0;
       });
     }
-    return moduleOrder.map((m) => ({ module: m, exercises: byModule.get(m)! }));
+    return entries.map(([module, exercises]) => ({ module, exercises }));
   }, [library, excludeIds, q, primaryMuscleHint]);
 
   const toggle = (id: string) => {
@@ -159,10 +155,7 @@ export function ReviewerPicker({
         </div>
         <div className="px-4 py-3 border-b border-ink-800">
           <div className="relative">
-            <Search
-              size={14}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500"
-            />
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500" />
             <input
               type="text"
               value={q}

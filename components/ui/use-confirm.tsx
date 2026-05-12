@@ -98,9 +98,7 @@ function ConfirmDialog({
         <h3 id="confirm-title" className="font-display text-xl mb-2 text-ink-100">
           {title}
         </h3>
-        {message && (
-          <p className="text-sm text-ink-300 leading-relaxed mb-4">{message}</p>
-        )}
+        {message && <p className="text-sm text-ink-300 leading-relaxed mb-4">{message}</p>}
         <div className="flex gap-2 mt-2">
           <button
             type="button"

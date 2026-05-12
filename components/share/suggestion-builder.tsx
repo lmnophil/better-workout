@@ -43,14 +43,7 @@ type Props = {
   onClose: () => void;
 };
 
-export function SuggestionBuilder({
-  token,
-  state,
-  routine,
-  library,
-  libraryById,
-  onClose,
-}: Props) {
+export function SuggestionBuilder({ token, state, routine, library, libraryById, onClose }: Props) {
   switch (state.kind) {
     case 'swap':
       return (
@@ -64,14 +57,7 @@ export function SuggestionBuilder({
         />
       );
     case 'insert':
-      return (
-        <InsertFlow
-          token={token}
-          state={state}
-          library={library}
-          onClose={onClose}
-        />
-      );
+      return <InsertFlow token={token} state={state} library={library} onClose={onClose} />;
     case 'custom':
       return <CustomFlow token={token} state={state} onClose={onClose} />;
     case 'reorder':
@@ -101,7 +87,7 @@ function SwapFlow({
   state,
   library,
   libraryById,
-  routine,
+  routine: _routine,
   onClose,
 }: {
   token: string;
@@ -212,8 +198,8 @@ function CategorySwapPicker({
   return (
     <div className="px-4 py-4 space-y-3">
       <p className="text-sm text-ink-300">
-        Suggest a swap to any exercise matching this filter. The owner will pick
-        the actual replacement.
+        Suggest a swap to any exercise matching this filter. The owner will pick the actual
+        replacement.
       </p>
       <label className="block">
         <span className="text-xs text-ink-400 block mb-1">Primary muscle</span>
@@ -352,8 +338,8 @@ function CustomFlow({
     <ModalShell title="Suggest a new exercise" onClose={onClose}>
       <div className="px-4 py-4 space-y-3">
         <p className="text-sm text-ink-300">
-          Propose an exercise the owner doesn’t have yet. If accepted, it’ll be
-          added to their custom library
+          Propose an exercise the owner doesn’t have yet. If accepted, it’ll be added to their
+          custom library
           {state.dayId ? ' and inserted into this day' : ''}.
         </p>
         <input
@@ -481,8 +467,7 @@ function ReorderFlow({
     <ModalShell title={`Reorder ${day.name}`} onClose={onClose}>
       <div className="px-4 py-4 space-y-2">
         <p className="text-sm text-ink-300">
-          Use the arrows to reorder. The owner sees the proposed order and can
-          one-click apply it.
+          Use the arrows to reorder. The owner sees the proposed order and can one-click apply it.
         </p>
         <ol className="space-y-1">
           {order.map((id, idx) => {
@@ -592,8 +577,8 @@ function HolisticFlow({
     >
       <div className="px-4 py-4 space-y-3">
         <p className="text-sm text-ink-300">
-          Don’t feel like targeting a specific day? Leave a note for the owner
-          and/or tag some exercises — they’ll decide where to fit them in.
+          Don’t feel like targeting a specific day? Leave a note for the owner and/or tag some
+          exercises — they’ll decide where to fit them in.
         </p>
         <textarea
           value={description}

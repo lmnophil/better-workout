@@ -76,10 +76,7 @@ import { ExercisePicker } from '@/components/workout/exercise-picker';
 import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { useConfirm } from '@/components/ui/use-confirm';
 import { usePrefs } from '@/components/ui/prefs-context';
-import {
-  estimatePlannedExerciseSeconds,
-  formatEstimateCompact,
-} from '@/lib/time-estimate';
+import { estimatePlannedExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 
 // ============ TYPES ============
 
@@ -107,9 +104,7 @@ type EditorDay = {
 
 // Module → canonical rank (smaller = earlier in a session). Unknown / custom
 // modules fall through to the end, in first-appearance order.
-const MODULE_ORDER_MAP = new Map<string, number>(
-  EXERCISE_MODULES.map((m, i) => [m, i] as const),
-);
+const MODULE_ORDER_MAP = new Map<string, number>(EXERCISE_MODULES.map((m, i) => [m, i] as const));
 const UNKNOWN_MODULE_RANK = EXERCISE_MODULES.length;
 function moduleRank(m: string): number {
   return MODULE_ORDER_MAP.get(m) ?? UNKNOWN_MODULE_RANK;
@@ -124,8 +119,12 @@ type ModuleGroup<T extends { module: string }> = { module: string; exercises: T[
 function groupExercisesByModule<T extends { module: string }>(exercises: T[]): ModuleGroup<T>[] {
   const byModule = new Map<string, T[]>();
   for (const ex of exercises) {
-    if (!byModule.has(ex.module)) byModule.set(ex.module, []);
-    byModule.get(ex.module)!.push(ex);
+    let bucket = byModule.get(ex.module);
+    if (!bucket) {
+      bucket = [];
+      byModule.set(ex.module, bucket);
+    }
+    bucket.push(ex);
   }
   return Array.from(byModule.entries())
     .sort((a, b) => moduleRank(a[0]) - moduleRank(b[0]))
@@ -212,12 +211,7 @@ type Props = {
 
 // ============ TOP-LEVEL DISPATCH ============
 
-export function RoutineEditor({
-  routine,
-  seedTemplates,
-  availableExercises,
-  muscleGroups,
-}: Props) {
+export function RoutineEditor({ routine, seedTemplates, availableExercises, muscleGroups }: Props) {
   return (
     <div className="px-5 pt-6 pb-24">
       <Header />
@@ -242,9 +236,7 @@ export function RoutineEditor({
 function Header() {
   return (
     <div className="mb-6">
-      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1">
-        Plan
-      </div>
+      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1">Plan</div>
       <h1
         className="font-display text-3xl tracking-tight"
         style={{ fontVariationSettings: "'opsz' 144, 'SOFT' 30" }}
@@ -252,8 +244,7 @@ function Header() {
         Routine
       </h1>
       <p className="text-sm text-ink-400 italic font-display mt-1 leading-relaxed">
-        Your cycle of templates &mdash; the structure you tell the app, not a
-        plan it gives you.
+        Your cycle of templates &mdash; the structure you tell the app, not a plan it gives you.
       </p>
     </div>
   );
@@ -384,9 +375,7 @@ function DraftEditor({
           const cleaned = parsed
             .map((d) => ({
               ...d,
-              exercises: (d.exercises ?? []).filter((e) =>
-                validIds.has(e.exerciseId),
-              ),
+              exercises: (d.exercises ?? []).filter((e) => validIds.has(e.exerciseId)),
             }))
             .filter((d) => d.exercises.length > 0);
           setDays(cleaned);
@@ -489,8 +478,7 @@ function DraftEditor({
   const editorDays: EditorDay[] = useMemo(
     () =>
       days.map((d, idx) => {
-        const fallback =
-          d.weekday !== null ? WEEKDAY_FULL_LABELS[d.weekday] : `Day ${idx + 1}`;
+        const fallback = d.weekday !== null ? WEEKDAY_FULL_LABELS[d.weekday] : `Day ${idx + 1}`;
         return {
           id: d.clientId,
           name: d.name.trim() || fallback,
@@ -732,11 +720,7 @@ function DraftEditor({
 
   return (
     <>
-      <PresetTabs
-        tab={presetTab}
-        onChange={setPresetTab}
-        customHasContent={customHasContent}
-      />
+      <PresetTabs tab={presetTab} onChange={setPresetTab} customHasContent={customHasContent} />
 
       {presetTab !== 'custom' && presetResult ? (
         <PresetView
@@ -762,9 +746,7 @@ function DraftEditor({
             // Switching mode leaves the days but clears weekday pins so the
             // user re-pins from scratch in calendar. We do the clear in both
             // directions to keep the data clean.
-            onSwitchSideEffect={() =>
-              setDays((prev) => prev.map((d) => ({ ...d, weekday: null })))
-            }
+            onSwitchSideEffect={() => setDays((prev) => prev.map((d) => ({ ...d, weekday: null })))}
           />
 
           <div className="mt-5">
@@ -777,12 +759,8 @@ function DraftEditor({
               seedTemplates={seedTemplates}
               restByExerciseId={restByExerciseId}
               onAddDay={addDay}
-              onRenameDay={(id, name) =>
-                updateDay(id, (d) => ({ ...d, name }))
-              }
-              onSetWeekday={(id, weekday) =>
-                updateDay(id, (d) => ({ ...d, weekday }))
-              }
+              onRenameDay={(id, name) => updateDay(id, (d) => ({ ...d, name }))}
+              onSetWeekday={(id, weekday) => updateDay(id, (d) => ({ ...d, weekday }))}
               onUpdateDayDescription={(id, description) =>
                 updateDay(id, (d) => ({ ...d, description }))
               }
@@ -846,11 +824,7 @@ function DraftEditor({
             />
           </div>
 
-          <CoveragePanel
-            totals={totals}
-            anyEstimated={anyEstimated}
-            muscleGroups={muscleGroups}
-          />
+          <CoveragePanel totals={totals} anyEstimated={anyEstimated} muscleGroups={muscleGroups} />
 
           <div className="mt-6 border border-ink-800 rounded-lg p-4 flex items-center justify-between gap-3">
             <div className="min-w-0">
@@ -904,7 +878,14 @@ function DraftEditor({
                 });
               }}
               onClose={() => setPickerForDayClientId(null)}
-              onCreateCustom={(name, primary, secondary, prescription, videoUrl, restTimerSeconds) => {
+              onCreateCustom={(
+                name,
+                primary,
+                secondary,
+                prescription,
+                videoUrl,
+                restTimerSeconds,
+              ) => {
                 startTransition(async () => {
                   await createCustomExercise({
                     name,
@@ -1042,25 +1023,19 @@ function PresetView({
       </div>
 
       {/* Equipment selector */}
-      <EquipmentSelector
-        available={availableEquipment}
-        onChange={onChangeEquipment}
-      />
+      <EquipmentSelector available={availableEquipment} onChange={onChangeEquipment} />
 
       {/* Tradeoffs / mat hint */}
       {(result.tradeoffs.length > 0 || result.needsMat) && (
         <div className="mt-5 mb-4 space-y-1.5">
           {result.tradeoffs.map((msg) => (
-            <p
-              key={msg}
-              className="text-[11px] text-ink-400 italic font-display leading-relaxed"
-            >
+            <p key={msg} className="text-[11px] text-ink-400 italic font-display leading-relaxed">
               {msg}
             </p>
           ))}
           {result.needsMat && (
             <p className="text-[11px] text-ink-500 font-display leading-relaxed">
-              You'll want a mat for floor work.
+              You&apos;ll want a mat for floor work.
             </p>
           )}
         </div>
@@ -1070,7 +1045,8 @@ function PresetView({
       <div className="space-y-2.5 mt-5 mb-5">
         {result.days.length === 0 ? (
           <p className="text-[12px] text-ink-500 italic font-display">
-            No exercises matched at this combination — try toggling more equipment on or picking a longer duration.
+            No exercises matched at this combination — try toggling more equipment on or picking a
+            longer duration.
           </p>
         ) : (
           result.days.map((d, idx) => (
@@ -1120,7 +1096,10 @@ function PresetView({
         disabled={result.days.every((d) => d.exercises.length === 0)}
         className="mt-6 w-full accent-bg text-ink-950 px-4 py-2.5 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed"
       >
-        Use this preset {willOverwriteCustom && <span className="font-normal opacity-80">— replaces your current draft</span>}
+        Use this preset{' '}
+        {willOverwriteCustom && (
+          <span className="font-normal opacity-80">— replaces your current draft</span>
+        )}
       </button>
     </div>
   );
@@ -1283,9 +1262,9 @@ function LiveEditor({
   const { prefs } = usePrefs();
 
   const [pickerForDayId, setPickerForDayId] = useState<string | null>(null);
-  const [swapForDay, setSwapForDay] = useState<
-    { dayId: string; outExerciseId: string } | null
-  >(null);
+  const [swapForDay, setSwapForDay] = useState<{ dayId: string; outExerciseId: string } | null>(
+    null,
+  );
 
   // Effective rest per exercise (override → global default). DayCard uses
   // this to render day-total and per-module subtotal time estimates.
@@ -1449,16 +1428,10 @@ function LiveEditor({
             }).catch(() => {});
           });
         }}
-        onSwapExercise={(id, exerciseId) =>
-          setSwapForDay({ dayId: id, outExerciseId: exerciseId })
-        }
+        onSwapExercise={(id, exerciseId) => setSwapForDay({ dayId: id, outExerciseId: exerciseId })}
       />
 
-      <CoveragePanel
-        totals={totals}
-        anyEstimated={anyEstimated}
-        muscleGroups={muscleGroups}
-      />
+      <CoveragePanel totals={totals} anyEstimated={anyEstimated} muscleGroups={muscleGroups} />
 
       <DangerZone
         routineName={routine.name}
@@ -1487,7 +1460,14 @@ function LiveEditor({
                 });
               }}
               onClose={() => setPickerForDayId(null)}
-              onCreateCustom={(name, primary, secondary, prescription, videoUrl, restTimerSeconds) => {
+              onCreateCustom={(
+                name,
+                primary,
+                secondary,
+                prescription,
+                videoUrl,
+                restTimerSeconds,
+              ) => {
                 startTransition(async () => {
                   await createCustomExercise({
                     name,
@@ -1535,7 +1515,14 @@ function LiveEditor({
                 });
               }}
               onClose={() => setSwapForDay(null)}
-              onCreateCustom={(name, primary, secondary, prescription, videoUrl, restTimerSeconds) => {
+              onCreateCustom={(
+                name,
+                primary,
+                secondary,
+                prescription,
+                videoUrl,
+                restTimerSeconds,
+              ) => {
                 startTransition(async () => {
                   await createCustomExercise({
                     name,
@@ -1603,9 +1590,7 @@ function MetaPanel({
     const next = description.trim() || null;
     if (next === routine.description) return;
     startTransition(() => {
-      updateRoutine({ description: next }).catch(() =>
-        setDescription(routine.description ?? ''),
-      );
+      updateRoutine({ description: next }).catch(() => setDescription(routine.description ?? ''));
     });
   }
 
@@ -1688,9 +1673,7 @@ function ScheduleToggle({
   return (
     <div>
       <div className="flex items-baseline justify-between mb-1.5 gap-2">
-        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-400">
-          Schedule style
-        </div>
+        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-400">Schedule style</div>
         <div className="text-[10px] text-ink-600 italic font-display text-right">
           Switching modes keeps your days but clears any weekday pins.
         </div>
@@ -1861,8 +1844,7 @@ function WeekdayView(props: DaysSectionProps) {
             Unassigned ({unassigned.length})
           </div>
           <p className="text-[11px] text-ink-400 italic font-display leading-relaxed">
-            These days don&apos;t have a weekday yet. Pick one in each card or
-            remove the day.
+            These days don&apos;t have a weekday yet. Pick one in each card or remove the day.
           </p>
           <div className="space-y-2">
             {unassigned.map((day) => (
@@ -1910,9 +1892,7 @@ function WeekdayView(props: DaysSectionProps) {
               className="w-full border border-ink-900 bg-ink-900/30 rounded-lg px-3 py-2.5 text-left hover:border-accent/40 hover:bg-ink-900/60 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between gap-2"
             >
               <div className="text-[13px] text-ink-400 flex items-center gap-2">
-                <span className="font-mono text-[11px] text-ink-500 w-9">
-                  {WEEKDAY_LABELS[wd]}
-                </span>
+                <span className="font-mono text-[11px] text-ink-500 w-9">{WEEKDAY_LABELS[wd]}</span>
                 <span className="italic font-display">— rest day —</span>
               </div>
               {!atCap && (
@@ -2033,14 +2013,8 @@ function DayCard({
   // group order follows the canonical SMR→Mobility→Activation→Strength→
   // Balance→Rev Up sequence defined in lib/exercises-data.ts. Sort button
   // below uses the same flattening to write canonical positions in one shot.
-  const moduleGroups = useMemo(
-    () => groupExercisesByModule(day.exercises),
-    [day.exercises],
-  );
-  const alreadySorted = useMemo(
-    () => isCanonicalModuleOrder(day.exercises),
-    [day.exercises],
-  );
+  const moduleGroups = useMemo(() => groupExercisesByModule(day.exercises), [day.exercises]);
+  const alreadySorted = useMemo(() => isCanonicalModuleOrder(day.exercises), [day.exercises]);
 
   // Time estimates summed at three levels: per exercise (used implicitly for
   // group/day totals), per module group, and per day. Per-exercise rest comes
@@ -2070,9 +2044,7 @@ function DayCard({
   }, [moduleGroups, restByExerciseId]);
 
   const takenWeekdays = new Set(
-    allDays
-      .filter((d) => d.id !== day.id && d.weekday !== null)
-      .map((d) => d.weekday as number),
+    allDays.filter((d) => d.id !== day.id && d.weekday !== null).map((d) => d.weekday as number),
   );
 
   function commitRename() {
@@ -2237,64 +2209,56 @@ function DayCard({
             {moduleGroups.map((group) => {
               const subtotalSec = groupEstimateSec.get(group.module) ?? 0;
               return (
-              <div key={group.module} className="space-y-1">
-                <div className="flex items-baseline gap-2 px-0.5">
-                  <div
-                    className="text-[10px] tracking-[0.2em] uppercase text-ink-500 cursor-help"
-                    title={moduleDescription(group.module) || group.module}
-                  >
-                    {group.module}
-                  </div>
-                  {subtotalSec > 0 && (
-                    <div className="text-[10px] text-ink-600 font-mono">
-                      ~{formatEstimateCompact(subtotalSec)}
+                <div key={group.module} className="space-y-1">
+                  <div className="flex items-baseline gap-2 px-0.5">
+                    <div
+                      className="text-[10px] tracking-[0.2em] uppercase text-ink-500 cursor-help"
+                      title={moduleDescription(group.module) || group.module}
+                    >
+                      {group.module}
                     </div>
-                  )}
+                    {subtotalSec > 0 && (
+                      <div className="text-[10px] text-ink-600 font-mono">
+                        ~{formatEstimateCompact(subtotalSec)}
+                      </div>
+                    )}
+                  </div>
+                  {group.exercises.map((ex) => {
+                    // Position-order index lookup so move-up/down logic stays in
+                    // step with the underlying data even when modules interleave.
+                    const dataIdx = day.exercises.findIndex((e) => e.exerciseId === ex.exerciseId);
+                    const prev = dataIdx > 0 ? day.exercises[dataIdx - 1] : null;
+                    const next =
+                      dataIdx >= 0 && dataIdx < day.exercises.length - 1
+                        ? day.exercises[dataIdx + 1]
+                        : null;
+                    // Disable across-module swaps so move-up/down in the grouped
+                    // view never visually jumps an exercise out of its header.
+                    // Sort handles cross-module cleanup in one shot.
+                    const canMoveUp = prev !== null && prev.module === ex.module;
+                    const canMoveDown = next !== null && next.module === ex.module;
+                    return (
+                      <ExerciseRow
+                        key={ex.exerciseId}
+                        exercise={ex}
+                        canMoveUp={canMoveUp}
+                        canMoveDown={canMoveDown}
+                        isPending={isPending}
+                        onRemove={() => onRemoveExercise(day.id, ex.exerciseId)}
+                        onMove={(dir) => onReorderExercise(day.id, ex.exerciseId, dir)}
+                        onUpdatePlanned={(patch) =>
+                          onUpdateExercisePlanned(day.id, ex.exerciseId, patch)
+                        }
+                        onSwap={onSwapExercise ? () => onSwapExercise(day.id, ex.exerciseId) : null}
+                      />
+                    );
+                  })}
                 </div>
-                {group.exercises.map((ex) => {
-                  // Position-order index lookup so move-up/down logic stays in
-                  // step with the underlying data even when modules interleave.
-                  const dataIdx = day.exercises.findIndex(
-                    (e) => e.exerciseId === ex.exerciseId,
-                  );
-                  const prev = dataIdx > 0 ? day.exercises[dataIdx - 1] : null;
-                  const next =
-                    dataIdx >= 0 && dataIdx < day.exercises.length - 1
-                      ? day.exercises[dataIdx + 1]
-                      : null;
-                  // Disable across-module swaps so move-up/down in the grouped
-                  // view never visually jumps an exercise out of its header.
-                  // Sort handles cross-module cleanup in one shot.
-                  const canMoveUp = prev !== null && prev.module === ex.module;
-                  const canMoveDown = next !== null && next.module === ex.module;
-                  return (
-                    <ExerciseRow
-                      key={ex.exerciseId}
-                      exercise={ex}
-                      canMoveUp={canMoveUp}
-                      canMoveDown={canMoveDown}
-                      isPending={isPending}
-                      onRemove={() => onRemoveExercise(day.id, ex.exerciseId)}
-                      onMove={(dir) => onReorderExercise(day.id, ex.exerciseId, dir)}
-                      onUpdatePlanned={(patch) =>
-                        onUpdateExercisePlanned(day.id, ex.exerciseId, patch)
-                      }
-                      onSwap={
-                        onSwapExercise
-                          ? () => onSwapExercise(day.id, ex.exerciseId)
-                          : null
-                      }
-                    />
-                  );
-                })}
-              </div>
               );
             })}
           </div>
         ) : (
-          <p className="text-[11px] text-ink-500 italic font-display py-1">
-            No exercises yet.
-          </p>
+          <p className="text-[11px] text-ink-500 italic font-display py-1">No exercises yet.</p>
         )}
 
         <div className="flex items-center gap-2">
@@ -2345,8 +2309,7 @@ function SeedFromTemplateMenu({
       <option value="">Or seed from…</option>
       {seedTemplates.map((t) => (
         <option key={t.id} value={t.id}>
-          {t.name} ({t.exerciseNames.length})
-          {t.isBuiltin ? ' · default' : ''}
+          {t.name} ({t.exerciseNames.length}){t.isBuiltin ? ' · default' : ''}
         </option>
       ))}
     </select>
@@ -2366,9 +2329,7 @@ function WeekdayPicker({
 }) {
   return (
     <div>
-      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5">
-        Weekday
-      </div>
+      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5">Weekday</div>
       <div className="flex gap-1.5 flex-wrap">
         {WEEKDAY_LABELS.map((wd, i) => {
           const isMine = value === i;
@@ -2483,16 +2444,12 @@ function ExerciseRow({
           onClick={() => setNoteOpen((v) => !v)}
           disabled={isPending}
           aria-label={
-            noteHasContent
-              ? `Edit note for ${exercise.name}`
-              : `Add note for ${exercise.name}`
+            noteHasContent ? `Edit note for ${exercise.name}` : `Add note for ${exercise.name}`
           }
           aria-expanded={noteOpen}
           title={noteHasContent ? 'Edit note' : 'Add a note'}
           className={`transition disabled:opacity-50 shrink-0 ${
-            noteHasContent
-              ? 'accent-text hover:brightness-110'
-              : 'text-ink-500 hover:text-ink-100'
+            noteHasContent ? 'accent-text hover:brightness-110' : 'text-ink-500 hover:text-ink-100'
           }`}
         >
           <StickyNote size={13} />
@@ -2582,9 +2539,7 @@ function PlannedInputs({
   const secondaryLabel = isTime ? 'Planned seconds' : 'Planned reps';
 
   const [setsText, setSetsText] = useState(plannedSets?.toString() ?? '');
-  const [secondaryText, setSecondaryText] = useState(
-    secondaryValue?.toString() ?? '',
-  );
+  const [secondaryText, setSecondaryText] = useState(secondaryValue?.toString() ?? '');
 
   useEffect(() => {
     setSetsText(plannedSets?.toString() ?? '');
@@ -2663,7 +2618,11 @@ function PlannedInputs({
         aria-label={secondaryLabel}
         className={`${inputClass} ${isTime ? 'w-12' : 'w-9'}`}
       />
-      {isTime && <span className="text-ink-600" aria-hidden="true">s</span>}
+      {isTime && (
+        <span className="text-ink-600" aria-hidden="true">
+          s
+        </span>
+      )}
     </div>
   );
 }
@@ -2739,35 +2698,33 @@ function tierFor(sets: number, target: number | null): CoverageTier {
 // `bg` tints the row, `bar` colors the volume bar, `dot` is the small
 // indicator. Lifted greens/reds match the coverage view's "fresh"/"neglected"
 // hexes deliberately so the two surfaces speak the same color language.
-const TIER_TOKENS: Record<
-  CoverageTier,
-  { bg: string; border: string; bar: string; dot: string }
-> = {
-  meets: {
-    bg: 'rgba(132, 204, 22, 0.10)',
-    border: 'rgba(132, 204, 22, 0.55)',
-    bar: '#84cc16',
-    dot: '#84cc16',
-  },
-  under: {
-    bg: 'rgba(180, 100, 70, 0.10)',
-    border: 'rgba(180, 100, 70, 0.5)',
-    bar: '#b46446',
-    dot: '#b46446',
-  },
-  gap: {
-    bg: 'rgba(220, 80, 60, 0.12)',
-    border: 'rgba(220, 80, 60, 0.6)',
-    bar: '#dc503c',
-    dot: '#dc503c',
-  },
-  untracked: {
-    bg: 'rgba(60, 50, 45, 0.20)',
-    border: 'rgba(60, 50, 45, 0.4)',
-    bar: '#3a2f25',
-    dot: '#3a2f25',
-  },
-};
+const TIER_TOKENS: Record<CoverageTier, { bg: string; border: string; bar: string; dot: string }> =
+  {
+    meets: {
+      bg: 'rgba(132, 204, 22, 0.10)',
+      border: 'rgba(132, 204, 22, 0.55)',
+      bar: '#84cc16',
+      dot: '#84cc16',
+    },
+    under: {
+      bg: 'rgba(180, 100, 70, 0.10)',
+      border: 'rgba(180, 100, 70, 0.5)',
+      bar: '#b46446',
+      dot: '#b46446',
+    },
+    gap: {
+      bg: 'rgba(220, 80, 60, 0.12)',
+      border: 'rgba(220, 80, 60, 0.6)',
+      bar: '#dc503c',
+      dot: '#dc503c',
+    },
+    untracked: {
+      bg: 'rgba(60, 50, 45, 0.20)',
+      border: 'rgba(60, 50, 45, 0.4)',
+      bar: '#3a2f25',
+      dot: '#3a2f25',
+    },
+  };
 
 // The set of muscle ids the routine is currently *short* on — has a target,
 // and the planned sets are below it. Drives the picker's gap-filling
@@ -2802,8 +2759,12 @@ function CoveragePanel({
   const byCategory = useMemo(() => {
     const groups = new Map<MuscleGroupClient['category'], MuscleGroupClient[]>();
     for (const m of muscleGroups) {
-      if (!groups.has(m.category)) groups.set(m.category, []);
-      groups.get(m.category)!.push(m);
+      let bucket = groups.get(m.category);
+      if (!bucket) {
+        bucket = [];
+        groups.set(m.category, bucket);
+      }
+      bucket.push(m);
     }
     return groups;
   }, [muscleGroups]);
@@ -2837,11 +2798,7 @@ function CoveragePanel({
           <p className="text-[11px] text-ink-500 italic font-display mt-0.5 leading-relaxed">
             What this routine hits across one full cycle.
             {anyEstimated && (
-              <>
-                {' '}
-                Exercises without planned sets are estimated at{' '}
-                {ESTIMATED_SETS_FALLBACK}.
-              </>
+              <> Exercises without planned sets are estimated at {ESTIMATED_SETS_FALLBACK}.</>
             )}
           </p>
         </div>
@@ -2859,12 +2816,7 @@ function CoveragePanel({
           <CoverageLegend />
           <div className="space-y-4 mt-3">
             {Array.from(byCategory.entries()).map(([category, items]) => (
-              <CoverageCategory
-                key={category}
-                category={category}
-                items={items}
-                totals={totals}
-              />
+              <CoverageCategory key={category} category={category} items={items} totals={totals} />
             ))}
           </div>
         </>
@@ -2890,22 +2842,21 @@ function CoverageLegend() {
           Weekly sets meet the target. Hover any muscle for details on what hits it.
         </LegendRow>
         <LegendRow tier="under" label="Below target">
-          Some work is happening, but not enough for the weekly target. Often fine for
-          smaller postural muscles; consider adding a set or two for the main movers.
+          Some work is happening, but not enough for the weekly target. Often fine for smaller
+          postural muscles; consider adding a set or two for the main movers.
         </LegendRow>
         <LegendRow tier="gap" label="Gap">
-          Zero sets across the cycle on a muscle that has a target. Worth a deliberate
-          choice — either tag-fill (add an exercise) or override the target down.
+          Zero sets across the cycle on a muscle that has a target. Worth a deliberate choice —
+          either tag-fill (add an exercise) or override the target down.
         </LegendRow>
         <LegendRow tier="untracked" label="Untracked">
-          Mobility, balance, and cardio rows. Tracked by recency on the Coverage page,
-          not weekly volume — once or twice a week is plenty.
+          Mobility, balance, and cardio rows. Tracked by recency on the Coverage page, not weekly
+          volume — once or twice a week is plenty.
         </LegendRow>
         <p className="text-[10px] italic text-ink-500 pt-1">
-          A smaller target (like Lower traps at 6 or Adductors at 4) doesn’t mean the
-          muscle is less important — it’s a small/postural muscle that gets a lot of
-          secondary credit from the main lifts, so less direct work is needed. Override
-          any target in Settings.
+          A smaller target (like Lower traps at 6 or Adductors at 4) doesn’t mean the muscle is less
+          important — it’s a small/postural muscle that gets a lot of secondary credit from the main
+          lifts, so less direct work is needed. Override any target in Settings.
         </p>
       </div>
     </details>
@@ -2964,10 +2915,7 @@ function SummaryStrip({
             className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded-full border"
             style={{ background: tok.bg, borderColor: tok.border }}
           >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: tok.dot }}
-            />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: tok.dot }} />
             <span className="text-ink-200">{i.count}</span>
             <span className="text-ink-400">{i.label}</span>
           </span>
@@ -3041,9 +2989,10 @@ function CoverageRow({
   total: MuscleTotal | undefined;
 }) {
   const sets = total?.sets ?? 0;
-  const hasTarget = muscle.target !== null && muscle.target > 0;
-  const ratio = hasTarget ? Math.min(sets / muscle.target!, 1) : 0;
-  const tier = tierFor(sets, muscle.target);
+  const target = muscle.target;
+  const hasTarget = target !== null && target > 0;
+  const ratio = hasTarget ? Math.min(sets / target, 1) : 0;
+  const tier = tierFor(sets, target);
   const tok = TIER_TOKENS[tier];
 
   // Tooltip text combines the description with a target hint when relevant.

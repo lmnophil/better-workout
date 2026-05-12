@@ -33,10 +33,7 @@ export async function GET() {
     // Single warn line — don't error-log to avoid waking on-call for transient
     // blips that the readiness retry will absorb. Repeated failures will show
     // up in Docker's restart logs / orchestrator alerts.
-    logger.warn(
-      { durationMs, err: serializeError(err) },
-      'healthz.db_unavailable',
-    );
+    logger.warn({ durationMs, err: serializeError(err) }, 'healthz.db_unavailable');
     return NextResponse.json(
       { status: 'unhealthy', durationMs },
       { status: 503, headers: { 'Cache-Control': 'no-store' } },

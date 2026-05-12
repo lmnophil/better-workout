@@ -31,13 +31,7 @@ type PrefsContextShape = {
 
 const PrefsContext = createContext<PrefsContextShape | null>(null);
 
-export function PrefsProvider({
-  initial,
-  children,
-}: {
-  initial: UserPrefs;
-  children: ReactNode;
-}) {
+export function PrefsProvider({ initial, children }: { initial: UserPrefs; children: ReactNode }) {
   const [prefs, setPrefs] = useState(initial);
   const [, startTransition] = useTransition();
 

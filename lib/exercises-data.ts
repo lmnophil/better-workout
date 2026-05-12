@@ -52,8 +52,7 @@ export const MODULE_INFO: Record<ExerciseModule | 'Custom', { description: strin
       'Self-myofascial release — foam rolling and soft-tissue prep for chest, back, arms.',
   },
   'SMR Trunk': {
-    description:
-      'Self-myofascial release — foam rolling and soft-tissue prep for the torso.',
+    description: 'Self-myofascial release — foam rolling and soft-tissue prep for the torso.',
   },
   'Mobility Lower': {
     description: 'Joint range and dynamic stretches for legs and hips.',
@@ -65,12 +64,10 @@ export const MODULE_INFO: Record<ExerciseModule | 'Custom', { description: strin
     description: 'Joint range and dynamic stretches for the spine and ribcage.',
   },
   'Activation Lower': {
-    description:
-      'Light targeted work to wake up glutes and legs before loading them.',
+    description: 'Light targeted work to wake up glutes and legs before loading them.',
   },
   'Activation Upper': {
-    description:
-      'Light targeted work to wake up shoulders and back before loading them.',
+    description: 'Light targeted work to wake up shoulders and back before loading them.',
   },
   'Activation Trunk': {
     description: 'Light targeted work to wake up the core before loading it.',
@@ -82,8 +79,7 @@ export const MODULE_INFO: Record<ExerciseModule | 'Custom', { description: strin
     description: 'Supporting variants and isolation work that backs up the main lifts.',
   },
   'Strength Thoracic': {
-    description:
-      'Upper-back and postural strength — rows, pulls, scapular work.',
+    description: 'Upper-back and postural strength — rows, pulls, scapular work.',
   },
   Balance: {
     description: 'Single-leg and proprioception drills.',
@@ -1406,14 +1402,16 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Glutes',
     category: 'lower',
     weeklyVolumeTarget: 12,
-    description: 'The primary hip extensor — built by squats, deadlifts, hip thrusts, lunges, and dedicated glute work.',
+    description:
+      'The primary hip extensor — built by squats, deadlifts, hip thrusts, lunges, and dedicated glute work.',
   },
   {
     id: 'hamstrings',
     label: 'Hamstrings',
     category: 'lower',
     weeklyVolumeTarget: 10,
-    description: 'Back-of-thigh hip extensors and knee flexors. Hit by deadlifts, RDLs, leg curls, and lunges.',
+    description:
+      'Back-of-thigh hip extensors and knee flexors. Hit by deadlifts, RDLs, leg curls, and lunges.',
   },
   {
     id: 'quads',
@@ -1427,7 +1425,8 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Adductors',
     category: 'lower',
     weeklyVolumeTarget: 4,
-    description: 'Inner-thigh hip stabilizers. Mostly trained as spillover from squats, lunges, and split squats — rarely programmed directly. Lower target reflects the realistic spillover dose.',
+    description:
+      'Inner-thigh hip stabilizers. Mostly trained as spillover from squats, lunges, and split squats — rarely programmed directly. Lower target reflects the realistic spillover dose.',
   },
   {
     id: 'chest',
@@ -1448,21 +1447,24 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Scapular stabilizers',
     category: 'upper',
     weeklyVolumeTarget: 8,
-    description: 'Small muscles that anchor the shoulder blade. Hit by face pulls, pull-aparts, Y/T raises, prone work. Postural — keeps shoulders healthy.',
+    description:
+      'Small muscles that anchor the shoulder blade. Hit by face pulls, pull-aparts, Y/T raises, prone work. Postural — keeps shoulders healthy.',
   },
   {
     id: 'rear delts',
     label: 'Rear delts',
     category: 'upper',
     weeklyVolumeTarget: 8,
-    description: 'Back of the shoulder. Hit by face pulls, reverse fly, pull-aparts, and rows (secondary). Often underdosed when training is bench-heavy.',
+    description:
+      'Back of the shoulder. Hit by face pulls, reverse fly, pull-aparts, and rows (secondary). Often underdosed when training is bench-heavy.',
   },
   {
     id: 'lower traps',
     label: 'Lower traps',
     category: 'upper',
     weeklyVolumeTarget: 6,
-    description: 'Postural muscles between the shoulder blades. Hit by Y raises, face pulls, pull-aparts, and rows (secondary). Lower target — small muscle, big impact on shoulder health.',
+    description:
+      'Postural muscles between the shoulder blades. Hit by Y raises, face pulls, pull-aparts, and rows (secondary). Lower target — small muscle, big impact on shoulder health.',
   },
   {
     id: 'biceps',
@@ -1483,27 +1485,31 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Shoulders',
     category: 'upper',
     weeklyVolumeTarget: 10,
-    description: 'Front and side delts — overhead and lateral raising. Hit by overhead press, lateral raises, and bench/push-ups (secondary).',
+    description:
+      'Front and side delts — overhead and lateral raising. Hit by overhead press, lateral raises, and bench/push-ups (secondary).',
   },
   {
     id: 'core',
     label: 'Core',
     category: 'trunk',
     weeklyVolumeTarget: 8,
-    description: 'Abs and obliques. Hit by planks, hollow holds, carries, and braced compound lifts (secondary).',
+    description:
+      'Abs and obliques. Hit by planks, hollow holds, carries, and braced compound lifts (secondary).',
   },
   {
     id: 'lower back',
     label: 'Lower back',
     category: 'trunk',
     weeklyVolumeTarget: 6,
-    description: 'Spinal erectors. Hit primarily as secondary on deadlifts, RDLs, good mornings, and bird-dog work. Lower target — usually well-served by hinge variants.',
+    description:
+      'Spinal erectors. Hit primarily as secondary on deadlifts, RDLs, good mornings, and bird-dog work. Lower target — usually well-served by hinge variants.',
   },
   {
     id: 'balance',
     label: 'Balance',
     category: 'other',
-    description: 'Single-leg and proprioception work. Tracked by recency, not volume — once a week is plenty.',
+    description:
+      'Single-leg and proprioception work. Tracked by recency, not volume — once a week is plenty.',
   },
   {
     id: 'cardio',
@@ -1515,7 +1521,8 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     id: 'hip mobility',
     label: 'Hip mobility',
     category: 'mobility',
-    description: 'Hip range of motion — 90/90s, deep squat reaches, world’s greatest. Recency, not volume.',
+    description:
+      'Hip range of motion — 90/90s, deep squat reaches, world’s greatest. Recency, not volume.',
   },
   {
     id: 'ankle mobility',
@@ -1527,19 +1534,22 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     id: 'hip flexors',
     label: 'Hip flexors',
     category: 'mobility',
-    description: 'Front-of-hip stretch — half-kneeling stretch, couch stretch. Recency, not volume.',
+    description:
+      'Front-of-hip stretch — half-kneeling stretch, couch stretch. Recency, not volume.',
   },
   {
     id: 'shoulder mobility',
     label: 'Shoulder mobility',
     category: 'mobility',
-    description: 'Shoulder range — pec stretch, sleeper, child’s pose with reach. Recency, not volume.',
+    description:
+      'Shoulder range — pec stretch, sleeper, child’s pose with reach. Recency, not volume.',
   },
   {
     id: 't-spine mobility',
     label: 'T-spine mobility',
     category: 'mobility',
-    description: 'Thoracic-spine rotation and extension — thread-the-needle, cat-cow, T-spine rotations. Recency, not volume.',
+    description:
+      'Thoracic-spine rotation and extension — thread-the-needle, cat-cow, T-spine rotations. Recency, not volume.',
   },
   {
     id: 'soft tissue',

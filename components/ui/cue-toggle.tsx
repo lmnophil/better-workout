@@ -30,7 +30,9 @@ export function CueToggle() {
         onClick={() => updatePrefs({ restTimerVibrate: !prefs.restTimerVibrate })}
         aria-label={prefs.restTimerVibrate ? 'Disable timer vibration' : 'Enable timer vibration'}
         aria-pressed={prefs.restTimerVibrate}
-        title={prefs.restTimerVibrate ? 'Vibrate on — tap to disable' : 'Vibrate off — tap to enable'}
+        title={
+          prefs.restTimerVibrate ? 'Vibrate on — tap to disable' : 'Vibrate off — tap to enable'
+        }
         className="p-2 text-ink-500 hover:text-ink-100 transition"
       >
         {prefs.restTimerVibrate ? <Vibrate size={18} /> : <VibrateOff size={18} />}

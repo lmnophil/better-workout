@@ -42,10 +42,7 @@ import { usePrefs } from '@/components/ui/prefs-context';
 import { groupBy, relativeDay } from '@/lib/utils';
 import { muscleIdsToChipIds } from '@/lib/area-filter';
 import { moduleDescription } from '@/lib/exercises-data';
-import {
-  RoutineTimeline,
-  type RoutineTimelineProps,
-} from '@/components/routines/routine-timeline';
+import { RoutineTimeline, type RoutineTimelineProps } from '@/components/routines/routine-timeline';
 
 // ============ TYPES ============
 
@@ -175,10 +172,7 @@ export function WorkoutView({
     () => new Map(availableExercises.map((e) => [e.id, e])),
     [availableExercises],
   );
-  const lastByExercise = useMemo(
-    () => new Map(lastSets.map((l) => [l.exerciseId, l])),
-    [lastSets],
-  );
+  const lastByExercise = useMemo(() => new Map(lastSets.map((l) => [l.exerciseId, l])), [lastSets]);
   const routineNoteByExercise = useMemo(
     () => new Map(routineExerciseNotes.map((n) => [n.exerciseId, n.note])),
     [routineExerciseNotes],
@@ -219,8 +213,7 @@ export function WorkoutView({
           return [
             {
               metric: ex.metric,
-              restSeconds:
-                ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
+              restSeconds: ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
               setLogs: setLogsByExercise.get(id) ?? [],
             },
           ];
@@ -309,11 +302,8 @@ export function WorkoutView({
     if (prefs.restTimerEnabled && triggered) {
       // Look up the exercise's per-user override; fall back to the global default.
       const setLog = activeSession?.setLogs.find((s) => s.id === setLogId);
-      const exercise = setLog
-        ? availableExercises.find((e) => e.id === setLog.exerciseId)
-        : null;
-      const duration =
-        exercise?.restTimerSecondsOverride ?? prefs.restTimerSeconds;
+      const exercise = setLog ? availableExercises.find((e) => e.id === setLog.exerciseId) : null;
+      const duration = exercise?.restTimerSecondsOverride ?? prefs.restTimerSeconds;
       restTimer.start(duration);
     }
   };
@@ -324,19 +314,13 @@ export function WorkoutView({
     });
   };
 
-  const handleSetExerciseRestOverride = (
-    exerciseId: string,
-    seconds: number | null,
-  ) => {
+  const handleSetExerciseRestOverride = (exerciseId: string, seconds: number | null) => {
     startTransition(() => {
       setExerciseRestOverride({ exerciseId, restTimerSeconds: seconds });
     });
   };
 
-  const handleSetExerciseWeightIncrement = (
-    exerciseId: string,
-    increment: number | null,
-  ) => {
+  const handleSetExerciseWeightIncrement = (exerciseId: string, increment: number | null) => {
     startTransition(() => {
       setExerciseWeightIncrement({ exerciseId, weightIncrement: increment });
     });
@@ -635,11 +619,7 @@ export function WorkoutView({
           availableExercises={availableExercises}
           // Exclude the swap target itself so we don't list "swap X for X" as
           // an option. In add mode, exclude everything already in the session.
-          excludeIds={
-            swapTarget
-              ? new Set([swapTarget.exerciseId])
-              : exerciseIdsAlreadyInSession
-          }
+          excludeIds={swapTarget ? new Set([swapTarget.exerciseId]) : exerciseIdsAlreadyInSession}
           initialRegionIds={pendingRegionIds}
           initialMuscleChipIds={pendingMuscleChipIds}
           onPickMany={handleAddExercises}
@@ -755,9 +735,7 @@ function EmptyState({
                 exerciseById={exerciseById}
                 onStart={() => onStartFromTemplate(t.id)}
                 onDelete={() =>
-                  t.isBuiltin
-                    ? onHideTemplate(t.id, t.name)
-                    : onDeleteTemplate(t.id, t.name)
+                  t.isBuiltin ? onHideTemplate(t.id, t.name) : onDeleteTemplate(t.id, t.name)
                 }
                 disabled={isPending}
               />
@@ -801,8 +779,8 @@ function BuildRoutineCTA() {
               </span>
             </div>
             <div className="text-[11px] text-ink-500 italic font-display mt-0.5 leading-relaxed">
-              Pick or assemble the cycle of templates you rotate through. We&apos;ll
-              flag any muscle groups your routine misses.
+              Pick or assemble the cycle of templates you rotate through. We&apos;ll flag any muscle
+              groups your routine misses.
             </div>
           </div>
           <ArrowRight
@@ -846,8 +824,7 @@ function TemplateRow({
       return [
         {
           metric: ex.metric,
-          restSeconds:
-            ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
+          restSeconds: ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
           plannedSets: p.plannedSets,
           plannedReps: p.plannedReps,
           plannedSeconds: p.plannedSeconds,
@@ -872,11 +849,8 @@ function TemplateRow({
           )}
         </div>
         <div className="text-[11px] text-ink-500 mt-0.5">
-          {template.exerciseCount}{' '}
-          {template.exerciseCount === 1 ? 'exercise' : 'exercises'}
-          {templateEstimateSec > 0 && (
-            <span> · ~{formatEstimate(templateEstimateSec)}</span>
-          )}
+          {template.exerciseCount} {template.exerciseCount === 1 ? 'exercise' : 'exercises'}
+          {templateEstimateSec > 0 && <span> · ~{formatEstimate(templateEstimateSec)}</span>}
           {template.previewNames.length > 0 && (
             <span className="text-ink-600">
               {' · '}
@@ -942,9 +916,7 @@ function SaveTemplateDialog({
       // cause is a name-collision race (someone added a template in another
       // tab between this dialog opening and submit).
       setServerError(
-        err instanceof Error
-          ? err.message
-          : 'Could not save the template. Try again?',
+        err instanceof Error ? err.message : 'Could not save the template. Try again?',
       );
       setSubmitting(false);
     }
@@ -985,14 +957,10 @@ function SaveTemplateDialog({
           className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-sm mb-1 focus:outline-none focus:border-accent/50 disabled:opacity-60"
         />
         {collision && (
-          <p className="text-[10px] text-bad mb-3">
-            You already have a template by that name.
-          </p>
+          <p className="text-[10px] text-bad mb-3">You already have a template by that name.</p>
         )}
         {!collision && !serverError && <div className="mb-4" />}
-        {serverError && (
-          <p className="text-[10px] text-bad mb-3">{serverError}</p>
-        )}
+        {serverError && <p className="text-[10px] text-bad mb-3">{serverError}</p>}
 
         <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block mb-1.5">
           Description <span className="text-ink-600">(optional)</span>

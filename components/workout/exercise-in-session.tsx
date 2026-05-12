@@ -22,10 +22,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import type { ExerciseInfo, SetLogClient } from './workout-view';
-import {
-  estimateActiveExerciseSeconds,
-  formatEstimateCompact,
-} from '@/lib/time-estimate';
+import { estimateActiveExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 
 type Props = {
   exercise: ExerciseInfo;
@@ -106,8 +103,7 @@ export function ExerciseInSession({
   const restOverridden = exercise.restTimerSecondsOverride !== null;
   const incrementOverridden = exercise.weightIncrementOverride !== null;
   const effectiveRest = exercise.restTimerSecondsOverride ?? globalRestSeconds;
-  const effectiveIncrement =
-    exercise.weightIncrementOverride ?? globalWeightIncrement;
+  const effectiveIncrement = exercise.weightIncrementOverride ?? globalWeightIncrement;
 
   // The repeat-last chip shows whenever last-time exists. The user can tap it
   // mid-session if they want to revert any manual edits and snap to history.
@@ -154,9 +150,7 @@ export function ExerciseInSession({
           {/* Prescription + settings opener — same row, wraps on narrow screens */}
           <div className="flex items-center gap-2 flex-wrap mt-0.5">
             {exercise.prescription && (
-              <span className="text-[11px] text-ink-500 font-mono">
-                {exercise.prescription}
-              </span>
+              <span className="text-[11px] text-ink-500 font-mono">{exercise.prescription}</span>
             )}
             {exerciseEstimateSec > 0 && (
               <span className="text-[11px] text-ink-500 font-mono">
@@ -428,9 +422,7 @@ function SetRow({
     (isTime ? set.seconds : set.reps)?.toString() ?? '',
   );
   const [weight, setWeight] = useState<string>(formatWeight(set.weight));
-  const [notesOpen, setNotesOpen] = useState(
-    set.notes !== null && set.notes !== '',
-  );
+  const [notesOpen, setNotesOpen] = useState(set.notes !== null && set.notes !== '');
   const [notesValue, setNotesValue] = useState(set.notes ?? '');
   const [justSaved, setJustSaved] = useState(false);
 
@@ -574,9 +566,7 @@ function SetRow({
         <button
           onClick={() => setNotesOpen((o) => !o)}
           className={`w-7 h-7 flex items-center justify-center transition shrink-0 rounded ${
-            hasNote
-              ? 'accent-text hover:brightness-110'
-              : 'text-ink-600 hover:text-ink-100'
+            hasNote ? 'accent-text hover:brightness-110' : 'text-ink-600 hover:text-ink-100'
           }`}
           aria-label={`${hasNote ? 'Edit' : 'Add'} note for set ${set.setNumber}`}
           aria-expanded={notesOpen}

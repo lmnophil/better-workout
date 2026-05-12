@@ -26,10 +26,7 @@ import { addSet } from '@/lib/actions';
 function AddSetButton({ exerciseId }: { exerciseId: string }) {
   const [isPending, startTransition] = useTransition();
   return (
-    <button
-      disabled={isPending}
-      onClick={() => startTransition(() => addSet({ exerciseId }))}
-    >
+    <button disabled={isPending} onClick={() => startTransition(() => addSet({ exerciseId }))}>
       Add set
     </button>
   );
@@ -46,14 +43,14 @@ Here's an annotated example from `lib/actions.ts`:
 const AddSetSchema = z.object({ exerciseId: z.string().min(1) });
 
 export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetSchema>) => {
-  const userId = await requireUser();                // 1. auth
-  const { exerciseId } = AddSetSchema.parse(input);  // 2. validation
-  await requireAvailableExercise(userId, exerciseId);// 3. ownership check
+  const userId = await requireUser(); // 1. auth
+  const { exerciseId } = AddSetSchema.parse(input); // 2. validation
+  await requireAvailableExercise(userId, exerciseId); // 3. ownership check
   const session = await findActiveSession(userId);
-  if (!session) throw new Error('No active session');// 4. expected error
+  if (!session) throw new Error('No active session'); // 4. expected error
   // ... mutation logic ...
-  metrics.setsLogged.inc();                          // 5. domain metric
-  revalidatePath('/');                               // 6. invalidate
+  metrics.setsLogged.inc(); // 5. domain metric
+  revalidatePath('/'); // 6. invalidate
 });
 ```
 
@@ -86,7 +83,7 @@ Actions in `lib/actions.ts` are grouped by `// =====` section headers in the fil
 
 **Workout templates.** Named, reusable lineups. `saveActiveAsTemplate` snapshots exercises + order from the active session — not the logged sets. `startFromTemplate` creates a fresh active session from a template. User templates can be deleted; built-ins can only be hidden via `UserHiddenTemplate` (and unhidden later). The split is enforced at the action layer.
 
-**Routines.** The user's named cycle of templates. One per user, capped at 7 days. Two scheduling modes (`sequence` advances a cursor on completion; `weekday` reads today's `getDay()`). Pending swaps stage a one-time exercise substitution that applies when the session is started from the routine day; permanent swaps edit the underlying `TemplateExercise` and refuse to modify built-in templates. `startFromRoutineDay` populates a session and marks it with `startedFromRoutineDayId`; completing such a session advances the cursor in `sequence` mode. Per-(day, exercise) edits — planned sets/reps/seconds *and* the free-text `note` — flow through `addExerciseToRoutineDay` and `updateRoutineDayExercise`, both of which accept `note` as an optional patch field that trims to null on empty. See [`docs/decisions.md`](./decisions.md) for the routines stance and [`docs/data-model.md`](./data-model.md) for the entities.
+**Routines.** The user's named cycle of templates. One per user, capped at 7 days. Two scheduling modes (`sequence` advances a cursor on completion; `weekday` reads today's `getDay()`). Pending swaps stage a one-time exercise substitution that applies when the session is started from the routine day; permanent swaps edit the underlying `TemplateExercise` and refuse to modify built-in templates. `startFromRoutineDay` populates a session and marks it with `startedFromRoutineDayId`; completing such a session advances the cursor in `sequence` mode. Per-(day, exercise) edits — planned sets/reps/seconds _and_ the free-text `note` — flow through `addExerciseToRoutineDay` and `updateRoutineDayExercise`, both of which accept `note` as an optional patch field that trims to null on empty. See [`docs/decisions.md`](./decisions.md) for the routines stance and [`docs/data-model.md`](./data-model.md) for the entities.
 
 ## Server-side queries: the categories
 
@@ -104,13 +101,13 @@ Queries in `lib/queries.ts`. All take `userId` as the first parameter; never tru
 
 > Every request not explicitly excluded in `middleware.ts` goes through edge middleware first, which redirects unauthenticated users to `/signin`. The four routes below are all in the matcher's exclusion list — they need to bypass auth-based redirects, either because they're unauthenticated by design or because they handle auth themselves. See `app/api/CLAUDE.md` for the full pattern.
 
-| Route | Method | Auth | Called by | Purpose |
-|---|---|---|---|---|
-| `/api/auth/[...nextauth]` | GET, POST | self-managed | Auth.js itself | Auth.js's own callback handler. Don't add anything here. |
-| `/api/auth/recover` | GET | none | The (app) layout when `auth()` returns null on a parseable cookie | Clears the session-token cookie variants and 302s to `/signin`. The (app) layout redirects here instead of straight to `/signin` so the stale cookie gets cleared on the way through — without this hop, the cookie would still look valid to middleware (which uses the Edge-safe auth config and can't see DB state), producing a redirect loop. Mostly fires after `prisma migrate reset` in dev. See [`docs/decisions.md`](./decisions.md) (`Stale-cookie recovery`). |
-| `/api/healthz` | GET | none | Docker `HEALTHCHECK` | Returns 200 + a tiny JSON body when the app is alive and DB-reachable. Public-facing healthcheck would be lower-trust; this one runs `SELECT 1`. |
-| `/api/metrics` | GET | Bearer token | Prometheus scraper | Prometheus exposition format. Returns 503 if `METRICS_TOKEN` env is unset (fail-closed). The reference Caddy snippet 404s it at the public edge — scrape over the internal Docker network or from a same-host scraper. |
-| `/api/log/client-error` | POST | none | Browser error boundaries | Sink for client-side crashes (route + global error.tsx). Rate-limited per IP. Logs at error level via Pino. |
+| Route                     | Method    | Auth         | Called by                                                         | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------- | --------- | ------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/auth/[...nextauth]` | GET, POST | self-managed | Auth.js itself                                                    | Auth.js's own callback handler. Don't add anything here.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `/api/auth/recover`       | GET       | none         | The (app) layout when `auth()` returns null on a parseable cookie | Clears the session-token cookie variants and 302s to `/signin`. The (app) layout redirects here instead of straight to `/signin` so the stale cookie gets cleared on the way through — without this hop, the cookie would still look valid to middleware (which uses the Edge-safe auth config and can't see DB state), producing a redirect loop. Mostly fires after `prisma migrate reset` in dev. See [`docs/decisions.md`](./decisions.md) (`Stale-cookie recovery`). |
+| `/api/healthz`            | GET       | none         | Docker `HEALTHCHECK`                                              | Returns 200 + a tiny JSON body when the app is alive and DB-reachable. Public-facing healthcheck would be lower-trust; this one runs `SELECT 1`.                                                                                                                                                                                                                                                                                                                          |
+| `/api/metrics`            | GET       | Bearer token | Prometheus scraper                                                | Prometheus exposition format. Returns 503 if `METRICS_TOKEN` env is unset (fail-closed). The reference Caddy snippet 404s it at the public edge — scrape over the internal Docker network or from a same-host scraper.                                                                                                                                                                                                                                                    |
+| `/api/log/client-error`   | POST      | none         | Browser error boundaries                                          | Sink for client-side crashes (route + global error.tsx). Rate-limited per IP. Logs at error level via Pino.                                                                                                                                                                                                                                                                                                                                                               |
 
 There is **no `POST /api/sets`, no `GET /api/exercises`**, etc. Mutations are server actions; reads are server-component queries. If you find yourself wanting an application-data HTTP route, ask why first — almost always the answer is a server action.
 

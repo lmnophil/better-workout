@@ -116,8 +116,7 @@ export function ExercisePicker({
           <h2 id="picker-title" className="font-display text-2xl">
             {isSwap ? (
               <>
-                Replace{' '}
-                <span className="accent-text">{swap.targetName}</span>
+                Replace <span className="accent-text">{swap.targetName}</span>
               </>
             ) : (
               'Pick exercises'
@@ -253,9 +252,7 @@ function BrowseTab({
     });
   }
   function toggleMuscle(id: string) {
-    setMuscleChipIds((prev) =>
-      prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id],
-    );
+    setMuscleChipIds((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
     // Picking a muscle chip implicitly cancels Full body (which means "no filter")
     setRegionIds((prev) => prev.filter((r) => r !== 'full'));
   }
@@ -294,8 +291,12 @@ function BrowseTab({
     });
     const groups = new Map<string, ExerciseInfo[]>();
     for (const ex of filtered) {
-      if (!groups.has(ex.module)) groups.set(ex.module, []);
-      groups.get(ex.module)!.push(ex);
+      let bucket = groups.get(ex.module);
+      if (!bucket) {
+        bucket = [];
+        groups.set(ex.module, bucket);
+      }
+      bucket.push(ex);
     }
     // Within each module, sort by first primary muscle, then by name. This
     // keeps like-exercises adjacent in the list so a user (or a reviewer
@@ -326,7 +327,10 @@ function BrowseTab({
   // appended so user-created exercises sort last. Single source of truth — if
   // EXERCISE_MODULES is reordered, the picker follows.
   const moduleOrder = [...EXERCISE_MODULES, 'Custom'];
-  const orderedModules = moduleOrder.filter((m) => groupedByModule.has(m));
+  const orderedModules = moduleOrder.flatMap((m) => {
+    const exercises = groupedByModule.get(m);
+    return exercises ? [{ module: m, exercises }] : [];
+  });
   const totalCount = Array.from(groupedByModule.values()).reduce((s, arr) => s + arr.length, 0);
 
   const selectedExercises = useMemo(
@@ -359,11 +363,7 @@ function BrowseTab({
   };
 
   const selectedTotalSec = useMemo(
-    () =>
-      selectedExercises.reduce(
-        (sum, e) => sum + estimateForExercise(e).total,
-        0,
-      ),
+    () => selectedExercises.reduce((sum, e) => sum + estimateForExercise(e).total, 0),
     // estimateForExercise depends on prefs; selected set already triggers via selectedExercises.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedExercises, prefs.restTimerSeconds],
@@ -427,10 +427,10 @@ function BrowseTab({
               </button>
             )}
           </div>
-          {hasGapSignal && (
+          {hasGapSignal && gapMuscles && (
             <GapToggle
               active={gapsOnly}
-              gapCount={gapMuscles!.size}
+              gapCount={gapMuscles.size}
               onClick={() => setGapsOnly((v) => !v)}
             />
           )}
@@ -452,8 +452,7 @@ function BrowseTab({
               No exercises match.
             </div>
           ) : (
-            orderedModules.map((module) => {
-              const exercises = groupedByModule.get(module)!;
+            orderedModules.map(({ module, exercises }) => {
               const description = moduleDescription(module);
               // Module-level multi-select: count what's already selected so
               // the action label flips between "Add all" (some/none selected)
@@ -531,9 +530,7 @@ function BrowseTab({
                             {!isSwap && (
                               <span
                                 className={`shrink-0 w-5 h-5 rounded border flex items-center justify-center transition ${
-                                  isSelected
-                                    ? 'accent-bg accent-border'
-                                    : 'border-ink-700'
+                                  isSelected ? 'accent-bg accent-border' : 'border-ink-700'
                                 }`}
                                 aria-hidden="true"
                               >
@@ -580,9 +577,7 @@ function BrowseTab({
                                     {ex.primaryMuscles.length > 3 ? '…' : ''}
                                   </span>
                                 )}
-                                {fillsGap && (
-                                  <GapBadge muscleIds={gapHits!} />
-                                )}
+                                {fillsGap && gapHits && <GapBadge muscleIds={gapHits} />}
                               </span>
                             </span>
                           </button>
@@ -637,9 +632,7 @@ function GapBadge({ muscleIds }: { muscleIds: string[] }) {
     <span
       className="inline-flex items-center gap-1 text-[10px] accent-text leading-none"
       title={
-        labels.length > 0
-          ? `Fills coverage gap: ${labels.join(', ')}`
-          : 'Fills a coverage gap'
+        labels.length > 0 ? `Fills coverage gap: ${labels.join(', ')}` : 'Fills a coverage gap'
       }
     >
       <span aria-hidden="true">↗</span>
@@ -665,8 +658,8 @@ function GapToggle({
   return (
     <div className="mb-2 flex items-center justify-between gap-2">
       <span className="text-[10px] text-ink-500 italic font-display leading-tight">
-        {gapCount} muscle{gapCount === 1 ? '' : 's'} short of target — exercises
-        that fill those are flagged below.
+        {gapCount} muscle{gapCount === 1 ? '' : 's'} short of target — exercises that fill those are
+        flagged below.
       </span>
       <button
         type="button"
@@ -742,8 +735,7 @@ function PickerFooter({
   const rows = Array.from(primaryCounts.entries())
     .map(([id, count]) => ({
       id,
-      label:
-        MUSCLE_GROUPS.find((m: MuscleGroup) => m.id === id)?.label ?? id,
+      label: MUSCLE_GROUPS.find((m: MuscleGroup) => m.id === id)?.label ?? id,
       count,
     }))
     .sort((a, b) => b.count - a.count);

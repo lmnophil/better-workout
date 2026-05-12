@@ -14,10 +14,7 @@
 
 import { NextResponse } from 'next/server';
 
-const SESSION_COOKIE_CANDIDATES = [
-  'authjs.session-token',
-  '__Secure-authjs.session-token',
-];
+const SESSION_COOKIE_CANDIDATES = ['authjs.session-token', '__Secure-authjs.session-token'];
 
 export const dynamic = 'force-dynamic';
 

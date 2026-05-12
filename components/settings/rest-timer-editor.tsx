@@ -11,9 +11,7 @@ const DURATION_PRESETS = [30, 60, 90, 120, 180, 240];
 
 export function RestTimerEditor() {
   const { prefs, updatePrefs } = usePrefs();
-  const [customOpen, setCustomOpen] = useState(
-    !DURATION_PRESETS.includes(prefs.restTimerSeconds),
-  );
+  const [customOpen, setCustomOpen] = useState(!DURATION_PRESETS.includes(prefs.restTimerSeconds));
   const [customValue, setCustomValue] = useState(String(prefs.restTimerSeconds));
 
   function pickPreset(seconds: number) {
@@ -30,10 +28,7 @@ export function RestTimerEditor() {
   return (
     <div className="space-y-1.5">
       {/* Enabled toggle */}
-      <Row
-        label="Auto-start after sets"
-        description="Start a rest countdown when you log reps."
-      >
+      <Row label="Auto-start after sets" description="Start a rest countdown when you log reps.">
         <Toggle
           checked={prefs.restTimerEnabled}
           onChange={(v) => updatePrefs({ restTimerEnabled: v })}
@@ -78,7 +73,10 @@ export function RestTimerEditor() {
       {/* Custom duration input — only visible when "Custom" is active */}
       {customOpen && (
         <div className="px-4 py-2.5 flex items-center gap-2 bg-ink-900/40 rounded-lg">
-          <label htmlFor="custom-rest" className="text-[10px] tracking-[0.2em] uppercase text-ink-400">
+          <label
+            htmlFor="custom-rest"
+            className="text-[10px] tracking-[0.2em] uppercase text-ink-400"
+          >
             Seconds
           </label>
           <input
@@ -101,10 +99,7 @@ export function RestTimerEditor() {
       )}
 
       {/* Sound */}
-      <Row
-        label="Chime when done"
-        description="Two-tone audio cue at the end of each rest."
-      >
+      <Row label="Chime when done" description="Two-tone audio cue at the end of each rest.">
         <Toggle
           checked={prefs.restTimerSound}
           onChange={(v) => updatePrefs({ restTimerSound: v })}
@@ -140,9 +135,7 @@ function Row({
       <div className="min-w-0">
         <div className="text-sm text-ink-100">{label}</div>
         {description && (
-          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">
-            {description}
-          </div>
+          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">{description}</div>
         )}
       </div>
       <div className="shrink-0">{children}</div>

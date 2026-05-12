@@ -139,7 +139,7 @@ function SuggestionInline({
   libraryById: Map<string, LibraryExercise>;
 }) {
   const nameOf = (id: string | undefined) =>
-    id ? libraryById.get(id)?.name ?? '(unknown exercise)' : '(unknown)';
+    id ? (libraryById.get(id)?.name ?? '(unknown exercise)') : '(unknown)';
 
   switch (kind) {
     case 'swap_specific':
@@ -186,9 +186,7 @@ function SuggestionInline({
     case 'holistic_add':
       return <>broad suggestion to add: {String(payload.description ?? 'see tagged items')}</>;
     case 'holistic_remove':
-      return (
-        <>broad suggestion to remove: {String(payload.description ?? 'see tagged items')}</>
-      );
+      return <>broad suggestion to remove: {String(payload.description ?? 'see tagged items')}</>;
     default:
       return <>{kind}</>;
   }

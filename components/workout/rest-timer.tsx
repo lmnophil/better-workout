@@ -82,8 +82,7 @@ export function useRestTimer(prefs: RestTimerPrefs): RestTimerControls {
     setTotalSec((t) => t + deltaSec);
   }, []);
 
-  const remainingSec =
-    endsAt === null ? 0 : Math.max(0, Math.ceil((endsAt - now) / 1000));
+  const remainingSec = endsAt === null ? 0 : Math.max(0, Math.ceil((endsAt - now) / 1000));
 
   return {
     active: endsAt !== null,
@@ -197,9 +196,7 @@ export function RestTimerBar({
       <div className="relative flex items-center justify-between px-5 py-2.5">
         <div className="flex items-center gap-2">
           <Pause size={14} className="accent-text" />
-          <span className="text-[10px] tracking-[0.25em] uppercase text-ink-300">
-            Rest
-          </span>
+          <span className="text-[10px] tracking-[0.25em] uppercase text-ink-300">Rest</span>
           <span className="font-mono text-base accent-text tabular-nums">{label}</span>
         </div>
 
@@ -209,9 +206,7 @@ export function RestTimerBar({
             type="button"
             onClick={onToggleSound}
             className={`p-1.5 transition ${
-              prefs.restTimerSound
-                ? 'accent-text'
-                : 'text-ink-600 hover:text-ink-400'
+              prefs.restTimerSound ? 'accent-text' : 'text-ink-600 hover:text-ink-400'
             }`}
             aria-label={prefs.restTimerSound ? 'Mute chime' : 'Unmute chime'}
             aria-pressed={prefs.restTimerSound}
@@ -223,9 +218,7 @@ export function RestTimerBar({
             type="button"
             onClick={onToggleVibrate}
             className={`p-1.5 transition ${
-              prefs.restTimerVibrate
-                ? 'accent-text'
-                : 'text-ink-600 hover:text-ink-400'
+              prefs.restTimerVibrate ? 'accent-text' : 'text-ink-600 hover:text-ink-400'
             }`}
             aria-label={prefs.restTimerVibrate ? 'Disable vibration' : 'Enable vibration'}
             aria-pressed={prefs.restTimerVibrate}

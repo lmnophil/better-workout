@@ -15,13 +15,14 @@ Anything else — a server action is simpler.
 `middleware.ts` runs `auth()` on every request the matcher selects, and **redirects unauthenticated requests to `/signin`**. The matcher's job is to exclude paths that should bypass auth.
 
 Currently excluded:
+
 - `api/auth/*` — Auth.js's own callbacks
 - `api/healthz` — Docker healthcheck (returning a redirect = "unhealthy" = restart loop = outage)
 - `api/metrics` — Prometheus scraper auth is a Bearer token, not a session
 - `api/log/*` — error-reporting endpoints must work for unauthenticated clients
 - Static assets, manifest, service worker
 
-There's also one **public app page** that bypasses auth — `/share/[token]`. It's handled via `PUBLIC_PATHS` inside `middleware.ts` (the middleware still runs so `req.auth` is populated for the owner previewing their own link, but unauthenticated visitors aren't redirected). The token plus a per-share reviewer cookie are the trust boundary. The public *server actions* that mutate share state (`registerShareReviewer`, `postShareComment`, `postShareSuggestion`, `toggleShareReaction`) are the only mutations in `lib/actions.ts` that skip `requireUser()`. See [docs/decisions.md](../../docs/decisions.md) (`Routine sharing — anonymous public reviewers`). Don't model new public app routes on this casually — the use case is specifically "anonymous reviewer with link from owner."
+There's also one **public app page** that bypasses auth — `/share/[token]`. It's handled via `PUBLIC_PATHS` inside `middleware.ts` (the middleware still runs so `req.auth` is populated for the owner previewing their own link, but unauthenticated visitors aren't redirected). The token plus a per-share reviewer cookie are the trust boundary. The public _server actions_ that mutate share state (`registerShareReviewer`, `postShareComment`, `postShareSuggestion`, `toggleShareReaction`) are the only mutations in `lib/actions.ts` that skip `requireUser()`. See [docs/decisions.md](../../docs/decisions.md) (`Routine sharing — anonymous public reviewers`). Don't model new public app routes on this casually — the use case is specifically "anonymous reviewer with link from owner."
 
 **If you add a public-or-system endpoint, update the matcher in `middleware.ts`.** Forgetting this means Docker's healthcheck (or Prometheus, or the client-error sink) gets redirected to `/signin`, returns a 307 instead of a 200, and the container is restarted in a loop. Verify any new public endpoint by hitting it with `curl -i` and confirming the status code, not just the body.
 
@@ -56,7 +57,7 @@ Apply the limit **before** parsing the body — flood attempts shouldn't even ge
 
 If your route does require auth, call `auth()` and check `session?.user?.id`. Don't try to read the JWT manually. Don't pass userId in the body and trust it.
 
-Note that authenticated `/api/*` endpoints still need to be in the middleware matcher's *included* set (i.e. NOT in the exclusion list) so middleware redirects unauthenticated users. If you exclude them from middleware and try to enforce auth in the route handler, you've duplicated machinery.
+Note that authenticated `/api/*` endpoints still need to be in the middleware matcher's _included_ set (i.e. NOT in the exclusion list) so middleware redirects unauthenticated users. If you exclude them from middleware and try to enforce auth in the route handler, you've duplicated machinery.
 
 ## Reverse proxy: outside vs inside the network
 

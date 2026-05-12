@@ -7,17 +7,19 @@ The active workout UI. The most complex part of the frontend — the rest of the
 `workout-view.tsx` and the cue-toggle in the layout header both consume the same prefs state via `usePrefs()` from `components/ui/prefs-context.tsx`. Don't reintroduce a `preferences` prop on `WorkoutView` — prop-drilling prefs across the layout/page boundary caused state desync between the workout view and the header cue toggle (each held its own copy). See `docs/decisions.md` for the full write-up.
 
 The contract:
+
 - Read prefs: `const { prefs } = usePrefs()`
 - Update prefs: `updatePrefs({ restTimerSeconds: 120 })` — patches the local state and persists via `updateUserPreferences` server action in one call.
 - The settings page's `RestTimerEditor` uses the same context. Toggle in any of the three (workout view, cue toggle, settings) and all three update.
 
 If you need a new pref, add it to:
+
 1. `prisma/schema.prisma` (`UserPreferences` model)
 2. `lib/prefs.ts` (`UserPrefs` type + `PREFS_DEFAULTS`)
 3. `lib/queries.ts` (`getUserPreferences` reads the new column)
 4. `lib/actions.ts` (`UpdatePreferencesSchema` accepts the new field)
 
-The shared `UserPrefs` shape replaced the older `RestTimerPrefs` type that used to live in `rest-timer.tsx`. The rest-timer hook now narrows to the rest-* subset via `Pick`, so its public surface is unchanged but the central source of truth is `lib/prefs.ts`.
+The shared `UserPrefs` shape replaced the older `RestTimerPrefs` type that used to live in `rest-timer.tsx`. The rest-timer hook now narrows to the rest-\* subset via `Pick`, so its public surface is unchanged but the central source of truth is `lib/prefs.ts`.
 
 ## Set commit semantics
 

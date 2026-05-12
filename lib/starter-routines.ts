@@ -50,10 +50,7 @@ import type { ExerciseModule } from './exercises-data';
 export const STARTER_FOCUSES = ['strength', 'build', 'mobility', 'longevity'] as const;
 export type StarterFocus = (typeof STARTER_FOCUSES)[number];
 
-export const STARTER_FOCUS_INFO: Record<
-  StarterFocus,
-  { label: string; description: string }
-> = {
+export const STARTER_FOCUS_INFO: Record<StarterFocus, { label: string; description: string }> = {
   strength: {
     label: 'Strength',
     description: 'Barbell-first main lifts, low-rep ranges, longer rest.',
@@ -122,10 +119,7 @@ export const EQUIPMENT_GROUPS: { label: string; tokens: readonly string[] }[] = 
   { label: 'Specialty', tokens: ['physio ball', 'bosu', 'airex pad', 'jump rope'] },
 ];
 
-export const EQUIPMENT_TIER_INFO: Record<
-  EquipmentTier,
-  { label: string; description: string }
-> = {
+export const EQUIPMENT_TIER_INFO: Record<EquipmentTier, { label: string; description: string }> = {
   'full-gym': {
     label: 'Full gym',
     description: 'Barbell, rack, bench, dumbbells, cables, machines, bands.',
@@ -188,14 +182,7 @@ export const TIER_EQUIPMENT: Record<EquipmentTier, ReadonlySet<string>> = {
     'foam roller',
     'mat',
   ]),
-  'dumbbells-only': new Set([
-    'dumbbells',
-    'bench',
-    'bands',
-    'pull-up bar',
-    'foam roller',
-    'mat',
-  ]),
+  'dumbbells-only': new Set(['dumbbells', 'bench', 'bands', 'pull-up bar', 'foam roller', 'mat']),
   'bands-only': new Set(['bands', 'foam roller', 'mat']),
   'bodyweight-only': new Set(['foam roller', 'mat']),
 };
@@ -266,7 +253,12 @@ function smrSlot(): Slot {
     priority: 4,
     estMinutes: 3,
     variants: [
-      { exerciseName: 'Foam roll quads', plannedSets: 1, plannedReps: 1, equipment: ['foam roller', 'mat'] },
+      {
+        exerciseName: 'Foam roll quads',
+        plannedSets: 1,
+        plannedReps: 1,
+        equipment: ['foam roller', 'mat'],
+      },
       // Tier without a foam roller drops the SMR slot entirely; that's the
       // intent — there's no good substitute and it's recency-only anyway.
     ],
@@ -293,8 +285,18 @@ function activationSlot(): Slot {
     priority: 2,
     estMinutes: 3,
     variants: [
-      { exerciseName: 'Banded glute bridges with abduction', plannedSets: 2, plannedReps: 12, equipment: ['bands', 'mat'] },
-      { exerciseName: 'Bodyweight glute bridge', plannedSets: 2, plannedReps: 12, equipment: ['mat'] },
+      {
+        exerciseName: 'Banded glute bridges with abduction',
+        plannedSets: 2,
+        plannedReps: 12,
+        equipment: ['bands', 'mat'],
+      },
+      {
+        exerciseName: 'Bodyweight glute bridge',
+        plannedSets: 2,
+        plannedReps: 12,
+        equipment: ['mat'],
+      },
     ],
   };
 }
@@ -307,7 +309,12 @@ function squatSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 7,
       variants: [
-        { exerciseName: 'Back squat', plannedSets: 4, plannedReps: 5, equipment: ['barbell', 'rack'] },
+        {
+          exerciseName: 'Back squat',
+          plannedSets: 4,
+          plannedReps: 5,
+          equipment: ['barbell', 'rack'],
+        },
         { exerciseName: 'Goblet squat', plannedSets: 4, plannedReps: 8, equipment: ['dumbbells'] },
         { exerciseName: 'Banded squat', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
         { exerciseName: 'Bodyweight squat', plannedSets: 3, plannedReps: 15, equipment: [] },
@@ -322,7 +329,12 @@ function squatSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       estMinutes: 6,
       variants: [
         { exerciseName: 'Goblet squat', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells'] },
-        { exerciseName: 'Back squat', plannedSets: 3, plannedReps: 8, equipment: ['barbell', 'rack'] },
+        {
+          exerciseName: 'Back squat',
+          plannedSets: 3,
+          plannedReps: 8,
+          equipment: ['barbell', 'rack'],
+        },
         { exerciseName: 'Leg press', plannedSets: 3, plannedReps: 10, equipment: ['machine'] },
         { exerciseName: 'Banded squat', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
         { exerciseName: 'Bodyweight squat', plannedSets: 3, plannedReps: 15, equipment: [] },
@@ -351,8 +363,18 @@ function hingeSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 7,
       variants: [
-        { exerciseName: 'Conventional deadlift', plannedSets: 3, plannedReps: 5, equipment: ['barbell'] },
-        { exerciseName: 'Romanian deadlift', plannedSets: 3, plannedReps: 6, equipment: ['barbell'] },
+        {
+          exerciseName: 'Conventional deadlift',
+          plannedSets: 3,
+          plannedReps: 5,
+          equipment: ['barbell'],
+        },
+        {
+          exerciseName: 'Romanian deadlift',
+          plannedSets: 3,
+          plannedReps: 6,
+          equipment: ['barbell'],
+        },
         { exerciseName: 'Dumbbell RDL', plannedSets: 3, plannedReps: 8, equipment: ['dumbbells'] },
         { exerciseName: 'Banded RDL', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
         { exerciseName: 'Single-leg RDL', plannedSets: 3, plannedReps: 8, equipment: [] },
@@ -366,7 +388,12 @@ function hingeSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 6,
       variants: [
-        { exerciseName: 'Romanian deadlift', plannedSets: 3, plannedReps: 8, equipment: ['barbell'] },
+        {
+          exerciseName: 'Romanian deadlift',
+          plannedSets: 3,
+          plannedReps: 8,
+          equipment: ['barbell'],
+        },
         { exerciseName: 'Dumbbell RDL', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells'] },
         { exerciseName: 'Banded RDL', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
         { exerciseName: 'Single-leg RDL', plannedSets: 3, plannedReps: 8, equipment: [] },
@@ -381,7 +408,12 @@ function hingeSlot(focus: StarterFocus, priority: SlotPriority): Slot {
     variants: [
       { exerciseName: 'Single-leg RDL', plannedSets: 3, plannedReps: 8, equipment: [] },
       { exerciseName: 'Banded RDL', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
-      { exerciseName: 'Bodyweight glute bridge', plannedSets: 3, plannedReps: 15, equipment: ['mat'] },
+      {
+        exerciseName: 'Bodyweight glute bridge',
+        plannedSets: 3,
+        plannedReps: 15,
+        equipment: ['mat'],
+      },
     ],
   };
 }
@@ -394,9 +426,24 @@ function pushSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 7,
       variants: [
-        { exerciseName: 'Bench press', plannedSets: 4, plannedReps: 5, equipment: ['barbell', 'bench', 'rack'] },
-        { exerciseName: 'Dumbbell bench press', plannedSets: 4, plannedReps: 8, equipment: ['dumbbells', 'bench'] },
-        { exerciseName: 'Banded chest press', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+        {
+          exerciseName: 'Bench press',
+          plannedSets: 4,
+          plannedReps: 5,
+          equipment: ['barbell', 'bench', 'rack'],
+        },
+        {
+          exerciseName: 'Dumbbell bench press',
+          plannedSets: 4,
+          plannedReps: 8,
+          equipment: ['dumbbells', 'bench'],
+        },
+        {
+          exerciseName: 'Banded chest press',
+          plannedSets: 3,
+          plannedReps: 12,
+          equipment: ['bands'],
+        },
         { exerciseName: 'Push-ups', plannedSets: 3, plannedReps: 12, equipment: [] },
       ],
     };
@@ -408,10 +455,30 @@ function pushSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 6,
       variants: [
-        { exerciseName: 'Dumbbell bench press', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench'] },
-        { exerciseName: 'Bench press', plannedSets: 3, plannedReps: 8, equipment: ['barbell', 'bench', 'rack'] },
-        { exerciseName: 'Incline dumbbell press', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench'] },
-        { exerciseName: 'Banded chest press', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+        {
+          exerciseName: 'Dumbbell bench press',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['dumbbells', 'bench'],
+        },
+        {
+          exerciseName: 'Bench press',
+          plannedSets: 3,
+          plannedReps: 8,
+          equipment: ['barbell', 'bench', 'rack'],
+        },
+        {
+          exerciseName: 'Incline dumbbell press',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['dumbbells', 'bench'],
+        },
+        {
+          exerciseName: 'Banded chest press',
+          plannedSets: 3,
+          plannedReps: 12,
+          equipment: ['bands'],
+        },
         { exerciseName: 'Push-ups', plannedSets: 3, plannedReps: 12, equipment: [] },
       ],
     };
@@ -438,10 +505,20 @@ function pullSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       estMinutes: 6,
       variants: [
         { exerciseName: 'Barbell row', plannedSets: 4, plannedReps: 6, equipment: ['barbell'] },
-        { exerciseName: 'Single-arm dumbbell row', plannedSets: 3, plannedReps: 8, equipment: ['dumbbells', 'bench'] },
+        {
+          exerciseName: 'Single-arm dumbbell row',
+          plannedSets: 3,
+          plannedReps: 8,
+          equipment: ['dumbbells', 'bench'],
+        },
         { exerciseName: 'Cable row', plannedSets: 3, plannedReps: 10, equipment: ['cable'] },
         { exerciseName: 'Banded row', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
-        { exerciseName: 'Inverted row', plannedSets: 3, plannedReps: 10, equipment: ['rack', 'barbell'] },
+        {
+          exerciseName: 'Inverted row',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['rack', 'barbell'],
+        },
       ],
     };
   }
@@ -452,11 +529,26 @@ function pullSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 5,
       variants: [
-        { exerciseName: 'Single-arm dumbbell row', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench'] },
-        { exerciseName: 'Chest-supported dumbbell row', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench'] },
+        {
+          exerciseName: 'Single-arm dumbbell row',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['dumbbells', 'bench'],
+        },
+        {
+          exerciseName: 'Chest-supported dumbbell row',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['dumbbells', 'bench'],
+        },
         { exerciseName: 'Cable row', plannedSets: 3, plannedReps: 10, equipment: ['cable'] },
         { exerciseName: 'Banded row', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
-        { exerciseName: 'Inverted row', plannedSets: 3, plannedReps: 10, equipment: ['rack', 'barbell'] },
+        {
+          exerciseName: 'Inverted row',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['rack', 'barbell'],
+        },
       ],
     };
   }
@@ -467,8 +559,18 @@ function pullSlot(focus: StarterFocus, priority: SlotPriority): Slot {
     estMinutes: 5,
     variants: [
       { exerciseName: 'Banded row', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
-      { exerciseName: 'Inverted row', plannedSets: 3, plannedReps: 10, equipment: ['rack', 'barbell'] },
-      { exerciseName: 'Single-arm dumbbell row', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench'] },
+      {
+        exerciseName: 'Inverted row',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['rack', 'barbell'],
+      },
+      {
+        exerciseName: 'Single-arm dumbbell row',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['dumbbells', 'bench'],
+      },
     ],
   };
 }
@@ -481,9 +583,24 @@ function vPushSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 6,
       variants: [
-        { exerciseName: 'Overhead press', plannedSets: 3, plannedReps: 5, equipment: ['barbell', 'rack'] },
-        { exerciseName: 'Dumbbell shoulder press', plannedSets: 3, plannedReps: 8, equipment: ['dumbbells'] },
-        { exerciseName: 'Banded shoulder press', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+        {
+          exerciseName: 'Overhead press',
+          plannedSets: 3,
+          plannedReps: 5,
+          equipment: ['barbell', 'rack'],
+        },
+        {
+          exerciseName: 'Dumbbell shoulder press',
+          plannedSets: 3,
+          plannedReps: 8,
+          equipment: ['dumbbells'],
+        },
+        {
+          exerciseName: 'Banded shoulder press',
+          plannedSets: 3,
+          plannedReps: 12,
+          equipment: ['bands'],
+        },
         { exerciseName: 'Pike push-ups', plannedSets: 3, plannedReps: 8, equipment: [] },
       ],
     };
@@ -495,9 +612,24 @@ function vPushSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 5,
       variants: [
-        { exerciseName: 'Seated dumbbell shoulder press', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench'] },
-        { exerciseName: 'Dumbbell shoulder press', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells'] },
-        { exerciseName: 'Banded shoulder press', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+        {
+          exerciseName: 'Seated dumbbell shoulder press',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['dumbbells', 'bench'],
+        },
+        {
+          exerciseName: 'Dumbbell shoulder press',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['dumbbells'],
+        },
+        {
+          exerciseName: 'Banded shoulder press',
+          plannedSets: 3,
+          plannedReps: 12,
+          equipment: ['bands'],
+        },
         { exerciseName: 'Pike push-ups', plannedSets: 3, plannedReps: 8, equipment: [] },
       ],
     };
@@ -509,7 +641,12 @@ function vPushSlot(focus: StarterFocus, priority: SlotPriority): Slot {
     estMinutes: 4,
     variants: [
       { exerciseName: 'Pike push-ups', plannedSets: 3, plannedReps: 8, equipment: [] },
-      { exerciseName: 'Banded shoulder press', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      {
+        exerciseName: 'Banded shoulder press',
+        plannedSets: 3,
+        plannedReps: 12,
+        equipment: ['bands'],
+      },
     ],
   };
 }
@@ -525,7 +662,12 @@ function vPullSlot(focus: StarterFocus, priority: SlotPriority): Slot {
         { exerciseName: 'Pull-ups', plannedSets: 4, plannedReps: 6, equipment: ['pull-up bar'] },
         { exerciseName: 'Lat pulldown', plannedSets: 3, plannedReps: 8, equipment: ['cable'] },
         { exerciseName: 'Banded pulldown', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
-        { exerciseName: 'Inverted row', plannedSets: 3, plannedReps: 10, equipment: ['rack', 'barbell'] },
+        {
+          exerciseName: 'Inverted row',
+          plannedSets: 3,
+          plannedReps: 10,
+          equipment: ['rack', 'barbell'],
+        },
       ],
     };
   }
@@ -563,8 +705,18 @@ function lungeSlot(focus: StarterFocus, priority: SlotPriority): Slot {
       priority,
       estMinutes: 5,
       variants: [
-        { exerciseName: 'Dumbbell walking lunges', plannedSets: 3, plannedReps: 8, equipment: ['dumbbells'] },
-        { exerciseName: 'Bulgarian squat (seated step away)', plannedSets: 3, plannedReps: 8, equipment: ['dumbbells', 'bench'] },
+        {
+          exerciseName: 'Dumbbell walking lunges',
+          plannedSets: 3,
+          plannedReps: 8,
+          equipment: ['dumbbells'],
+        },
+        {
+          exerciseName: 'Bulgarian squat (seated step away)',
+          plannedSets: 3,
+          plannedReps: 8,
+          equipment: ['dumbbells', 'bench'],
+        },
         { exerciseName: 'Walking lunges', plannedSets: 3, plannedReps: 10, equipment: [] },
         { exerciseName: 'Reverse lunges', plannedSets: 3, plannedReps: 10, equipment: [] },
       ],
@@ -589,9 +741,24 @@ function hipThrustSlot(priority: SlotPriority): Slot {
     priority,
     estMinutes: 5,
     variants: [
-      { exerciseName: 'Dumbbell hip thrust', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench', 'mat'] },
-      { exerciseName: 'Banded hip thrust', plannedSets: 3, plannedReps: 12, equipment: ['bands', 'bench', 'mat'] },
-      { exerciseName: 'Bodyweight hip thrust', plannedSets: 3, plannedReps: 15, equipment: ['bench', 'mat'] },
+      {
+        exerciseName: 'Dumbbell hip thrust',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['dumbbells', 'bench', 'mat'],
+      },
+      {
+        exerciseName: 'Banded hip thrust',
+        plannedSets: 3,
+        plannedReps: 12,
+        equipment: ['bands', 'bench', 'mat'],
+      },
+      {
+        exerciseName: 'Bodyweight hip thrust',
+        plannedSets: 3,
+        plannedReps: 15,
+        equipment: ['bench', 'mat'],
+      },
     ],
   };
 }
@@ -619,8 +786,18 @@ function tricepsSlot(priority: SlotPriority): Slot {
     estMinutes: 4,
     variants: [
       { exerciseName: 'Tricep pushdown', plannedSets: 3, plannedReps: 12, equipment: ['cable'] },
-      { exerciseName: 'Overhead tricep extension', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells'] },
-      { exerciseName: 'Banded tricep extension', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      {
+        exerciseName: 'Overhead tricep extension',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['dumbbells'],
+      },
+      {
+        exerciseName: 'Banded tricep extension',
+        plannedSets: 3,
+        plannedReps: 12,
+        equipment: ['bands'],
+      },
       { exerciseName: 'Diamond push-ups', plannedSets: 3, plannedReps: 10, equipment: [] },
       { exerciseName: 'Bench dips', plannedSets: 3, plannedReps: 12, equipment: ['bench'] },
     ],
@@ -635,7 +812,12 @@ function shouldersSlot(priority: SlotPriority): Slot {
     estMinutes: 4,
     variants: [
       { exerciseName: 'Lateral raises', plannedSets: 3, plannedReps: 12, equipment: ['dumbbells'] },
-      { exerciseName: 'Banded lateral raise', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      {
+        exerciseName: 'Banded lateral raise',
+        plannedSets: 3,
+        plannedReps: 12,
+        equipment: ['bands'],
+      },
     ],
   };
 }
@@ -684,8 +866,18 @@ function carrySlot(priority: SlotPriority): Slot {
     priority,
     estMinutes: 4,
     variants: [
-      { exerciseName: 'Farmer carry', plannedSets: 3, plannedSeconds: 40, equipment: ['dumbbells'] },
-      { exerciseName: 'Suitcase carry', plannedSets: 2, plannedSeconds: 40, equipment: ['dumbbells'] },
+      {
+        exerciseName: 'Farmer carry',
+        plannedSets: 3,
+        plannedSeconds: 40,
+        equipment: ['dumbbells'],
+      },
+      {
+        exerciseName: 'Suitcase carry',
+        plannedSets: 2,
+        plannedSeconds: 40,
+        equipment: ['dumbbells'],
+      },
     ],
   };
 }
@@ -746,7 +938,12 @@ function mobilityCoreBlock(): readonly Slot[] {
       priority: 4,
       estMinutes: 3,
       variants: [
-        { exerciseName: 'Foam roll quads', plannedSets: 1, plannedReps: 1, equipment: ['foam roller', 'mat'] },
+        {
+          exerciseName: 'Foam roll quads',
+          plannedSets: 1,
+          plannedReps: 1,
+          equipment: ['foam roller', 'mat'],
+        },
       ],
     },
   ];
@@ -866,12 +1063,7 @@ function mobilityDay(name: string, includeStrength = true): DayBase {
     slots: [
       ...mobilityCoreBlock(),
       ...(includeStrength
-        ? [
-            squatSlot('mobility', 2),
-            pushSlot('mobility', 2),
-            pullSlot('mobility', 2),
-            coreSlot(2),
-          ]
+        ? [squatSlot('mobility', 2), pushSlot('mobility', 2), pullSlot('mobility', 2), coreSlot(2)]
         : [coreSlot(2)]),
       conditioningSlot(3),
     ],
@@ -914,8 +1106,18 @@ function longevitySquatMainSlot(): Slot {
     variants: [
       // Front squat first — upright torso, less spinal-shear than back squat,
       // matches the longevity archetype's bias toward joint-friendlier lifts.
-      { exerciseName: 'Front squat', plannedSets: 4, plannedReps: 5, equipment: ['barbell', 'rack'] },
-      { exerciseName: 'Back squat', plannedSets: 4, plannedReps: 6, equipment: ['barbell', 'rack'] },
+      {
+        exerciseName: 'Front squat',
+        plannedSets: 4,
+        plannedReps: 5,
+        equipment: ['barbell', 'rack'],
+      },
+      {
+        exerciseName: 'Back squat',
+        plannedSets: 4,
+        plannedReps: 6,
+        equipment: ['barbell', 'rack'],
+      },
       { exerciseName: 'Goblet squat', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells'] },
       { exerciseName: 'Banded squat', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
       { exerciseName: 'Bodyweight squat', plannedSets: 3, plannedReps: 15, equipment: [] },
@@ -930,12 +1132,42 @@ function posteriorChainSlot(): Slot {
     priority: 1,
     estMinutes: 6,
     variants: [
-      { exerciseName: 'Physio ball hamstring bridges', plannedSets: 3, plannedReps: 10, equipment: ['physio ball', 'mat'] },
-      { exerciseName: 'Posterior chain leg lifts (ball)', plannedSets: 3, plannedReps: 10, equipment: ['physio ball', 'bands'] },
-      { exerciseName: 'Banded hip thrust', plannedSets: 3, plannedReps: 12, equipment: ['bands', 'bench', 'mat'] },
-      { exerciseName: 'Dumbbell hip thrust', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench', 'mat'] },
-      { exerciseName: 'Bodyweight hip thrust', plannedSets: 3, plannedReps: 15, equipment: ['bench', 'mat'] },
-      { exerciseName: 'Bodyweight glute bridge', plannedSets: 3, plannedReps: 15, equipment: ['mat'] },
+      {
+        exerciseName: 'Physio ball hamstring bridges',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['physio ball', 'mat'],
+      },
+      {
+        exerciseName: 'Posterior chain leg lifts (ball)',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['physio ball', 'bands'],
+      },
+      {
+        exerciseName: 'Banded hip thrust',
+        plannedSets: 3,
+        plannedReps: 12,
+        equipment: ['bands', 'bench', 'mat'],
+      },
+      {
+        exerciseName: 'Dumbbell hip thrust',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['dumbbells', 'bench', 'mat'],
+      },
+      {
+        exerciseName: 'Bodyweight hip thrust',
+        plannedSets: 3,
+        plannedReps: 15,
+        equipment: ['bench', 'mat'],
+      },
+      {
+        exerciseName: 'Bodyweight glute bridge',
+        plannedSets: 3,
+        plannedReps: 15,
+        equipment: ['mat'],
+      },
     ],
   };
 }
@@ -947,7 +1179,12 @@ function postureSlot(): Slot {
     priority: 2,
     estMinutes: 4,
     variants: [
-      { exerciseName: 'Scapular postural band work', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      {
+        exerciseName: 'Scapular postural band work',
+        plannedSets: 3,
+        plannedReps: 12,
+        equipment: ['bands'],
+      },
       { exerciseName: 'Banded face pulls', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
       { exerciseName: 'Banded pull-aparts', plannedSets: 3, plannedReps: 15, equipment: ['bands'] },
       { exerciseName: 'Reverse fly', plannedSets: 3, plannedReps: 12, equipment: ['dumbbells'] },
@@ -963,10 +1200,30 @@ function balanceFinisherSlot(): Slot {
     priority: 3,
     estMinutes: 5,
     variants: [
-      { exerciseName: 'BOSU dome single-leg holds', plannedSets: 3, plannedSeconds: 60, equipment: ['bosu'] },
-      { exerciseName: 'Airex pad single-leg holds', plannedSets: 3, plannedSeconds: 60, equipment: ['airex pad'] },
-      { exerciseName: 'BOSU flat single-leg holds', plannedSets: 3, plannedSeconds: 60, equipment: ['bosu'] },
-      { exerciseName: 'Single-leg balance hold', plannedSets: 3, plannedSeconds: 30, equipment: [] },
+      {
+        exerciseName: 'BOSU dome single-leg holds',
+        plannedSets: 3,
+        plannedSeconds: 60,
+        equipment: ['bosu'],
+      },
+      {
+        exerciseName: 'Airex pad single-leg holds',
+        plannedSets: 3,
+        plannedSeconds: 60,
+        equipment: ['airex pad'],
+      },
+      {
+        exerciseName: 'BOSU flat single-leg holds',
+        plannedSets: 3,
+        plannedSeconds: 60,
+        equipment: ['bosu'],
+      },
+      {
+        exerciseName: 'Single-leg balance hold',
+        plannedSets: 3,
+        plannedSeconds: 30,
+        equipment: [],
+      },
     ],
   };
 }
@@ -1181,15 +1438,13 @@ const STARTER_ROUTINES: Record<StarterFocus, Record<number, RoutineBase>> = {
   },
   longevity: {
     1: {
-      description: 'One hinge-led longevity session: main lift, posterior chain, posture, balance, SMR.',
+      description:
+        'One hinge-led longevity session: main lift, posterior chain, posture, balance, SMR.',
       days: [longevityLowerDay('Full body (hinge)', true)],
     },
     2: {
       description: 'Hinge-led day + squat-led day.',
-      days: [
-        longevityLowerDay('Lower (hinge)', true),
-        longevityLowerDay('Lower (squat)', false),
-      ],
+      days: [longevityLowerDay('Lower (hinge)', true), longevityLowerDay('Lower (squat)', false)],
     },
     3: {
       description: 'Hinge day + squat day + an upper/posture-led day.',
@@ -1209,7 +1464,8 @@ const STARTER_ROUTINES: Record<StarterFocus, Record<number, RoutineBase>> = {
       ],
     },
     5: {
-      description: 'Hinge / squat / posture / hinge / squat — same five-piece structure across the cycle.',
+      description:
+        'Hinge / squat / posture / hinge / squat — same five-piece structure across the cycle.',
       days: [
         longevityLowerDay('Day 1 (hinge)', true),
         longevityLowerDay('Day 2 (squat)', false),
@@ -1269,10 +1525,7 @@ export type BuildStarterRoutineResult = {
   needsMat: boolean;
 };
 
-function pickVariant(
-  slot: Slot,
-  available: ReadonlySet<string>,
-): SlotChoice | null {
+function pickVariant(slot: Slot, available: ReadonlySet<string>): SlotChoice | null {
   for (const v of slot.variants) {
     if (v.equipment.every((e) => available.has(e))) return v;
   }
@@ -1341,9 +1594,7 @@ export function buildStarterRoutine(input: {
         '30-min preset trims SMR and the cardio finisher. Bump to 45 for mobility prep, 60 for the full session.',
       );
     } else if (durationMinutes === 45) {
-      tradeoffs.add(
-        '45-min preset trims SMR. Pick 60 to include foam-rolling at the start.',
-      );
+      tradeoffs.add('45-min preset trims SMR. Pick 60 to include foam-rolling at the start.');
     }
   }
   if (droppedAny) {

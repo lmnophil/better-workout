@@ -50,10 +50,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
           select: { id: true },
         });
         if (!exists) {
-          logger.info(
-            { userId: token.userId },
-            'auth.jwt_invalidated_user_missing',
-          );
+          logger.info({ userId: token.userId }, 'auth.jwt_invalidated_user_missing');
           return null;
         }
       }
@@ -98,10 +95,7 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       logger.info({ userId: user.id }, 'auth.user_created');
     },
     linkAccount({ user, account }) {
-      logger.info(
-        { userId: user.id, provider: account.provider },
-        'auth.account_linked',
-      );
+      logger.info({ userId: user.id, provider: account.provider }, 'auth.account_linked');
     },
   },
 });

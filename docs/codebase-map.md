@@ -1,6 +1,6 @@
 # Codebase map
 
-A code-grounded reference for orienting in this repo. Skim before re-discovering the codebase. For *rationale* read [decisions.md](decisions.md); for *working agreements* read the root [CLAUDE.md](../CLAUDE.md).
+A code-grounded reference for orienting in this repo. Skim before re-discovering the codebase. For _rationale_ read [decisions.md](decisions.md); for _working agreements_ read the root [CLAUDE.md](../CLAUDE.md).
 
 This doc describes shapes and invariants, not exhaustive lists. It deliberately avoids enumerating every action, query, or exercise — the code is the canonical list, and copied lists drift. Specific counts (number of exercises, equipment types, etc.) are also kept out for the same reason: read the seed file when you need an exact number.
 
@@ -17,12 +17,14 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 ## 1. Database schema (`prisma/schema.prisma`)
 
 ### Auth tables (Auth.js v5)
+
 - **User** — id (cuid), name, email (unique), emailVerified, image; relations to everything user-owned. No soft-delete; cascades on user delete.
 - **Account** — OAuth provider rows. FK userId Cascade. Unique (provider, providerAccountId).
 - **AuthSession** — JWT strategy is in use, but Auth.js requires this schema. sessionToken unique.
 - **VerificationToken** — magic-link tokens; unique (identifier, token).
 
 ### Exercise model
+
 - **Exercise** — id, name, module (one of `EXERCISE_MODULES`), prescription, `metric` (`'reps'|'time'`, default `'reps'`), `equipment` (string[]), `primaryMuscles[]`, `secondaryMuscles[]`, `videoUrl`, `isCustom`.
   - `ownerId` (nullable FK→User Cascade) + `isCustom`: built-ins are `ownerId=null, isCustom=false`; user customs are `ownerId=userId, isCustom=true`.
   - **Soft-delete** via `deletedAt` (nullable). Used for user customs so existing SetLog history isn't orphaned.
@@ -30,15 +32,18 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 - **ExerciseUserSettings** — per-user per-exercise overrides for `restTimerSeconds` and `weightIncrement`. Unique (userId, exerciseId), both Cascade.
 
 ### Sessions and sets
+
 - **WorkoutSession** — `userId` Cascade, `date`, `completedAt` (nullable). Optional `startedFromRoutineDayId` (FK→RoutineDay, **SetNull** so deleting the day doesn't lose history). Indices on (userId, date), (userId, completedAt), (startedFromRoutineDayId).
   - **Invariant: at most one active (`completedAt = null`) session per user.** Enforced by app, not DB.
 - **SetLog** — `sessionId` Cascade, `exerciseId` **Restrict** (deliberate — protects history when an exercise soft-deletes), `setNumber` (contiguous per exercise within session), `position` (orders exercises within session), `reps`, `weight`, `seconds`, `notes`.
 
 ### Volume and prefs
+
 - **UserVolumeTarget** — per-user per-muscle override. `muscleId` is a string matching `MUSCLE_GROUPS[].id`, **no FK** (muscle list is in code, not DB). Unique (userId, muscleId).
 - **UserPreferences** — one per user, lazily created. `restTimerEnabled`, `restTimerSeconds` (default 90), `restTimerSound`, `restTimerVibrate`, `defaultSetsPerExercise` (default 3), `defaultWeightIncrement` (default 5).
 
 ### Templates and routines
+
 - **WorkoutTemplate** — `userId` nullable + `isBuiltin` bool. Built-ins: `userId=null, isBuiltin=true`. User templates: `userId=set, isBuiltin=false`. Unique (userId, name) — same NULL trick as exercises.
 - **UserHiddenTemplate** — per-user marker that the user has hidden a built-in template. Unique (userId, templateId), both Cascade.
 - **TemplateExercise** — junction. `position`, `plannedSets`, `plannedReps` (used when exercise.metric='reps'), `plannedSeconds` (used when metric='time'), `plannedWeight`, free-text `note` (per-(day, exercise) cues — tempo, breathing, coach annotations). Unique (templateId, exerciseId).
@@ -47,6 +52,7 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 - **RoutineDayPendingSwap** — staged one-time exercise substitution applied on session start. Unique (routineDayId, outExerciseId). All FKs Cascade.
 
 ### Routine sharing and notifications
+
 - **RoutineShare** — owner-minted token-based share link. Cascade from `Routine`. `token` is the URL-visible secret; `revokedAt` is a soft-revoke.
 - **ShareReviewer** — anonymous reviewer identity per share, keyed by an HttpOnly cookie. Display name is reviewer-chosen. Unique (shareId, reviewerKey).
 - **ShareComment** — polymorphic free-text comment (`targetType` discriminates routine / day / template_exercise / suggestion). No FK on the target — validation lives in the action layer.
@@ -73,9 +79,11 @@ Ordered list of module tags used to group exercises in the picker. The ordering 
 Authored as `EXERCISES` in `lib/exercises-data.ts`. Most exercises are `metric: 'reps'`; isometric holds, carries, and conditioning movements are `metric: 'time'`. The seed upserts built-ins by `(ownerId=null, name)`. `KNOWN_EQUIPMENT` is a compile-time tuple in the same file — read it directly for the current set.
 
 ### Seed idempotence
+
 `npm run db:seed` upserts built-ins by `(ownerId=null, name)` and clears `deletedAt` on previously soft-deleted built-ins. Customs untouched. Safe to re-run any time.
 
 ### Starter routines
+
 Live in `lib/starter-routines.ts`. Four focuses — Strength, Build, Mobility, Longevity — each × 1–7 days/cycle × 15/30/45/60 min/day × equipment tier. Each focus assembles day templates from seven slot helpers (squat / hinge / push / pull / vPush / vPull / lunge etc.) plus support slots (mobility / SMR / core / carry / conditioning / thoracic / balance). The user picks one as a starting draft; everything is editable after.
 
 ---
@@ -108,17 +116,20 @@ For canonical signatures, read `lib/queries.ts` directly — they're terse and t
 ## 5. Routes (`app/`)
 
 ### Layout structure
+
 - `app/layout.tsx` — root HTML shell, fonts (Fraunces / Bricolage Grotesque / JetBrains Mono via `next/font/google`), PWA manifest.
 - `app/error.tsx` — root error boundary.
 - `app/global-error.tsx` — last-resort boundary for root layout failures.
 - `middleware.ts` — auth gate; explicitly excludes `api/auth`, `api/healthz`, `api/metrics`, `api/log/*`.
 
 ### `app/(auth)/` — unauthenticated
+
 - `signin/page.tsx` — Google button + magic-link form.
 - `verify-request/page.tsx` — "magic link sent" confirmation.
 - `error.tsx` — auth-scoped boundary.
 
 ### `app/(app)/` — authenticated (gated by middleware)
+
 - `layout.tsx` — app shell (navbar, `PrefsProvider`, cue toggle, notifications bell).
 - `page.tsx` — workout view (the main UI). Loads active session, exercises, templates, routine, recent sessions.
 - `coverage/page.tsx` — coverage view.
@@ -129,9 +140,11 @@ For canonical signatures, read `lib/queries.ts` directly — they're terse and t
 - `error.tsx` — app-scoped boundary.
 
 ### `app/share/[token]/` — public reviewer surface (no auth)
+
 - `page.tsx` — anonymous reviewer view of a shared routine. The only public app route besides `/signin` and `/verify-request`; bypassed in middleware via `PUBLIC_PATHS`. See [decisions.md](decisions.md) (`Routine sharing — anonymous public reviewers`).
 
 ### `app/api/` — see [`app/api/CLAUDE.md`](../app/api/CLAUDE.md)
+
 - `auth/[...nextauth]/route.ts` — Auth.js handler. Don't add things here.
 - `auth/recover/route.ts` — clears the stale session-token cookie and 302s to `/signin`. See [decisions.md](decisions.md) (`Stale-cookie recovery`).
 - `healthz/route.ts` — `SELECT 1` check; 200 or 503. Used by Docker HEALTHCHECK.
@@ -139,6 +152,7 @@ For canonical signatures, read `lib/queries.ts` directly — they're terse and t
 - `log/client-error/route.ts` — browser error sink; rate-limited per IP.
 
 ### Service worker / PWA
+
 - `app/manifest.ts`, `app/sw.ts` (Serwist-compiled), `app/offline/page.tsx` — offline fallback. `app/offline/auto-reload.tsx` is a client island that reloads the user's intended destination once `navigator` reports `online` again.
 - **SW message protocol.** The SW handles two client-sent messages: `{ type: 'SKIP_WAITING' }` (drives the prompt-and-reload update flow — see [decisions.md](decisions.md) `Service-worker updates use prompt-and-reload`) and `{ type: 'CLEAR_USER_CACHES' }` (drops caches matching `pages|rsc|apis|cross-origin|others` on signout; static-asset caches stay). Mounted client components: `components/ui/sw-update-prompt.tsx` (root-layout-mounted, listens for `updatefound`) and `components/auth/sw-signout-cleanup.tsx` (signin-page-mounted when `?cleanup=1`, posted by both the signout button and `/api/auth/recover`).
 - **Touch input zoom.** Pinch-zoom is intentionally enabled at the viewport level; iOS Safari's focus-zoom is suppressed by a 16px floor on form inputs under `@media (pointer: coarse)` in `app/globals.css`. See [decisions.md](decisions.md) `Touch inputs use a 16px font-size floor`.
@@ -155,6 +169,7 @@ Has its own [CLAUDE.md](../components/workout/CLAUDE.md). Key shape:
 - **`rest-timer.tsx`** — `useRestTimer()` hook + `RestTimerBar` UI. **Absolute-deadline pattern** (`endsAt: ms`) so backgrounded tabs don't drift. Singleton AudioContext for chime — don't create per call.
 
 Patterns to know:
+
 - Prefs come from `usePrefs()` context, not props. Prop-drilling them caused a bug — see workout/CLAUDE.md.
 - SetRow: local string state, commit on blur, sync only when not focused — keeps inputs responsive.
 - Rest timer auto-starts when reps are committed, gated on `prefs.restTimerEnabled`.
@@ -167,6 +182,7 @@ Patterns to know:
 Renders a color-graded grid of muscle groups, sectioned by category (Lower / Upper / Core / Mobility / Other).
 
 **Recency tiers** (days since most recent set hitting that muscle, primary or secondary):
+
 - ≤2: fresh (bright green)
 - ≤4: recent (muted green)
 - ≤7: stale (muted orange)
@@ -198,23 +214,30 @@ All writes go through `updateUserPreferences` / `setVolumeTarget` / `resetVolume
 ## 10. Observability and infra
 
 ### Logger (`lib/logger.ts`)
+
 Pino, structured JSON to stdout. Auto-redacts `email`, `token`, `password`, `authorization`, `cookie` (and nested forms).
 
 ### Metrics (`lib/metrics.ts`)
+
 prom-client registry, reused via `globalThis` across hot reloads.
+
 - **Histograms**: `action_duration_seconds[action, status]`, `db_query_duration_seconds[operation]`.
 - **Counters**: `actions_total[action, status]`, `auth_events_total[event, provider]`, `sessions_completed_total`, `sets_logged_total`, `templates_used_total`, `client_errors_total[kind]`.
 
 ### Rate limiting (`lib/rate-limit.ts`)
+
 Token-bucket, **in-memory** (fine for self-host; resets on container restart).
+
 - `magicLinkPerIp`: 10 burst, 10/hour.
 - `magicLinkPerEmail`: 3 burst, 3/hour.
 - `clientErrorPerIp`: 30 burst, 60/hour.
 
 ### Health check (`app/api/healthz`)
+
 Runs `SELECT 1`. Returns 200 or 503. Docker HEALTHCHECK polls every 30s; 3 consecutive failures triggers a restart.
 
 ### Error boundaries
+
 - `app/error.tsx` — top-level fallback; recognises `'Unauthorized'` for "session expired" UX.
 - `app/(app)/error.tsx` — authenticated app routes.
 - `app/(auth)/error.tsx` — auth routes.
@@ -223,6 +246,7 @@ Runs `SELECT 1`. Returns 200 or 503. Docker HEALTHCHECK polls every 30s; 3 conse
 All boundaries call `useReportError(error, source)` to ship to `/api/log/client-error`. No others by design — boundaries that just `console.error` are not added.
 
 ### `withLogging` (`lib/observability.ts`)
+
 Wraps every server action. On success: timing + metrics + debug log (warn if >1s). On error: distinguishes expected (matched by `EXPECTED_ERROR_NAMES` and `EXPECTED_MESSAGES`) from bugs (full stack trace).
 
 ---
@@ -230,16 +254,21 @@ Wraps every server action. On success: timing + metrics + debug log (warn if >1s
 ## 11. Build and deploy
 
 ### npm scripts (`package.json`)
+
 `dev`, `dev:pretty`, `build` (`prisma generate && next build`), `start`, `lint`, `typecheck`, `db:generate`, `db:migrate`, `db:deploy`, `db:seed`, `db:studio`.
 
 ### Dockerfile
+
 Multi-stage, three stages:
+
 1. `deps` — `node:22-alpine` + full `npm ci`.
 2. `builder` — `prisma generate`, esbuild-bundle `prisma/seed.ts` to `seed.js` (`--bundle --format=esm --packages=external`), `next build` (standalone output).
 3. `runner` — `node:22-alpine`, non-root user, copies standalone + static + prod deps + Prisma artefacts. ENTRYPOINT runs `prisma migrate deploy` then `node server.js`. HEALTHCHECK is `node healthcheck.cjs`.
 
 ### docker-compose.yml
+
 Three services on an internal bridge:
+
 - **db**: postgres:16-alpine, persistent `postgres-data` volume, `pg_isready` healthcheck.
 - **app**: built from Dockerfile. Publishes 3000:3000. Depends on db (healthy). Env: `DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL`, `AUTH_TRUST_HOST`, provider keys, `LOG_LEVEL`, `METRICS_TOKEN`, `NODE_ENV=production`.
 - **backup**: postgres:16-alpine running `backup-loop.sh`. Env: `BACKUP_SCHEDULE_HOUR` (default 03 UTC), `BACKUP_KEEP_LOCAL` (default 7). Mounts `BACKUP_HOST_DIR` → `/backups`.
@@ -247,6 +276,7 @@ Three services on an internal bridge:
 JSON-file log driver, 10MB × 5 with gzip per service.
 
 ### Backup scripts (`scripts/`) — has its own [CLAUDE.md](../scripts/CLAUDE.md)
+
 - `backup.sh` — `pg_dump | gzip -9` to `/backups/<dbname>-<ISO-timestamp>.sql.gz`. Atomic write (`.partial` rename). Prunes to `BACKUP_KEEP_LOCAL` newest. **No encryption** — operator's offsite pipeline handles that.
 - `backup-loop.sh` — POSIX sh; runs once on start, then sleeps until next `BACKUP_SCHEDULE_HOUR`.
 - `generate-secrets.sh` — outputs `AUTH_SECRET`, `POSTGRES_PASSWORD`, `METRICS_TOKEN`.

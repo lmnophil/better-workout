@@ -16,11 +16,7 @@ type HiddenTemplate = {
   exerciseCount: number;
 };
 
-export function HiddenTemplatesEditor({
-  templates,
-}: {
-  templates: HiddenTemplate[];
-}) {
+export function HiddenTemplatesEditor({ templates }: { templates: HiddenTemplate[] }) {
   if (templates.length === 0) {
     return (
       <p className="text-xs text-ink-500 italic font-display">
@@ -57,11 +53,8 @@ function Row({ template }: { template: HiddenTemplate }) {
           </span>
         </div>
         <div className="text-[11px] text-ink-500 mt-0.5">
-          {template.exerciseCount}{' '}
-          {template.exerciseCount === 1 ? 'exercise' : 'exercises'}
-          {template.description && (
-            <span className="text-ink-600"> · {template.description}</span>
-          )}
+          {template.exerciseCount} {template.exerciseCount === 1 ? 'exercise' : 'exercises'}
+          {template.description && <span className="text-ink-600"> · {template.description}</span>}
         </div>
       </div>
       <button

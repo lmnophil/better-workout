@@ -66,9 +66,7 @@ export async function getAvailableExercises(userId: string) {
       select: { exerciseId: true, restTimerSeconds: true, weightIncrement: true },
     }),
   ]);
-  const settingsByExerciseId = new Map(
-    settings.map((s) => [s.exerciseId, s] as const),
-  );
+  const settingsByExerciseId = new Map(settings.map((s) => [s.exerciseId, s] as const));
 
   return exercises.map((e) => {
     const s = settingsByExerciseId.get(e.id);

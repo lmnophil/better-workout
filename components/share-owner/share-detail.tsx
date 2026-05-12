@@ -70,7 +70,10 @@ export function ShareDetail({
 
   return (
     <div className="space-y-6">
-      <Section title={`Open suggestions (${openSuggestions.length})`} dim={openSuggestions.length === 0}>
+      <Section
+        title={`Open suggestions (${openSuggestions.length})`}
+        dim={openSuggestions.length === 0}
+      >
         {openSuggestions.length === 0 ? (
           <Empty>No open suggestions.</Empty>
         ) : (
@@ -118,15 +121,23 @@ export function ShareDetail({
             {closedSuggestions.map((s) => (
               <li key={s.id}>
                 <span className="text-ink-200">{s.reviewerName}</span>: {humanKind(s.kind)} —{' '}
-                <span className={s.state === 'applied' ? 'text-emerald-300/80' : s.state === 'rejected' ? 'text-rose-300/80' : ''}>
+                <span
+                  className={
+                    s.state === 'applied'
+                      ? 'text-emerald-300/80'
+                      : s.state === 'rejected'
+                        ? 'text-rose-300/80'
+                        : ''
+                  }
+                >
                   {s.state}
                 </span>
               </li>
             ))}
             {resolvedComments.map((c) => (
               <li key={c.id}>
-                <span className="text-ink-200">{c.reviewerName}</span>: “{c.body.slice(0, 60)}”
-                — resolved
+                <span className="text-ink-200">{c.reviewerName}</span>: “{c.body.slice(0, 60)}” —
+                resolved
               </li>
             ))}
           </ul>
@@ -188,26 +199,24 @@ function SuggestionCard({
   const targetLabel =
     s.targetType && s.targetId ? labelByTarget[`${s.targetType}:${s.targetId}`] : null;
 
-  const run = (fn: () => Promise<void>) => startTransition(async () => {
-    try {
-      await fn();
-    } catch {
-      /* silent — page revalidates on success; the action's withLogging records failures */
-    }
-  });
+  const run = (fn: () => Promise<void>) =>
+    startTransition(async () => {
+      try {
+        await fn();
+      } catch {
+        /* silent — page revalidates on success; the action's withLogging records failures */
+      }
+    });
 
   const reject = () => run(() => rejectShareSuggestion({ suggestionId: s.id }));
   const resolve = () => run(() => resolveShareSuggestion({ suggestionId: s.id }));
 
   return (
-    <li
-      id={`suggestion-${s.id}`}
-      className="bg-ink-900/40 border border-ink-800 rounded-lg p-3"
-    >
+    <li id={`suggestion-${s.id}`} className="bg-ink-900/40 border border-ink-800 rounded-lg p-3">
       <div className="flex items-baseline justify-between gap-2 mb-1">
         <div className="text-xs text-ink-400">
-          <span className="text-ink-100 font-medium">{s.reviewerName}</span>{' '}
-          · {new Date(s.createdAt).toLocaleString()}
+          <span className="text-ink-100 font-medium">{s.reviewerName}</span> ·{' '}
+          {new Date(s.createdAt).toLocaleString()}
           {targetLabel && (
             <>
               {' '}
@@ -227,9 +236,7 @@ function SuggestionCard({
         <div className="space-y-2">
           {s.kind === 'swap_anyof' && (
             <CandidatePicker
-              candidates={
-                (s.payload.candidateIds as string[] | undefined) ?? []
-              }
+              candidates={(s.payload.candidateIds as string[] | undefined) ?? []}
               exerciseNameById={exerciseNameById}
               picked={pickedSwap}
               onPick={setPickedSwap}
@@ -237,10 +244,7 @@ function SuggestionCard({
           )}
           <ActionRow>
             <ApplyButton
-              disabled={
-                pending ||
-                (s.kind === 'swap_anyof' && !pickedSwap)
-              }
+              disabled={pending || (s.kind === 'swap_anyof' && !pickedSwap)}
               onClick={() =>
                 run(() =>
                   applyShareSwap({
@@ -248,7 +252,7 @@ function SuggestionCard({
                     inExerciseId:
                       s.kind === 'swap_specific'
                         ? (s.payload.inExerciseId as string | undefined)
-                        : pickedSwap ?? undefined,
+                        : (pickedSwap ?? undefined),
                   }),
                 )
               }
@@ -261,8 +265,7 @@ function SuggestionCard({
       {s.kind === 'swap_category' && (
         <ActionRow>
           <span className="text-xs text-ink-400">
-            Pick a replacement on the routine page, then resolve this
-            suggestion.
+            Pick a replacement on the routine page, then resolve this suggestion.
           </span>
           <ResolveButton disabled={pending} onClick={resolve} />
           <RejectButton disabled={pending} onClick={reject} />
@@ -285,9 +288,7 @@ function SuggestionCard({
             candidates={(s.payload.exerciseIds as string[] | undefined) ?? []}
             exerciseNameById={exerciseNameById}
             picked={pickedInserts}
-            onToggle={(id) =>
-              setPickedInserts((prev) => ({ ...prev, [id]: !prev[id] }))
-            }
+            onToggle={(id) => setPickedInserts((prev) => ({ ...prev, [id]: !prev[id] }))}
           />
           <ActionRow>
             <ApplyButton
@@ -303,11 +304,7 @@ function SuggestionCard({
                   }),
                 )
               }
-              label={
-                Object.values(pickedInserts).some((v) => v)
-                  ? `Apply selected`
-                  : `Apply all`
-              }
+              label={Object.values(pickedInserts).some((v) => v) ? `Apply selected` : `Apply all`}
             />
             <RejectButton disabled={pending} onClick={reject} />
           </ActionRow>
@@ -359,9 +356,7 @@ function SuggestionCard({
         </div>
       )}
 
-      {(s.kind === 'sticker' ||
-        s.kind === 'holistic_add' ||
-        s.kind === 'holistic_remove') && (
+      {(s.kind === 'sticker' || s.kind === 'holistic_add' || s.kind === 'holistic_remove') && (
         <ActionRow>
           <span className="text-xs text-ink-400">
             Advisory — hand-edit the routine if you want to act on it.
@@ -421,9 +416,7 @@ function InsertPicker({
 }) {
   return (
     <div>
-      <div className="text-xs text-ink-400 mb-1">
-        Select which to insert (none selected = all):
-      </div>
+      <div className="text-xs text-ink-400 mb-1">Select which to insert (none selected = all):</div>
       <div className="flex flex-wrap gap-1">
         {candidates.map((id) => (
           <button
@@ -469,13 +462,7 @@ function ApplyButton({
   );
 }
 
-function RejectButton({
-  onClick,
-  disabled,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-}) {
+function RejectButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -488,13 +475,7 @@ function RejectButton({
   );
 }
 
-function ResolveButton({
-  onClick,
-  disabled,
-}: {
-  onClick: () => void;
-  disabled?: boolean;
-}) {
+function ResolveButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -509,13 +490,7 @@ function ResolveButton({
 
 // ---------------- Comment card ----------------
 
-function CommentCard({
-  c,
-  labelByTarget,
-}: {
-  c: Comment;
-  labelByTarget: Record<string, string>;
-}) {
+function CommentCard({ c, labelByTarget }: { c: Comment; labelByTarget: Record<string, string> }) {
   const [pending, startTransition] = useTransition();
   const targetLabel = labelByTarget[`${c.targetType}:${c.targetId}`];
 
@@ -529,14 +504,11 @@ function CommentCard({
     });
 
   return (
-    <li
-      id={`comment-${c.id}`}
-      className="bg-ink-900/40 border border-ink-800 rounded-lg p-3"
-    >
+    <li id={`comment-${c.id}`} className="bg-ink-900/40 border border-ink-800 rounded-lg p-3">
       <div className="flex items-baseline justify-between gap-2 mb-1">
         <div className="text-xs text-ink-400">
-          <span className="text-ink-100 font-medium">{c.reviewerName}</span>{' '}
-          · {new Date(c.createdAt).toLocaleString()}
+          <span className="text-ink-100 font-medium">{c.reviewerName}</span> ·{' '}
+          {new Date(c.createdAt).toLocaleString()}
           {targetLabel && (
             <>
               {' '}
@@ -625,9 +597,7 @@ function SuggestionSummary({
   exerciseNameById: Record<string, string>;
 }) {
   const nameOf = (id: unknown) =>
-    typeof id === 'string'
-      ? exerciseNameById[id] ?? '(unknown exercise)'
-      : '(unknown)';
+    typeof id === 'string' ? (exerciseNameById[id] ?? '(unknown exercise)') : '(unknown)';
 
   switch (s.kind) {
     case 'swap_specific':
@@ -649,9 +619,7 @@ function SuggestionSummary({
         <>
           Swap <em>{nameOf(s.payload.outExerciseId)}</em> for any{' '}
           {s.payload.module ? `${s.payload.module} ` : ''}exercise
-          {s.payload.primaryMuscle
-            ? ` targeting ${s.payload.primaryMuscle}`
-            : ''}
+          {s.payload.primaryMuscle ? ` targeting ${s.payload.primaryMuscle}` : ''}
         </>
       );
     case 'reorder':
@@ -660,8 +628,7 @@ function SuggestionSummary({
       const ids = (s.payload.exerciseIds as string[] | undefined) ?? [];
       return (
         <>
-          Insert at position {Number(s.payload.atPosition) + 1}:{' '}
-          {ids.map(nameOf).join(', ')}
+          Insert at position {Number(s.payload.atPosition) + 1}: {ids.map(nameOf).join(', ')}
         </>
       );
     }

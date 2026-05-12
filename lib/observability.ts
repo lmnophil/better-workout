@@ -117,16 +117,10 @@ export function withLogging<TArgs extends unknown[], TReturn>(
 
       if (isExpectedError(err)) {
         // Expected user-facing error: log at warn, no stack noise.
-        log.warn(
-          { durationMs, err: serializeError(err) },
-          'action.rejected',
-        );
+        log.warn({ durationMs, err: serializeError(err) }, 'action.rejected');
       } else {
         // Genuine bug or incident — full detail.
-        log.error(
-          { durationMs, err: serializeError(err) },
-          'action.failed',
-        );
+        log.error({ durationMs, err: serializeError(err) }, 'action.failed');
       }
 
       throw err;

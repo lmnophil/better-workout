@@ -108,24 +108,24 @@ export default async function RoutinePage() {
         </div>
       )}
       <RoutineEditor
-      routine={routineForClient}
-      seedTemplates={seedTemplates}
-      availableExercises={availableExercises.map((e) => ({
-        id: e.id,
-        name: e.name,
-        module: e.module,
-        prescription: e.prescription,
-        primaryMuscles: e.primaryMuscles,
-        secondaryMuscles: e.secondaryMuscles,
-        videoUrl: e.videoUrl,
-        isCustom: e.isCustom,
-        metric: e.metric,
-        equipment: e.equipment,
-        restTimerSecondsOverride: e.restTimerSecondsOverride,
-        weightIncrementOverride: e.weightIncrementOverride,
-      }))}
-      muscleGroups={muscleGroups}
-    />
+        routine={routineForClient}
+        seedTemplates={seedTemplates}
+        availableExercises={availableExercises.map((e) => ({
+          id: e.id,
+          name: e.name,
+          module: e.module,
+          prescription: e.prescription,
+          primaryMuscles: e.primaryMuscles,
+          secondaryMuscles: e.secondaryMuscles,
+          videoUrl: e.videoUrl,
+          isCustom: e.isCustom,
+          metric: e.metric,
+          equipment: e.equipment,
+          restTimerSecondsOverride: e.restTimerSecondsOverride,
+          weightIncrementOverride: e.weightIncrementOverride,
+        }))}
+        muscleGroups={muscleGroups}
+      />
     </>
   );
 }

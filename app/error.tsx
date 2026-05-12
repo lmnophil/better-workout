@@ -32,9 +32,7 @@ export default function RootError({
           The app hit an unexpected error. Your data is safe — try again, or head home.
         </p>
         {error.digest && (
-          <p className="text-[10px] font-mono text-ink-600 mb-4">
-            ref: {error.digest}
-          </p>
+          <p className="text-[10px] font-mono text-ink-600 mb-4">ref: {error.digest}</p>
         )}
         <div className="flex items-center justify-center gap-3">
           <button
@@ -44,6 +42,10 @@ export default function RootError({
             <RotateCw size={14} strokeWidth={2.5} />
             Try again
           </button>
+          {/* Plain <a> on purpose — error boundary wants a hard reload to
+              reset any broken Next.js client state. next/link would keep the
+              corrupted runtime alive. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/"
             className="text-xs tracking-wider uppercase text-ink-400 hover:text-ink-100 transition"

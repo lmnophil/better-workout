@@ -44,8 +44,7 @@ export function PWAInstallBanner() {
     // combining UA with a touch-capable Mac heuristic (real Macs report
     // maxTouchPoints === 0; touch iPads report 5).
     const ua = navigator.userAgent;
-    const isLegacyIDevice =
-      /iPad|iPhone|iPod/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+    const isLegacyIDevice = /iPad|iPhone|iPod/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
     const isModernIPad =
       /Macintosh/.test(ua) &&
       typeof navigator.maxTouchPoints === 'number' &&
@@ -94,9 +93,8 @@ export function PWAInstallBanner() {
         <div className="text-xs text-ink-100">
           {isIOS ? (
             <>
-              Add to home screen: tap{' '}
-              <Share size={12} className="inline -mt-0.5 text-ink-300" /> then{' '}
-              <span className="text-ink-300">&ldquo;Add to Home Screen&rdquo;</span>
+              Add to home screen: tap <Share size={12} className="inline -mt-0.5 text-ink-300" />{' '}
+              then <span className="text-ink-300">&ldquo;Add to Home Screen&rdquo;</span>
             </>
           ) : (
             <>Install for offline access and faster startup.</>

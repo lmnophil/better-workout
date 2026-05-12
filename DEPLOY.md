@@ -19,7 +19,7 @@ This stack assumes you already run a reverse proxy on the host (or another box) 
 - A domain you control (Cloudflare, Namecheap, Google Domains — anyone)
 - Google Cloud project with OAuth credentials
 - Resend account with a verified domain (or you can start with Resend's test domain)
-- Either: a Proxmox host you can ssh into, *or* an Oracle Cloud account
+- Either: a Proxmox host you can ssh into, _or_ an Oracle Cloud account
 
 ---
 
@@ -114,38 +114,38 @@ The `.env` file lives next to `docker-compose.yml`. It's gitignored — never co
 
 Required everywhere (dev and prod):
 
-| Variable | Where to get it | Sensitive? |
-|---|---|---|
-| `AUTH_SECRET` | `openssl rand -base64 32` (or use generate-secrets.sh) | **Yes** |
-| `AUTH_URL` | Your full URL with protocol, e.g. `https://workout.example.com` | No |
-| `AUTH_GOOGLE_ID` | Google Cloud Console (Part 5) | No |
-| `AUTH_GOOGLE_SECRET` | Google Cloud Console (Part 5) | **Yes** |
-| `AUTH_RESEND_KEY` | Resend dashboard (Part 5) | **Yes** |
-| `AUTH_EMAIL_FROM` | Address on your verified Resend domain | No |
+| Variable             | Where to get it                                                 | Sensitive? |
+| -------------------- | --------------------------------------------------------------- | ---------- |
+| `AUTH_SECRET`        | `openssl rand -base64 32` (or use generate-secrets.sh)          | **Yes**    |
+| `AUTH_URL`           | Your full URL with protocol, e.g. `https://workout.example.com` | No         |
+| `AUTH_GOOGLE_ID`     | Google Cloud Console (Part 5)                                   | No         |
+| `AUTH_GOOGLE_SECRET` | Google Cloud Console (Part 5)                                   | **Yes**    |
+| `AUTH_RESEND_KEY`    | Resend dashboard (Part 5)                                       | **Yes**    |
+| `AUTH_EMAIL_FROM`    | Address on your verified Resend domain                          | No         |
 
 Compose-deployment only (used by `docker-compose.yml`):
 
-| Variable | Where to get it | Sensitive? |
-|---|---|---|
-| `POSTGRES_PASSWORD` | `openssl rand -base64 24` (or use generate-secrets.sh) | **Yes** |
-| `POSTGRES_USER` | Defaults to `workout`. Override only if you have a reason. | No |
-| `POSTGRES_DB` | Defaults to `workout`. Override only if you have a reason. | No |
-| `BACKUP_HOST_DIR` | Host path where DB backups land (e.g. `/var/backups/workout`). Must exist; readable by your offsite pipeline. **Required.** | No |
-| `BACKUP_SCHEDULE_HOUR` | UTC hour for daily backup, 00–23. Default `03`. | No |
-| `BACKUP_KEEP_LOCAL` | How many local backup files to keep before pruning. Default `7`. | No |
+| Variable               | Where to get it                                                                                                             | Sensitive? |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `POSTGRES_PASSWORD`    | `openssl rand -base64 24` (or use generate-secrets.sh)                                                                      | **Yes**    |
+| `POSTGRES_USER`        | Defaults to `workout`. Override only if you have a reason.                                                                  | No         |
+| `POSTGRES_DB`          | Defaults to `workout`. Override only if you have a reason.                                                                  | No         |
+| `BACKUP_HOST_DIR`      | Host path where DB backups land (e.g. `/var/backups/workout`). Must exist; readable by your offsite pipeline. **Required.** | No         |
+| `BACKUP_SCHEDULE_HOUR` | UTC hour for daily backup, 00–23. Default `03`.                                                                             | No         |
+| `BACKUP_KEEP_LOCAL`    | How many local backup files to keep before pruning. Default `7`.                                                            | No         |
 
 Local dev only (ignored by compose):
 
-| Variable | Where to get it |
-|---|---|
+| Variable       | Where to get it                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
 | `DATABASE_URL` | Connection string for your local Postgres, e.g. `postgres://postgres:devpass@localhost:5432/workout` |
 
 Optional:
 
-| Variable | Default | Notes |
-|---|---|---|
-| `LOG_LEVEL` | `info` (prod) / `debug` (dev) | Bump to `debug` when investigating |
-| `METRICS_TOKEN` | unset | Bearer token for `/api/metrics`. If unset, endpoint returns 503. Generate: `openssl rand -hex 32`. **Required in prod.** |
+| Variable        | Default                       | Notes                                                                                                                    |
+| --------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `LOG_LEVEL`     | `info` (prod) / `debug` (dev) | Bump to `debug` when investigating                                                                                       |
+| `METRICS_TOKEN` | unset                         | Bearer token for `/api/metrics`. If unset, endpoint returns 503. Generate: `openssl rand -hex 32`. **Required in prod.** |
 
 ### Boot-time validation
 
@@ -157,13 +157,13 @@ If the app container won't start, `docker compose logs app` shows exactly what's
 
 If you suspect a secret leaked, replace it and restart:
 
-| Secret | Effect of rotating |
-|---|---|
-| `AUTH_SECRET` | All existing JWT sessions invalidated → users must sign in again. Do this if leaked. |
-| `POSTGRES_PASSWORD` | Update the env var, restart the `db` and `app` containers together. Postgres re-reads the password on container restart only if the user is recreated — see "Rotating Postgres password" in Day-to-day operations. |
-| `AUTH_GOOGLE_SECRET` | Generate a new one in Google Cloud Console, paste into `.env`, restart `app`. The old one is invalidated immediately. |
-| `AUTH_RESEND_KEY` | Revoke the old key in Resend dashboard, create a new one, paste into `.env`, restart `app`. |
-| `METRICS_TOKEN` | Update the env var, restart `app`, update your scraper's credential. |
+| Secret               | Effect of rotating                                                                                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AUTH_SECRET`        | All existing JWT sessions invalidated → users must sign in again. Do this if leaked.                                                                                                                               |
+| `POSTGRES_PASSWORD`  | Update the env var, restart the `db` and `app` containers together. Postgres re-reads the password on container restart only if the user is recreated — see "Rotating Postgres password" in Day-to-day operations. |
+| `AUTH_GOOGLE_SECRET` | Generate a new one in Google Cloud Console, paste into `.env`, restart `app`. The old one is invalidated immediately.                                                                                              |
+| `AUTH_RESEND_KEY`    | Revoke the old key in Resend dashboard, create a new one, paste into `.env`, restart `app`.                                                                                                                        |
+| `METRICS_TOKEN`      | Update the env var, restart `app`, update your scraper's credential.                                                                                                                                               |
 
 Always restart the relevant container after editing `.env`:
 
@@ -289,6 +289,7 @@ ls -lh /var/backups/workout/
 ```
 
 If the host directory is empty after the container starts, check:
+
 - `docker compose logs backup` for permission errors
 - That `BACKUP_HOST_DIR` in `.env` matches the directory you created
 - That the directory is writable by UID 999
@@ -336,6 +337,7 @@ ls /var/backups/workout/
 `pg_dump --format=plain --no-owner --no-privileges` — every table, index, sequence, and row, as plain SQL. Portable across Postgres environments (the `--no-owner` flag means restore works against a different DB role). You can `zcat backup.sql.gz | head` to read the first lines if you want to verify it looks sensible.
 
 What's NOT in a backup:
+
 - Reverse proxy state (TLS certs etc.) — lives outside this stack now
 - App container state — there is none worth preserving
 - Uploaded files — there are no file uploads in this app
@@ -464,6 +466,7 @@ sum by (action) (rate(workout_tracker_actions_total{status="error"}[5m]))
 `GET /api/healthz` returns `{"status":"ok"}` with HTTP 200 if the app can reach the database, `{"status":"unhealthy"}` with HTTP 503 if it can't. Both responses include a `durationMs` showing how long the DB round-trip took.
 
 This endpoint backs:
+
 - The Docker `HEALTHCHECK` on the app container (`docker compose ps` shows the status)
 - Whatever uptime monitoring or reverse-proxy active health check you wire up
 
@@ -497,7 +500,7 @@ This setup intentionally stops short of bundling Prometheus + Grafana + Loki —
 The same `docker-compose.yml` runs unchanged on an Oracle Cloud Ampere ARM VM. Differences:
 
 1. Provision an **Always Free Ampere A1** instance with Ubuntu 22.04+ (4 OCPUs / 24 GB free).
-2. Open ports 80 and 443 in the **VCN security list** *and* in `iptables`/`ufw` on the VM:
+2. Open ports 80 and 443 in the **VCN security list** _and_ in `iptables`/`ufw` on the VM:
    ```bash
    sudo iptables -I INPUT -p tcp -m multiport --dports 80,443 -j ACCEPT
    sudo netfilter-persistent save

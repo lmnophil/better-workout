@@ -115,22 +115,13 @@ type BuilderState =
       kind: 'holistic_remove';
     };
 
-export function ShareView({
-  token,
-  reviewer,
-  routine,
-  activity,
-  library,
-}: Props) {
+export function ShareView({ token, reviewer, routine, activity, library }: Props) {
   const [builder, setBuilder] = useState<BuilderState>({ kind: 'none' });
 
   // Build O(1) lookups so per-target panels don't filter the whole list each
   // render. The maps stay small (one share's worth of activity), but the
   // memoization keeps the per-card render cheap as the routine grows.
-  const commentsByTarget = useMemo(
-    () => groupByTarget(activity.comments),
-    [activity.comments],
-  );
+  const commentsByTarget = useMemo(() => groupByTarget(activity.comments), [activity.comments]);
   const suggestionsByTarget = useMemo(
     () => groupByTarget(activity.suggestions),
     [activity.suggestions],
@@ -187,9 +178,9 @@ export function ShareView({
   }, [routine, commentsByTarget, suggestionsByTarget, reactionsByTarget]);
 
   const headerCounts = useMemo(() => {
-    let c = activity.comments.length;
-    let s = activity.suggestions.length;
-    let r = activity.reactions.length;
+    const c = activity.comments.length;
+    const s = activity.suggestions.length;
+    const r = activity.reactions.length;
     return { c, s, r };
   }, [activity]);
 
@@ -206,12 +197,14 @@ export function ShareView({
             you’re <span className="text-ink-100">{reviewer.displayName}</span>
           </div>
         </div>
-        {routine.description && (
-          <p className="text-sm text-ink-300 mt-1">{routine.description}</p>
-        )}
+        {routine.description && <p className="text-sm text-ink-300 mt-1">{routine.description}</p>}
         <div className="flex items-center gap-3 text-xs text-ink-400 mt-2">
-          <span>{headerCounts.c} comment{headerCounts.c === 1 ? '' : 's'}</span>
-          <span>{headerCounts.s} suggestion{headerCounts.s === 1 ? '' : 's'}</span>
+          <span>
+            {headerCounts.c} comment{headerCounts.c === 1 ? '' : 's'}
+          </span>
+          <span>
+            {headerCounts.s} suggestion{headerCounts.s === 1 ? '' : 's'}
+          </span>
           <span>{headerCounts.r} 👍</span>
         </div>
       </header>
@@ -255,11 +248,7 @@ export function ShareView({
         const dayKey = targetKey('routine_day', day.id);
         const totals = totalsByDay.get(day.id);
         return (
-          <section
-            key={day.id}
-            className="border-b border-ink-800 px-5 py-5"
-            id={`day-${day.id}`}
-          >
+          <section key={day.id} className="border-b border-ink-800 px-5 py-5" id={`day-${day.id}`}>
             <div className="flex items-baseline justify-between mb-3">
               <div>
                 <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
@@ -453,10 +442,7 @@ function groupByTarget<T extends { targetType: string | null; targetId: string |
   return map;
 }
 
-function groupReactions(
-  rows: ShareActivity['reactions'],
-  myReviewerId: string,
-) {
+function groupReactions(rows: ShareActivity['reactions'], myReviewerId: string) {
   const totals = new Map<string, number>();
   const byReviewer = new Map<string, boolean>();
   for (const row of rows) {

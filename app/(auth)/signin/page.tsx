@@ -116,9 +116,7 @@ async function SignInForm({
       </div>
 
       <form action={emailSignIn} className="space-y-2">
-        <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block">
-          Email
-        </label>
+        <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block">Email</label>
         <input
           type="email"
           name="email"

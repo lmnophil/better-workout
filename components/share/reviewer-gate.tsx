@@ -43,9 +43,9 @@ export function ReviewerGate({ token, ownerName, routineName }: Props) {
         <span className="accent-text">{ownerName}</span> shared a routine
       </h1>
       <p className="text-ink-300 mb-6">
-        Take a look at <span className="text-ink-100">{routineName}</span>, leave
-        comments, suggest swaps, or react to exercises you like. Pick a name to
-        get started — the owner will see this on every comment you post.
+        Take a look at <span className="text-ink-100">{routineName}</span>, leave comments, suggest
+        swaps, or react to exercises you like. Pick a name to get started — the owner will see this
+        on every comment you post.
       </p>
 
       <label className="block text-sm text-ink-300 mb-1">Your display name</label>
@@ -73,8 +73,8 @@ export function ReviewerGate({ token, ownerName, routineName }: Props) {
       </button>
 
       <p className="text-xs text-ink-500 mt-4">
-        Your name is local to this share link — clearing browser cookies will
-        ask again. No account required.
+        Your name is local to this share link — clearing browser cookies will ask again. No account
+        required.
       </p>
     </div>
   );

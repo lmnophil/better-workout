@@ -31,8 +31,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const userId = session.user.id;
 
   // Pull a friendly greeting handle: first name, else email local-part
-  const handle =
-    session.user.name?.split(' ')[0] ?? session.user.email?.split('@')[0] ?? 'athlete';
+  const handle = session.user.name?.split(' ')[0] ?? session.user.email?.split('@')[0] ?? 'athlete';
 
   const preferences = await getUserPreferences(userId);
 

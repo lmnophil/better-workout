@@ -12,8 +12,8 @@ export default function ShareNotFound() {
         </div>
         <h1 className="font-display text-3xl mb-3">Share link unavailable</h1>
         <p className="text-ink-300 text-sm">
-          This link isn’t active. It may have been revoked, or the address may
-          be off by a character. Ask the person who shared it for a fresh link.
+          This link isn’t active. It may have been revoked, or the address may be off by a
+          character. Ask the person who shared it for a fresh link.
         </p>
       </div>
     </main>

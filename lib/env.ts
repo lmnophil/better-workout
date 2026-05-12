@@ -26,7 +26,7 @@ const CHECKS: EnvCheck[] = [
   {
     name: 'AUTH_SECRET',
     level: 'required',
-    description: "Auth.js JWT signing key. Generate: openssl rand -base64 32",
+    description: 'Auth.js JWT signing key. Generate: openssl rand -base64 32',
     validate: (v) =>
       v.length < 16 ? 'too short — must be at least 16 chars (32 recommended)' : null,
   },
@@ -95,17 +95,12 @@ export function validateEnv(): void {
 
   for (const check of CHECKS) {
     const raw = process.env[check.name];
-    const present = raw !== undefined && raw.trim() !== '';
 
     // Treat prod-required as required when in prod, recommended otherwise
     const effectiveLevel =
-      check.level === 'prod-required'
-        ? isProd
-          ? 'required'
-          : 'recommended'
-        : check.level;
+      check.level === 'prod-required' ? (isProd ? 'required' : 'recommended') : check.level;
 
-    if (!present) {
+    if (raw === undefined || raw.trim() === '') {
       const msg = `${check.name} is not set — ${check.description}`;
       if (effectiveLevel === 'required') {
         errors.push(msg);
@@ -117,7 +112,7 @@ export function validateEnv(): void {
 
     // Run validator if present
     if (check.validate) {
-      const problem = check.validate(raw!);
+      const problem = check.validate(raw);
       if (problem) {
         errors.push(`${check.name} is invalid: ${problem}`);
       }
@@ -143,8 +138,5 @@ export function validateEnv(): void {
     process.exit(1);
   }
 
-  logger.info(
-    { warningCount: warnings.length },
-    'env.validated',
-  );
+  logger.info({ warningCount: warnings.length }, 'env.validated');
 }

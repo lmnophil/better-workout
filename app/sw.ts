@@ -74,13 +74,13 @@ self.addEventListener('message', (event) => {
 
   if (data.type === 'CLEAR_USER_CACHES') {
     event.waitUntil(
-      caches.keys().then((keys) =>
-        Promise.all(
-          keys
-            .filter((k) => USER_SCOPED_CACHE_RE.test(k))
-            .map((k) => caches.delete(k)),
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys.filter((k) => USER_SCOPED_CACHE_RE.test(k)).map((k) => caches.delete(k)),
+          ),
         ),
-      ),
     );
   }
 });

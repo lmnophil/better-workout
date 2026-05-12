@@ -8,13 +8,13 @@ For schema-editing operational guidance (migrations, seed compilation, things-th
 
 Five groups of models:
 
-| Group | Models | Notes |
-|---|---|---|
-| Auth.js adapter tables | `User`, `Account`, `AuthSession`, `VerificationToken` | Managed by the `@auth/prisma-adapter`. The app reads `User.id` to scope everything; the rest is opaque infrastructure. |
-| Core domain | `Exercise`, `WorkoutSession`, `SetLog` | The spine of the app. Every workout is a session containing setLogs that reference exercises. |
-| User-customization layer | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, saved workout lineups, and per-user hide markers for built-in templates. |
-| Routines | `Routine`, `RoutineDay`, `RoutineDayPendingSwap` | The user's named cycle of templates and any one-time substitutions staged for upcoming days. Capped at 7 days per routine. |
-| Routine sharing + notifications | `RoutineShare`, `ShareReviewer`, `ShareComment`, `ShareSuggestion`, `ShareReaction`, `Notification` | Owner-minted share links, anonymous-by-cookie reviewer identities, and the in-app inbox the owner reviews. See [decisions.md](./decisions.md) for the philosophical framing. |
+| Group                           | Models                                                                                                                     | Notes                                                                                                                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth.js adapter tables          | `User`, `Account`, `AuthSession`, `VerificationToken`                                                                      | Managed by the `@auth/prisma-adapter`. The app reads `User.id` to scope everything; the rest is opaque infrastructure.                                                       |
+| Core domain                     | `Exercise`, `WorkoutSession`, `SetLog`                                                                                     | The spine of the app. Every workout is a session containing setLogs that reference exercises.                                                                                |
+| User-customization layer        | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, saved workout lineups, and per-user hide markers for built-in templates.                                               |
+| Routines                        | `Routine`, `RoutineDay`, `RoutineDayPendingSwap`                                                                           | The user's named cycle of templates and any one-time substitutions staged for upcoming days. Capped at 7 days per routine.                                                   |
+| Routine sharing + notifications | `RoutineShare`, `ShareReviewer`, `ShareComment`, `ShareSuggestion`, `ShareReaction`, `Notification`                        | Owner-minted share links, anonymous-by-cookie reviewer identities, and the in-app inbox the owner reviews. See [decisions.md](./decisions.md) for the philosophical framing. |
 
 ## Diagram
 
@@ -143,7 +143,7 @@ The log entry for one set of one exercise inside one session. Most-frequently-wr
 
 Key behaviors:
 
-- **Two ordering fields with different scopes.** `setNumber` is contiguous from 1 within `(sessionId, exerciseId)` — used for "set 1, set 2, set 3 of the deadlift." `position` is the order of the *exercise* within the session, shared by every SetLog of that exercise. Don't mix them.
+- **Two ordering fields with different scopes.** `setNumber` is contiguous from 1 within `(sessionId, exerciseId)` — used for "set 1, set 2, set 3 of the deadlift." `position` is the order of the _exercise_ within the session, shared by every SetLog of that exercise. Don't mix them.
 - **`Restrict` on the Exercise relation, not Cascade.** A user can soft-delete a custom exercise even when historical SetLogs reference it; the soft-delete preserves history. A literal hard-delete would be blocked at the DB level.
 - **`notes` is per-set freeform text.** Surfaced in the "last time" reference next session. Empty stored as null.
 
@@ -203,7 +203,7 @@ Switching styles in `updateRoutine` clears state that doesn't apply to the new m
 
 ### `RoutineDay`
 
-A position within the cycle. Always has a `position` (0-indexed, contiguous, unique per routine). The `templateId` is a *reference*, not a copy — editing the template propagates to every routine day that uses it. The `label` is optional auxiliary text ("Heavy day", "Light day"); the template name is the primary display.
+A position within the cycle. Always has a `position` (0-indexed, contiguous, unique per routine). The `templateId` is a _reference_, not a copy — editing the template propagates to every routine day that uses it. The `label` is optional auxiliary text ("Heavy day", "Light day"); the template name is the primary display.
 
 The `description` field is a longer free-text paragraph framing the whole day (e.g. "Lower emphasis (glute drive). Stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up."). It's the day-level companion to `TemplateExercise.note`'s per-exercise scope: `description` is "what is this day for?" while `note` is "how do I perform this exercise here?". Same neutral-tool rationale — user types it, the app stores and renders verbatim.
 

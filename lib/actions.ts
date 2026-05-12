@@ -118,8 +118,7 @@ async function buildSeededSetLogRows(
   ]);
 
   const metaById = new Map(exercisesMeta.map((e) => [e.id, e]));
-  const defaultSets =
-    prefRow?.defaultSetsPerExercise ?? PREFS_DEFAULTS.defaultSetsPerExercise;
+  const defaultSets = prefRow?.defaultSetsPerExercise ?? PREFS_DEFAULTS.defaultSetsPerExercise;
 
   const rows: {
     sessionId: string;
@@ -144,9 +143,7 @@ async function buildSeededSetLogRows(
         : null;
     const setCount = Math.max(
       1,
-      fromHistory > 0
-        ? fromHistory
-        : (fromPlanned ?? fromPrescription ?? defaultSets),
+      fromHistory > 0 ? fromHistory : (fromPlanned ?? fromPrescription ?? defaultSets),
     );
 
     for (let i = 0; i < setCount; i++) {
@@ -189,90 +186,92 @@ const AddExercisesSchema = z.object({
  * caller-provided order for new additions. Creates the session lazily if
  * none exists.
  */
-export const addExercisesToActiveSession = withLogging('addExercisesToActiveSession', async (
-  input: z.infer<typeof AddExercisesSchema>,
-) => {
-  const userId = await requireUser();
-  const { exerciseIds } = AddExercisesSchema.parse(input);
+export const addExercisesToActiveSession = withLogging(
+  'addExercisesToActiveSession',
+  async (input: z.infer<typeof AddExercisesSchema>) => {
+    const userId = await requireUser();
+    const { exerciseIds } = AddExercisesSchema.parse(input);
 
-  // Verify access for every exercise up front. If any fail, none are added.
-  // Fetching them all in one query rather than N round-trips.
-  const accessible = await db.exercise.findMany({
-    where: {
-      id: { in: exerciseIds },
-      OR: [{ ownerId: null }, { ownerId: userId }],
-      deletedAt: null,
-    },
-    select: { id: true },
-  });
-  const accessibleIds = new Set(accessible.map((e) => e.id));
-  for (const id of exerciseIds) {
-    if (!accessibleIds.has(id)) {
-      throw new Error('Exercise not available');
+    // Verify access for every exercise up front. If any fail, none are added.
+    // Fetching them all in one query rather than N round-trips.
+    const accessible = await db.exercise.findMany({
+      where: {
+        id: { in: exerciseIds },
+        OR: [{ ownerId: null }, { ownerId: userId }],
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    const accessibleIds = new Set(accessible.map((e) => e.id));
+    for (const id of exerciseIds) {
+      if (!accessibleIds.has(id)) {
+        throw new Error('Exercise not available');
+      }
     }
-  }
 
-  const session = await getOrCreateActiveSession(userId);
+    const session = await getOrCreateActiveSession(userId);
 
-  // Skip any exercises already in the session — preserve no-op semantics from
-  // the single-add. Stable order across the not-yet-added subset.
-  const existing = await db.setLog.findMany({
-    where: { sessionId: session.id, exerciseId: { in: exerciseIds } },
-    select: { exerciseId: true },
-    distinct: ['exerciseId'],
-  });
-  const alreadyIn = new Set(existing.map((s) => s.exerciseId));
-  const toAdd = exerciseIds.filter((id) => !alreadyIn.has(id));
-  if (toAdd.length === 0) {
+    // Skip any exercises already in the session — preserve no-op semantics from
+    // the single-add. Stable order across the not-yet-added subset.
+    const existing = await db.setLog.findMany({
+      where: { sessionId: session.id, exerciseId: { in: exerciseIds } },
+      select: { exerciseId: true },
+      distinct: ['exerciseId'],
+    });
+    const alreadyIn = new Set(existing.map((s) => s.exerciseId));
+    const toAdd = exerciseIds.filter((id) => !alreadyIn.has(id));
+    if (toAdd.length === 0) {
+      revalidatePath('/');
+      return;
+    }
+
+    const maxPos = await db.setLog.aggregate({
+      where: { sessionId: session.id },
+      _max: { position: true },
+    });
+    const startPosition = (maxPos._max.position ?? -1) + 1;
+
+    const rows = await buildSeededSetLogRows(
+      userId,
+      toAdd.map((exId, idx) => ({
+        exerciseId: exId,
+        sessionId: session.id,
+        position: startPosition + idx,
+      })),
+      session.id,
+    );
+    await db.setLog.createMany({ data: rows });
+
     revalidatePath('/');
-    return;
-  }
-
-  const maxPos = await db.setLog.aggregate({
-    where: { sessionId: session.id },
-    _max: { position: true },
-  });
-  const startPosition = (maxPos._max.position ?? -1) + 1;
-
-  const rows = await buildSeededSetLogRows(
-    userId,
-    toAdd.map((exId, idx) => ({
-      exerciseId: exId,
-      sessionId: session.id,
-      position: startPosition + idx,
-    })),
-    session.id,
-  );
-  await db.setLog.createMany({ data: rows });
-
-  revalidatePath('/');
-});
+  },
+);
 
 const RemoveExerciseSchema = z.object({ exerciseId: z.string().min(1) });
 
-export const removeExerciseFromActiveSession = withLogging('removeExerciseFromActiveSession', async (
-  input: z.infer<typeof RemoveExerciseSchema>,
-) => {
-  const userId = await requireUser();
-  const { exerciseId } = RemoveExerciseSchema.parse(input);
+export const removeExerciseFromActiveSession = withLogging(
+  'removeExerciseFromActiveSession',
+  async (input: z.infer<typeof RemoveExerciseSchema>) => {
+    const userId = await requireUser();
+    const { exerciseId } = RemoveExerciseSchema.parse(input);
 
-  const session = await findActiveSession(userId);
-  if (!session) return;
+    const session = await findActiveSession(userId);
+    if (!session) return;
 
-  await db.setLog.deleteMany({
-    where: { sessionId: session.id, exerciseId },
-  });
+    await db.setLog.deleteMany({
+      where: { sessionId: session.id, exerciseId },
+    });
 
-  // If that was the last exercise in the session, delete the session itself.
-  // Otherwise an empty session would persist and confuse "active" detection
-  // on later visits.
-  const remaining = await db.setLog.count({ where: { sessionId: session.id } });
-  if (remaining === 0) {
-    await db.workoutSession.delete({ where: { id: session.id } });
-  }
+    // If that was the last exercise in the session, delete the session itself.
+    // Otherwise an empty session would persist and confuse "active" detection
+    // on later visits.
+    const remaining = await db.setLog.count({ where: { sessionId: session.id } });
+    if (remaining === 0) {
+      await db.workoutSession.delete({ where: { id: session.id } });
+    }
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 // ============================================================
 // SET ACTIONS
@@ -337,33 +336,36 @@ const UpdateSetSchema = z.object({
   seconds: z.number().int().min(0).max(3600).nullable().optional(),
 });
 
-export const updateSet = withLogging('updateSet', async (input: z.infer<typeof UpdateSetSchema>) => {
-  const userId = await requireUser();
-  const { setLogId, reps, weight, seconds } = UpdateSetSchema.parse(input);
+export const updateSet = withLogging(
+  'updateSet',
+  async (input: z.infer<typeof UpdateSetSchema>) => {
+    const userId = await requireUser();
+    const { setLogId, reps, weight, seconds } = UpdateSetSchema.parse(input);
 
-  // Verify the set belongs to a session owned by this user
-  const setLog = await db.setLog.findUnique({
-    where: { id: setLogId },
-    include: { session: true },
-  });
-  if (!setLog || setLog.session.userId !== userId) {
-    throw new Error('Set not found');
-  }
-  if (setLog.session.completedAt) {
-    throw new Error('Cannot edit a completed session');
-  }
+    // Verify the set belongs to a session owned by this user
+    const setLog = await db.setLog.findUnique({
+      where: { id: setLogId },
+      include: { session: true },
+    });
+    if (!setLog || setLog.session.userId !== userId) {
+      throw new Error('Set not found');
+    }
+    if (setLog.session.completedAt) {
+      throw new Error('Cannot edit a completed session');
+    }
 
-  await db.setLog.update({
-    where: { id: setLogId },
-    data: {
-      ...(reps !== undefined ? { reps } : {}),
-      ...(weight !== undefined ? { weight } : {}),
-      ...(seconds !== undefined ? { seconds } : {}),
-    },
-  });
+    await db.setLog.update({
+      where: { id: setLogId },
+      data: {
+        ...(reps !== undefined ? { reps } : {}),
+        ...(weight !== undefined ? { weight } : {}),
+        ...(seconds !== undefined ? { seconds } : {}),
+      },
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const RepeatLastSchema = z.object({ exerciseId: z.string().min(1) });
 
@@ -376,123 +378,119 @@ const RepeatLastSchema = z.object({ exerciseId: z.string().min(1) });
  * No-op if the exercise has no prior history. Preserves notes on existing
  * rows that survive the snap. Renumbers atomically, like removeSet.
  */
-export const repeatLastForExercise = withLogging('repeatLastForExercise', async (
-  input: z.infer<typeof RepeatLastSchema>,
-) => {
-  const userId = await requireUser();
-  const { exerciseId } = RepeatLastSchema.parse(input);
+export const repeatLastForExercise = withLogging(
+  'repeatLastForExercise',
+  async (input: z.infer<typeof RepeatLastSchema>) => {
+    const userId = await requireUser();
+    const { exerciseId } = RepeatLastSchema.parse(input);
 
-  await requireAvailableExercise(userId, exerciseId);
-  const session = await findActiveSession(userId);
-  if (!session) throw new Error('No active session');
+    await requireAvailableExercise(userId, exerciseId);
+    const session = await findActiveSession(userId);
+    if (!session) throw new Error('No active session');
 
-  const lastByExercise = await getLastSetsForExerciseIds(
-    userId,
-    [exerciseId],
-    session.id,
-  );
-  const last = lastByExercise.get(exerciseId);
-  if (!last || last.sets.length === 0) return;
+    const lastByExercise = await getLastSetsForExerciseIds(userId, [exerciseId], session.id);
+    const last = lastByExercise.get(exerciseId);
+    if (!last || last.sets.length === 0) return;
 
-  const current = await db.setLog.findMany({
-    where: { sessionId: session.id, exerciseId },
-    orderBy: { setNumber: 'asc' },
-  });
-  if (current.length === 0) throw new Error('Exercise not in active session');
+    const current = await db.setLog.findMany({
+      where: { sessionId: session.id, exerciseId },
+      orderBy: { setNumber: 'asc' },
+    });
+    if (current.length === 0) throw new Error('Exercise not in active session');
 
-  // All current sets share the same position — preserve it for new rows.
-  const position = current[0].position;
-  const targetCount = last.sets.length;
+    // All current sets share the same position — preserve it for new rows.
+    const position = current[0].position;
+    const targetCount = last.sets.length;
 
-  await db.$transaction(async (tx) => {
-    // Drop overflow first so setNumber renumbering can't collide.
-    if (current.length > targetCount) {
-      const toDrop = current.slice(targetCount).map((s) => s.id);
-      await tx.setLog.deleteMany({ where: { id: { in: toDrop } } });
-    }
-    // Update the rows we keep, copying reps/weight/seconds from last-time.
-    const toKeep = current.slice(0, targetCount);
-    for (let i = 0; i < toKeep.length; i++) {
-      const row = toKeep[i];
-      const src = last.sets[i];
-      if (
-        row.reps !== src.reps ||
-        row.weight !== src.weight ||
-        row.seconds !== src.seconds
-      ) {
-        await tx.setLog.update({
-          where: { id: row.id },
-          data: { reps: src.reps, weight: src.weight, seconds: src.seconds },
-        });
+    await db.$transaction(async (tx) => {
+      // Drop overflow first so setNumber renumbering can't collide.
+      if (current.length > targetCount) {
+        const toDrop = current.slice(targetCount).map((s) => s.id);
+        await tx.setLog.deleteMany({ where: { id: { in: toDrop } } });
       }
-    }
-    // Create any extra sets last-time had that we don't.
-    if (current.length < targetCount) {
-      const toCreate = last.sets.slice(current.length).map((src, idx) => ({
-        sessionId: session.id,
-        exerciseId,
-        setNumber: current.length + idx + 1,
-        position,
-        reps: src.reps,
-        weight: src.weight,
-        seconds: src.seconds,
-      }));
-      await tx.setLog.createMany({ data: toCreate });
-    }
-  });
+      // Update the rows we keep, copying reps/weight/seconds from last-time.
+      const toKeep = current.slice(0, targetCount);
+      for (let i = 0; i < toKeep.length; i++) {
+        const row = toKeep[i];
+        const src = last.sets[i];
+        if (row.reps !== src.reps || row.weight !== src.weight || row.seconds !== src.seconds) {
+          await tx.setLog.update({
+            where: { id: row.id },
+            data: { reps: src.reps, weight: src.weight, seconds: src.seconds },
+          });
+        }
+      }
+      // Create any extra sets last-time had that we don't.
+      if (current.length < targetCount) {
+        const toCreate = last.sets.slice(current.length).map((src, idx) => ({
+          sessionId: session.id,
+          exerciseId,
+          setNumber: current.length + idx + 1,
+          position,
+          reps: src.reps,
+          weight: src.weight,
+          seconds: src.seconds,
+        }));
+        await tx.setLog.createMany({ data: toCreate });
+      }
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const RemoveSetSchema = z.object({ setLogId: z.string().min(1) });
 
-export const removeSet = withLogging('removeSet', async (input: z.infer<typeof RemoveSetSchema>) => {
-  const userId = await requireUser();
-  const { setLogId } = RemoveSetSchema.parse(input);
+export const removeSet = withLogging(
+  'removeSet',
+  async (input: z.infer<typeof RemoveSetSchema>) => {
+    const userId = await requireUser();
+    const { setLogId } = RemoveSetSchema.parse(input);
 
-  const setLog = await db.setLog.findUnique({
-    where: { id: setLogId },
-    include: { session: true },
-  });
-  if (!setLog || setLog.session.userId !== userId) {
-    throw new Error('Set not found');
-  }
-  if (setLog.session.completedAt) {
-    throw new Error('Cannot edit a completed session');
-  }
-
-  // Delete + renumber in one transaction. Either both happen or neither does;
-  // a partial failure mid-renumber would leave gaps in setNumber.
-  await db.$transaction(async (tx) => {
-    await tx.setLog.delete({ where: { id: setLogId } });
-
-    const remaining = await tx.setLog.findMany({
-      where: { sessionId: setLog.sessionId, exerciseId: setLog.exerciseId },
-      orderBy: { setNumber: 'asc' },
+    const setLog = await db.setLog.findUnique({
+      where: { id: setLogId },
+      include: { session: true },
     });
-    for (let i = 0; i < remaining.length; i++) {
-      const s = remaining[i];
-      if (s.setNumber !== i + 1) {
-        await tx.setLog.update({
-          where: { id: s.id },
-          data: { setNumber: i + 1 },
-        });
-      }
+    if (!setLog || setLog.session.userId !== userId) {
+      throw new Error('Set not found');
     }
-  });
+    if (setLog.session.completedAt) {
+      throw new Error('Cannot edit a completed session');
+    }
 
-  // If the session has no sets left at all, clean it up — same reason as
-  // removeExerciseFromActiveSession. Outside the transaction so the renumber
-  // is durable even if this cleanup fails.
-  const remainingInSession = await db.setLog.count({
-    where: { sessionId: setLog.sessionId },
-  });
-  if (remainingInSession === 0) {
-    await db.workoutSession.delete({ where: { id: setLog.sessionId } });
-  }
+    // Delete + renumber in one transaction. Either both happen or neither does;
+    // a partial failure mid-renumber would leave gaps in setNumber.
+    await db.$transaction(async (tx) => {
+      await tx.setLog.delete({ where: { id: setLogId } });
 
-  revalidatePath('/');
-});
+      const remaining = await tx.setLog.findMany({
+        where: { sessionId: setLog.sessionId, exerciseId: setLog.exerciseId },
+        orderBy: { setNumber: 'asc' },
+      });
+      for (let i = 0; i < remaining.length; i++) {
+        const s = remaining[i];
+        if (s.setNumber !== i + 1) {
+          await tx.setLog.update({
+            where: { id: s.id },
+            data: { setNumber: i + 1 },
+          });
+        }
+      }
+    });
+
+    // If the session has no sets left at all, clean it up — same reason as
+    // removeExerciseFromActiveSession. Outside the transaction so the renumber
+    // is durable even if this cleanup fails.
+    const remainingInSession = await db.setLog.count({
+      where: { sessionId: setLog.sessionId },
+    });
+    if (remainingInSession === 0) {
+      await db.workoutSession.delete({ where: { id: setLog.sessionId } });
+    }
+
+    revalidatePath('/');
+  },
+);
 
 // ============================================================
 // SESSION COMPLETION / ABANDON
@@ -624,45 +622,48 @@ const ReorderSchema = z.object({
  * the adjacent exercise. No-op if already at the edge (caller should hide the
  * arrow in that case anyway).
  */
-export const reorderExercise = withLogging('reorderExercise', async (input: z.infer<typeof ReorderSchema>) => {
-  const userId = await requireUser();
-  const { exerciseId, direction } = ReorderSchema.parse(input);
+export const reorderExercise = withLogging(
+  'reorderExercise',
+  async (input: z.infer<typeof ReorderSchema>) => {
+    const userId = await requireUser();
+    const { exerciseId, direction } = ReorderSchema.parse(input);
 
-  const session = await findActiveSession(userId);
-  if (!session) return;
+    const session = await findActiveSession(userId);
+    if (!session) return;
 
-  // Get distinct exercises with their positions, ordered as they appear on screen
-  const ordered = await db.setLog.findMany({
-    where: { sessionId: session.id },
-    select: { exerciseId: true, position: true },
-    distinct: ['exerciseId'],
-    orderBy: { position: 'asc' },
-  });
+    // Get distinct exercises with their positions, ordered as they appear on screen
+    const ordered = await db.setLog.findMany({
+      where: { sessionId: session.id },
+      select: { exerciseId: true, position: true },
+      distinct: ['exerciseId'],
+      orderBy: { position: 'asc' },
+    });
 
-  const myIndex = ordered.findIndex((e) => e.exerciseId === exerciseId);
-  if (myIndex === -1) return;
+    const myIndex = ordered.findIndex((e) => e.exerciseId === exerciseId);
+    if (myIndex === -1) return;
 
-  const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
-  if (neighborIndex < 0 || neighborIndex >= ordered.length) return; // edge — no-op
+    const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
+    if (neighborIndex < 0 || neighborIndex >= ordered.length) return; // edge — no-op
 
-  const me = ordered[myIndex];
-  const neighbor = ordered[neighborIndex];
+    const me = ordered[myIndex];
+    const neighbor = ordered[neighborIndex];
 
-  // Swap position values atomically. Both updateMany calls in one transaction
-  // so observers never see two exercises with the same position.
-  await db.$transaction([
-    db.setLog.updateMany({
-      where: { sessionId: session.id, exerciseId: me.exerciseId },
-      data: { position: neighbor.position },
-    }),
-    db.setLog.updateMany({
-      where: { sessionId: session.id, exerciseId: neighbor.exerciseId },
-      data: { position: me.position },
-    }),
-  ]);
+    // Swap position values atomically. Both updateMany calls in one transaction
+    // so observers never see two exercises with the same position.
+    await db.$transaction([
+      db.setLog.updateMany({
+        where: { sessionId: session.id, exerciseId: me.exerciseId },
+        data: { position: neighbor.position },
+      }),
+      db.setLog.updateMany({
+        where: { sessionId: session.id, exerciseId: neighbor.exerciseId },
+        data: { position: me.position },
+      }),
+    ]);
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 // ============================================================
 // CUSTOM EXERCISE ACTIONS
@@ -690,78 +691,80 @@ const CreateCustomExerciseSchema = z.object({
   equipment: z.array(z.string().trim().max(40)).max(20).optional(),
 });
 
-export const createCustomExercise = withLogging('createCustomExercise', async (
-  input: z.infer<typeof CreateCustomExerciseSchema>,
-) => {
-  const userId = await requireUser();
-  const {
-    name,
-    primaryMuscles,
-    secondaryMuscles,
-    prescription,
-    videoUrl,
-    restTimerSeconds,
-    metric,
-    equipment,
-  } = CreateCustomExerciseSchema.parse(input);
+export const createCustomExercise = withLogging(
+  'createCustomExercise',
+  async (input: z.infer<typeof CreateCustomExerciseSchema>) => {
+    const userId = await requireUser();
+    const {
+      name,
+      primaryMuscles,
+      secondaryMuscles,
+      prescription,
+      videoUrl,
+      restTimerSeconds,
+      metric,
+      equipment,
+    } = CreateCustomExerciseSchema.parse(input);
 
-  // Check for collision with the user's existing customs
-  const existing = await db.exercise.findFirst({
-    where: { ownerId: userId, name, deletedAt: null },
-  });
-  if (existing) {
-    throw new Error('You already have an exercise with that name');
-  }
+    // Check for collision with the user's existing customs
+    const existing = await db.exercise.findFirst({
+      where: { ownerId: userId, name, deletedAt: null },
+    });
+    if (existing) {
+      throw new Error('You already have an exercise with that name');
+    }
 
-  // Create exercise + (optionally) per-exercise settings in one transaction so
-  // a settings write failure doesn't leave the exercise without its rest override.
-  await db.$transaction(async (tx) => {
-    const created = await tx.exercise.create({
-      data: {
-        name,
-        module: 'Custom',
-        prescription: prescription || null,
-        primaryMuscles,
-        secondaryMuscles: secondaryMuscles ?? [],
-        videoUrl: videoUrl ?? null,
-        isCustom: true,
-        ownerId: userId,
-        metric: metric ?? 'reps',
-        equipment: equipment ?? [],
-      },
+    // Create exercise + (optionally) per-exercise settings in one transaction so
+    // a settings write failure doesn't leave the exercise without its rest override.
+    await db.$transaction(async (tx) => {
+      const created = await tx.exercise.create({
+        data: {
+          name,
+          module: 'Custom',
+          prescription: prescription || null,
+          primaryMuscles,
+          secondaryMuscles: secondaryMuscles ?? [],
+          videoUrl: videoUrl ?? null,
+          isCustom: true,
+          ownerId: userId,
+          metric: metric ?? 'reps',
+          equipment: equipment ?? [],
+        },
+      });
+
+      if (restTimerSeconds !== undefined) {
+        await tx.exerciseUserSettings.create({
+          data: { userId, exerciseId: created.id, restTimerSeconds },
+        });
+      }
     });
 
-    if (restTimerSeconds !== undefined) {
-      await tx.exerciseUserSettings.create({
-        data: { userId, exerciseId: created.id, restTimerSeconds },
-      });
-    }
-  });
-
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const DeleteCustomExerciseSchema = z.object({ exerciseId: z.string().min(1) });
 
-export const deleteCustomExercise = withLogging('deleteCustomExercise', async (
-  input: z.infer<typeof DeleteCustomExerciseSchema>,
-) => {
-  const userId = await requireUser();
-  const { exerciseId } = DeleteCustomExerciseSchema.parse(input);
+export const deleteCustomExercise = withLogging(
+  'deleteCustomExercise',
+  async (input: z.infer<typeof DeleteCustomExerciseSchema>) => {
+    const userId = await requireUser();
+    const { exerciseId } = DeleteCustomExerciseSchema.parse(input);
 
-  // Soft-delete only — preserves historical SetLogs that reference this exercise
-  const exercise = await db.exercise.findFirst({
-    where: { id: exerciseId, ownerId: userId },
-  });
-  if (!exercise) throw new Error('Exercise not found');
+    // Soft-delete only — preserves historical SetLogs that reference this exercise
+    const exercise = await db.exercise.findFirst({
+      where: { id: exerciseId, ownerId: userId },
+    });
+    if (!exercise) throw new Error('Exercise not found');
 
-  await db.exercise.update({
-    where: { id: exerciseId },
-    data: { deletedAt: new Date() },
-  });
+    await db.exercise.update({
+      where: { id: exerciseId },
+      data: { deletedAt: new Date() },
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 // ============================================================
 // VOLUME TARGET SETTINGS
@@ -772,31 +775,37 @@ const SetVolumeTargetSchema = z.object({
   target: z.number().int().min(0).max(50),
 });
 
-export const setVolumeTarget = withLogging('setVolumeTarget', async (input: z.infer<typeof SetVolumeTargetSchema>) => {
-  const userId = await requireUser();
-  const { muscleId, target } = SetVolumeTargetSchema.parse(input);
+export const setVolumeTarget = withLogging(
+  'setVolumeTarget',
+  async (input: z.infer<typeof SetVolumeTargetSchema>) => {
+    const userId = await requireUser();
+    const { muscleId, target } = SetVolumeTargetSchema.parse(input);
 
-  await db.userVolumeTarget.upsert({
-    where: { userId_muscleId: { userId, muscleId } },
-    create: { userId, muscleId, target },
-    update: { target },
-  });
+    await db.userVolumeTarget.upsert({
+      where: { userId_muscleId: { userId, muscleId } },
+      create: { userId, muscleId, target },
+      update: { target },
+    });
 
-  revalidatePath('/coverage');
-  revalidatePath('/settings');
-});
+    revalidatePath('/coverage');
+    revalidatePath('/settings');
+  },
+);
 
 const ResetVolumeTargetSchema = z.object({ muscleId: z.string().min(1) });
 
-export const resetVolumeTarget = withLogging('resetVolumeTarget', async (input: z.infer<typeof ResetVolumeTargetSchema>) => {
-  const userId = await requireUser();
-  const { muscleId } = ResetVolumeTargetSchema.parse(input);
+export const resetVolumeTarget = withLogging(
+  'resetVolumeTarget',
+  async (input: z.infer<typeof ResetVolumeTargetSchema>) => {
+    const userId = await requireUser();
+    const { muscleId } = ResetVolumeTargetSchema.parse(input);
 
-  await db.userVolumeTarget.deleteMany({ where: { userId, muscleId } });
+    await db.userVolumeTarget.deleteMany({ where: { userId, muscleId } });
 
-  revalidatePath('/coverage');
-  revalidatePath('/settings');
-});
+    revalidatePath('/coverage');
+    revalidatePath('/settings');
+  },
+);
 
 // ============================================================
 // USER PREFERENCES
@@ -815,21 +824,22 @@ const UpdatePreferencesSchema = z.object({
  * Partial update to user preferences. Lazily creates the preferences row on
  * first call. Only fields included in `input` are changed.
  */
-export const updateUserPreferences = withLogging('updateUserPreferences', async (
-  input: z.infer<typeof UpdatePreferencesSchema>,
-) => {
-  const userId = await requireUser();
-  const data = UpdatePreferencesSchema.parse(input);
+export const updateUserPreferences = withLogging(
+  'updateUserPreferences',
+  async (input: z.infer<typeof UpdatePreferencesSchema>) => {
+    const userId = await requireUser();
+    const data = UpdatePreferencesSchema.parse(input);
 
-  await db.userPreferences.upsert({
-    where: { userId },
-    create: { userId, ...data },
-    update: data,
-  });
+    await db.userPreferences.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
+    });
 
-  revalidatePath('/');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/settings');
+  },
+);
 
 // ============================================================
 // PER-EXERCISE SETTINGS
@@ -846,49 +856,50 @@ const SetExerciseRestOverrideSchema = z.object({
  * Works for both built-in and custom exercises. Verifies the user can see the
  * exercise (own custom OR built-in) before writing.
  */
-export const setExerciseRestOverride = withLogging('setExerciseRestOverride', async (
-  input: z.infer<typeof SetExerciseRestOverrideSchema>,
-) => {
-  const userId = await requireUser();
-  const { exerciseId, restTimerSeconds } = SetExerciseRestOverrideSchema.parse(input);
+export const setExerciseRestOverride = withLogging(
+  'setExerciseRestOverride',
+  async (input: z.infer<typeof SetExerciseRestOverrideSchema>) => {
+    const userId = await requireUser();
+    const { exerciseId, restTimerSeconds } = SetExerciseRestOverrideSchema.parse(input);
 
-  // Make sure this exercise is one the user can configure (built-in or their own)
-  const exercise = await db.exercise.findFirst({
-    where: {
-      id: exerciseId,
-      OR: [{ ownerId: null }, { ownerId: userId }],
-      deletedAt: null,
-    },
-    select: { id: true },
-  });
-  if (!exercise) throw new Error('Exercise not found');
-
-  if (restTimerSeconds === null) {
-    // Clearing — but only this field. If a weight-increment override exists
-    // we keep the row; otherwise we drop it so we don't leave empty settings
-    // rows lying around.
-    const existing = await db.exerciseUserSettings.findUnique({
-      where: { userId_exerciseId: { userId, exerciseId } },
-      select: { weightIncrement: true },
+    // Make sure this exercise is one the user can configure (built-in or their own)
+    const exercise = await db.exercise.findFirst({
+      where: {
+        id: exerciseId,
+        OR: [{ ownerId: null }, { ownerId: userId }],
+        deletedAt: null,
+      },
+      select: { id: true },
     });
-    if (existing && existing.weightIncrement !== null) {
-      await db.exerciseUserSettings.update({
+    if (!exercise) throw new Error('Exercise not found');
+
+    if (restTimerSeconds === null) {
+      // Clearing — but only this field. If a weight-increment override exists
+      // we keep the row; otherwise we drop it so we don't leave empty settings
+      // rows lying around.
+      const existing = await db.exerciseUserSettings.findUnique({
         where: { userId_exerciseId: { userId, exerciseId } },
-        data: { restTimerSeconds: null },
+        select: { weightIncrement: true },
       });
+      if (existing && existing.weightIncrement !== null) {
+        await db.exerciseUserSettings.update({
+          where: { userId_exerciseId: { userId, exerciseId } },
+          data: { restTimerSeconds: null },
+        });
+      } else {
+        await db.exerciseUserSettings.deleteMany({ where: { userId, exerciseId } });
+      }
     } else {
-      await db.exerciseUserSettings.deleteMany({ where: { userId, exerciseId } });
+      await db.exerciseUserSettings.upsert({
+        where: { userId_exerciseId: { userId, exerciseId } },
+        create: { userId, exerciseId, restTimerSeconds },
+        update: { restTimerSeconds },
+      });
     }
-  } else {
-    await db.exerciseUserSettings.upsert({
-      where: { userId_exerciseId: { userId, exerciseId } },
-      create: { userId, exerciseId, restTimerSeconds },
-      update: { restTimerSeconds },
-    });
-  }
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const SetExerciseWeightIncrementSchema = z.object({
   exerciseId: z.string().min(1),
@@ -901,45 +912,46 @@ const SetExerciseWeightIncrementSchema = z.object({
  * Mirrors setExerciseRestOverride. The +/- buttons next to the weight input
  * use the override when present, otherwise the user's global default.
  */
-export const setExerciseWeightIncrement = withLogging('setExerciseWeightIncrement', async (
-  input: z.infer<typeof SetExerciseWeightIncrementSchema>,
-) => {
-  const userId = await requireUser();
-  const { exerciseId, weightIncrement } = SetExerciseWeightIncrementSchema.parse(input);
+export const setExerciseWeightIncrement = withLogging(
+  'setExerciseWeightIncrement',
+  async (input: z.infer<typeof SetExerciseWeightIncrementSchema>) => {
+    const userId = await requireUser();
+    const { exerciseId, weightIncrement } = SetExerciseWeightIncrementSchema.parse(input);
 
-  const exercise = await db.exercise.findFirst({
-    where: {
-      id: exerciseId,
-      OR: [{ ownerId: null }, { ownerId: userId }],
-      deletedAt: null,
-    },
-    select: { id: true },
-  });
-  if (!exercise) throw new Error('Exercise not found');
-
-  if (weightIncrement === null) {
-    const existing = await db.exerciseUserSettings.findUnique({
-      where: { userId_exerciseId: { userId, exerciseId } },
-      select: { restTimerSeconds: true },
+    const exercise = await db.exercise.findFirst({
+      where: {
+        id: exerciseId,
+        OR: [{ ownerId: null }, { ownerId: userId }],
+        deletedAt: null,
+      },
+      select: { id: true },
     });
-    if (existing && existing.restTimerSeconds !== null) {
-      await db.exerciseUserSettings.update({
+    if (!exercise) throw new Error('Exercise not found');
+
+    if (weightIncrement === null) {
+      const existing = await db.exerciseUserSettings.findUnique({
         where: { userId_exerciseId: { userId, exerciseId } },
-        data: { weightIncrement: null },
+        select: { restTimerSeconds: true },
       });
+      if (existing && existing.restTimerSeconds !== null) {
+        await db.exerciseUserSettings.update({
+          where: { userId_exerciseId: { userId, exerciseId } },
+          data: { weightIncrement: null },
+        });
+      } else {
+        await db.exerciseUserSettings.deleteMany({ where: { userId, exerciseId } });
+      }
     } else {
-      await db.exerciseUserSettings.deleteMany({ where: { userId, exerciseId } });
+      await db.exerciseUserSettings.upsert({
+        where: { userId_exerciseId: { userId, exerciseId } },
+        create: { userId, exerciseId, weightIncrement },
+        update: { weightIncrement },
+      });
     }
-  } else {
-    await db.exerciseUserSettings.upsert({
-      where: { userId_exerciseId: { userId, exerciseId } },
-      create: { userId, exerciseId, weightIncrement },
-      update: { weightIncrement },
-    });
-  }
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 // ============================================================
 // SET NOTES
@@ -957,25 +969,28 @@ const UpdateSetNotesSchema = z.object({
  * Notes are visible the next time you encounter the exercise via the
  * "last time" reference.
  */
-export const updateSetNotes = withLogging('updateSetNotes', async (input: z.infer<typeof UpdateSetNotesSchema>) => {
-  const userId = await requireUser();
-  const { setLogId, notes } = UpdateSetNotesSchema.parse(input);
+export const updateSetNotes = withLogging(
+  'updateSetNotes',
+  async (input: z.infer<typeof UpdateSetNotesSchema>) => {
+    const userId = await requireUser();
+    const { setLogId, notes } = UpdateSetNotesSchema.parse(input);
 
-  // Ownership check — set must belong to a session owned by the user
-  const setLog = await db.setLog.findFirst({
-    where: { id: setLogId, session: { userId } },
-    select: { id: true },
-  });
-  if (!setLog) throw new Error('Set not found');
+    // Ownership check — set must belong to a session owned by the user
+    const setLog = await db.setLog.findFirst({
+      where: { id: setLogId, session: { userId } },
+      select: { id: true },
+    });
+    if (!setLog) throw new Error('Set not found');
 
-  const trimmed = notes.trim();
-  await db.setLog.update({
-    where: { id: setLogId },
-    data: { notes: trimmed.length > 0 ? trimmed : null },
-  });
+    const trimmed = notes.trim();
+    await db.setLog.update({
+      where: { id: setLogId },
+      data: { notes: trimmed.length > 0 ? trimmed : null },
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 // ============================================================
 // WORKOUT TEMPLATES
@@ -992,56 +1007,57 @@ const SaveActiveAsTemplateSchema = z.object({
  * weights/reps. The name is unique per user, and we throw a friendly error if
  * the user already has a template by that name.
  */
-export const saveActiveAsTemplate = withLogging('saveActiveAsTemplate', async (
-  input: z.infer<typeof SaveActiveAsTemplateSchema>,
-) => {
-  const userId = await requireUser();
-  const { name, description } = SaveActiveAsTemplateSchema.parse(input);
+export const saveActiveAsTemplate = withLogging(
+  'saveActiveAsTemplate',
+  async (input: z.infer<typeof SaveActiveAsTemplateSchema>) => {
+    const userId = await requireUser();
+    const { name, description } = SaveActiveAsTemplateSchema.parse(input);
 
-  const session = await findActiveSession(userId);
-  if (!session) throw new Error('No active session to save');
+    const session = await findActiveSession(userId);
+    if (!session) throw new Error('No active session to save');
 
-  // Distinct exercises in order (same logic as workout view)
-  const sets = await db.setLog.findMany({
-    where: { sessionId: session.id },
-    select: { exerciseId: true, position: true },
-    distinct: ['exerciseId'],
-    orderBy: { position: 'asc' },
-  });
-  if (sets.length === 0) {
-    throw new Error('Add at least one exercise before saving as a template');
-  }
+    // Distinct exercises in order (same logic as workout view)
+    const sets = await db.setLog.findMany({
+      where: { sessionId: session.id },
+      select: { exerciseId: true, position: true },
+      distinct: ['exerciseId'],
+      orderBy: { position: 'asc' },
+    });
+    if (sets.length === 0) {
+      throw new Error('Add at least one exercise before saving as a template');
+    }
 
-  // Friendly error on name collision against the user's own templates. We
-  // intentionally don't check against built-ins — Postgres treats (null, name)
-  // and (userId, name) as distinct, and surfacing "you already have a template
-  // by that name" when the conflict is with a built-in would be confusing.
-  // The user can rename or hide the built-in if they want to.
-  const collision = await db.workoutTemplate.findFirst({
-    where: { userId, name },
-    select: { id: true },
-  });
-  if (collision) {
-    throw new Error('You already have a template by that name');
-  }
+    // Friendly error on name collision against the user's own templates. We
+    // intentionally don't check against built-ins — Postgres treats (null, name)
+    // and (userId, name) as distinct, and surfacing "you already have a template
+    // by that name" when the conflict is with a built-in would be confusing.
+    // The user can rename or hide the built-in if they want to.
+    const collision = await db.workoutTemplate.findFirst({
+      where: { userId, name },
+      select: { id: true },
+    });
+    if (collision) {
+      throw new Error('You already have a template by that name');
+    }
 
-  await db.workoutTemplate.create({
-    data: {
-      userId,
-      isBuiltin: false,
-      name,
-      description: description || null,
-      exercises: {
-        create: sets.map((s, idx) => ({
-          exerciseId: s.exerciseId,
-          position: idx,
-        })),
+    await db.workoutTemplate.create({
+      data: {
+        userId,
+        isBuiltin: false,
+        name,
+        description: description || null,
+        exercises: {
+          create: sets.map((s, idx) => ({
+            exerciseId: s.exerciseId,
+            position: idx,
+          })),
+        },
       },
-    },
-  });
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const StartFromTemplateSchema = z.object({ templateId: z.string().min(1) });
 
@@ -1054,89 +1070,90 @@ const StartFromTemplateSchema = z.object({ templateId: z.string().min(1) });
  * If the template references exercises the user no longer has access to (own
  * custom soft-deleted, or somehow removed), those entries are silently skipped.
  */
-export const startFromTemplate = withLogging('startFromTemplate', async (input: z.infer<typeof StartFromTemplateSchema>) => {
-  const userId = await requireUser();
-  const { templateId } = StartFromTemplateSchema.parse(input);
+export const startFromTemplate = withLogging(
+  'startFromTemplate',
+  async (input: z.infer<typeof StartFromTemplateSchema>) => {
+    const userId = await requireUser();
+    const { templateId } = StartFromTemplateSchema.parse(input);
 
-  // Block if there's already an active session
-  const existing = await findActiveSession(userId);
-  if (existing) {
-    throw new Error(
-      'You already have a workout in progress. Complete or discard it first.',
-    );
-  }
+    // Block if there's already an active session
+    const existing = await findActiveSession(userId);
+    if (existing) {
+      throw new Error('You already have a workout in progress. Complete or discard it first.');
+    }
 
-  // Load the template — either the user's own, or a built-in that they
-  // haven't hidden. Built-ins (userId = null, isBuiltin = true) are reachable
-  // by anyone unless they've added a UserHiddenTemplate row for it.
-  const template = await db.workoutTemplate.findFirst({
-    where: {
-      id: templateId,
-      OR: [
-        { userId },
+    // Load the template — either the user's own, or a built-in that they
+    // haven't hidden. Built-ins (userId = null, isBuiltin = true) are reachable
+    // by anyone unless they've added a UserHiddenTemplate row for it.
+    const template = await db.workoutTemplate.findFirst({
+      where: {
+        id: templateId,
+        OR: [
+          { userId },
+          {
+            userId: null,
+            isBuiltin: true,
+            hiddenBy: { none: { userId } },
+          },
+        ],
+      },
+      include: {
+        exercises: {
+          orderBy: { position: 'asc' },
+          include: {
+            exercise: { select: { id: true, deletedAt: true, ownerId: true } },
+          },
+        },
+      },
+    });
+    if (!template) throw new Error('Template not found');
+
+    // Filter to exercises the user can still use
+    const usable = template.exercises.filter((te) => {
+      const ex = te.exercise;
+      if (ex.deletedAt !== null) return false;
+      if (ex.ownerId !== null && ex.ownerId !== userId) return false;
+      return true;
+    });
+    if (usable.length === 0) {
+      throw new Error('This template no longer has any usable exercises');
+    }
+
+    // Create the session, then seed SetLogs from history + prefs. The seed step
+    // runs after the session create commits because buildSeededSetLogRows needs
+    // a fixed sessionId and reads from completed sessions (which it must not
+    // see this brand-new in-progress one — the excludeSessionId param guards it,
+    // but separating the writes also keeps the read-then-write logic outside the
+    // transaction, where the additional queries don't extend transaction time.)
+    const newSession = await db.workoutSession.create({
+      data: { userId, date: new Date() },
+    });
+    const hints = new Map(
+      usable.map((te) => [
+        te.exerciseId,
         {
-          userId: null,
-          isBuiltin: true,
-          hiddenBy: { none: { userId } },
+          plannedSets: te.plannedSets,
+          plannedReps: te.plannedReps,
+          plannedSeconds: te.plannedSeconds,
         },
-      ],
-    },
-    include: {
-      exercises: {
-        orderBy: { position: 'asc' },
-        include: {
-          exercise: { select: { id: true, deletedAt: true, ownerId: true } },
-        },
-      },
-    },
-  });
-  if (!template) throw new Error('Template not found');
+      ]),
+    );
+    const rows = await buildSeededSetLogRows(
+      userId,
+      usable.map((te, idx) => ({
+        exerciseId: te.exerciseId,
+        sessionId: newSession.id,
+        position: idx,
+      })),
+      newSession.id,
+      hints,
+    );
+    await db.setLog.createMany({ data: rows });
 
-  // Filter to exercises the user can still use
-  const usable = template.exercises.filter((te) => {
-    const ex = te.exercise;
-    if (ex.deletedAt !== null) return false;
-    if (ex.ownerId !== null && ex.ownerId !== userId) return false;
-    return true;
-  });
-  if (usable.length === 0) {
-    throw new Error('This template no longer has any usable exercises');
-  }
-
-  // Create the session, then seed SetLogs from history + prefs. The seed step
-  // runs after the session create commits because buildSeededSetLogRows needs
-  // a fixed sessionId and reads from completed sessions (which it must not
-  // see this brand-new in-progress one — the excludeSessionId param guards it,
-  // but separating the writes also keeps the read-then-write logic outside the
-  // transaction, where the additional queries don't extend transaction time.)
-  const newSession = await db.workoutSession.create({
-    data: { userId, date: new Date() },
-  });
-  const hints = new Map(
-    usable.map((te) => [
-      te.exerciseId,
-      {
-        plannedSets: te.plannedSets,
-        plannedReps: te.plannedReps,
-        plannedSeconds: te.plannedSeconds,
-      },
-    ]),
-  );
-  const rows = await buildSeededSetLogRows(
-    userId,
-    usable.map((te, idx) => ({
-      exerciseId: te.exerciseId,
-      sessionId: newSession.id,
-      position: idx,
-    })),
-    newSession.id,
-    hints,
-  );
-  await db.setLog.createMany({ data: rows });
-
-  metrics.templatesUsed.inc();
-  revalidatePath('/');
-});
+    metrics.templatesUsed.inc();
+    revalidatePath('/');
+  },
+);
 
 const DeleteTemplateSchema = z.object({ templateId: z.string().min(1) });
 
@@ -1145,36 +1162,37 @@ const DeleteTemplateSchema = z.object({ templateId: z.string().min(1) });
  * for those. Scope-by-userId acts as the ownership check; if the templateId
  * is a built-in the deleteMany is a no-op (built-in userId is null).
  */
-export const deleteTemplate = withLogging('deleteTemplate', async (input: z.infer<typeof DeleteTemplateSchema>) => {
-  const userId = await requireUser();
-  const { templateId } = DeleteTemplateSchema.parse(input);
+export const deleteTemplate = withLogging(
+  'deleteTemplate',
+  async (input: z.infer<typeof DeleteTemplateSchema>) => {
+    const userId = await requireUser();
+    const { templateId } = DeleteTemplateSchema.parse(input);
 
-  // Pre-check so we can return a meaningful error if the user tries to delete
-  // a built-in. The deleteMany below would silently do nothing without this.
-  const template = await db.workoutTemplate.findUnique({
-    where: { id: templateId },
-    select: { userId: true, isBuiltin: true },
-  });
-  if (template?.isBuiltin) {
-    throw new Error('Built-in templates can be hidden but not deleted');
-  }
+    // Pre-check so we can return a meaningful error if the user tries to delete
+    // a built-in. The deleteMany below would silently do nothing without this.
+    const template = await db.workoutTemplate.findUnique({
+      where: { id: templateId },
+      select: { userId: true, isBuiltin: true },
+    });
+    if (template?.isBuiltin) {
+      throw new Error('Built-in templates can be hidden but not deleted');
+    }
 
-  // Refuse if the template is referenced by a routine day. Cascade would
-  // silently drop the day (and its pending swaps), and a user who can't
-  // see the connection would be surprised. Make them remove the day first.
-  const routineUse = await db.routineDay.count({
-    where: { templateId, routine: { userId } },
-  });
-  if (routineUse > 0) {
-    throw new Error(
-      "This template is used in your routine. Remove it from the routine first.",
-    );
-  }
+    // Refuse if the template is referenced by a routine day. Cascade would
+    // silently drop the day (and its pending swaps), and a user who can't
+    // see the connection would be surprised. Make them remove the day first.
+    const routineUse = await db.routineDay.count({
+      where: { templateId, routine: { userId } },
+    });
+    if (routineUse > 0) {
+      throw new Error('This template is used in your routine. Remove it from the routine first.');
+    }
 
-  await db.workoutTemplate.deleteMany({ where: { id: templateId, userId } });
+    await db.workoutTemplate.deleteMany({ where: { id: templateId, userId } });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const HideTemplateSchema = z.object({ templateId: z.string().min(1) });
 
@@ -1183,40 +1201,46 @@ const HideTemplateSchema = z.object({ templateId: z.string().min(1) });
  * template is the user's own (only built-ins are hideable) or already hidden.
  * Idempotent.
  */
-export const hideTemplate = withLogging('hideTemplate', async (input: z.infer<typeof HideTemplateSchema>) => {
-  const userId = await requireUser();
-  const { templateId } = HideTemplateSchema.parse(input);
+export const hideTemplate = withLogging(
+  'hideTemplate',
+  async (input: z.infer<typeof HideTemplateSchema>) => {
+    const userId = await requireUser();
+    const { templateId } = HideTemplateSchema.parse(input);
 
-  const template = await db.workoutTemplate.findUnique({
-    where: { id: templateId },
-    select: { isBuiltin: true },
-  });
-  if (!template?.isBuiltin) {
-    throw new Error('Only built-in templates can be hidden');
-  }
+    const template = await db.workoutTemplate.findUnique({
+      where: { id: templateId },
+      select: { isBuiltin: true },
+    });
+    if (!template?.isBuiltin) {
+      throw new Error('Only built-in templates can be hidden');
+    }
 
-  // upsert pattern via createMany skipDuplicates — cleanly idempotent without
-  // a select-then-insert race window.
-  await db.userHiddenTemplate.createMany({
-    data: [{ userId, templateId }],
-    skipDuplicates: true,
-  });
+    // upsert pattern via createMany skipDuplicates — cleanly idempotent without
+    // a select-then-insert race window.
+    await db.userHiddenTemplate.createMany({
+      data: [{ userId, templateId }],
+      skipDuplicates: true,
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const UnhideTemplateSchema = z.object({ templateId: z.string().min(1) });
 
-export const unhideTemplate = withLogging('unhideTemplate', async (input: z.infer<typeof UnhideTemplateSchema>) => {
-  const userId = await requireUser();
-  const { templateId } = UnhideTemplateSchema.parse(input);
+export const unhideTemplate = withLogging(
+  'unhideTemplate',
+  async (input: z.infer<typeof UnhideTemplateSchema>) => {
+    const userId = await requireUser();
+    const { templateId } = UnhideTemplateSchema.parse(input);
 
-  await db.userHiddenTemplate.deleteMany({
-    where: { userId, templateId },
-  });
+    await db.userHiddenTemplate.deleteMany({
+      where: { userId, templateId },
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 // ============================================================
 // ROUTINES
@@ -1233,21 +1257,6 @@ export const unhideTemplate = withLogging('unhideTemplate', async (input: z.infe
 const ScheduleStyleSchema = z.enum(['sequence', 'weekday']);
 
 type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
-
-async function requireUserTemplate(userId: string, templateId: string) {
-  // Ownership-or-built-in check. Built-ins (userId null) are reachable to
-  // everyone unless hidden, but for routine purposes we don't filter hidden —
-  // the user explicitly selected the template, hidden status is about list
-  // surfacing.
-  const template = await db.workoutTemplate.findFirst({
-    where: {
-      id: templateId,
-      OR: [{ userId }, { userId: null, isBuiltin: true }],
-    },
-  });
-  if (!template) throw new Error('Template not found');
-  return template;
-}
 
 /**
  * Pick a name for a new template that won't collide with the user's existing
@@ -1394,30 +1403,31 @@ const CreateRoutineSchema = z.object({
  * constraint on userId would block the insert anyway; the explicit check
  * surfaces a friendlier message.
  */
-export const createRoutine = withLogging('createRoutine', async (
-  input: z.infer<typeof CreateRoutineSchema>,
-) => {
-  const userId = await requireUser();
-  const { name, description, scheduleStyle } = CreateRoutineSchema.parse(input);
+export const createRoutine = withLogging(
+  'createRoutine',
+  async (input: z.infer<typeof CreateRoutineSchema>) => {
+    const userId = await requireUser();
+    const { name, description, scheduleStyle } = CreateRoutineSchema.parse(input);
 
-  const existing = await db.routine.findUnique({ where: { userId } });
-  if (existing) {
-    throw new Error('You already have a routine. Edit it instead of creating a new one.');
-  }
+    const existing = await db.routine.findUnique({ where: { userId } });
+    if (existing) {
+      throw new Error('You already have a routine. Edit it instead of creating a new one.');
+    }
 
-  await db.routine.create({
-    data: {
-      userId,
-      name: name || 'My routine',
-      description: description || null,
-      scheduleStyle,
-    },
-  });
+    await db.routine.create({
+      data: {
+        userId,
+        name: name || 'My routine',
+        description: description || null,
+        scheduleStyle,
+      },
+    });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 const UpdateRoutineSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -1434,47 +1444,46 @@ const UpdateRoutineSchema = z.object({
  *     re-switch starts clean. lastCompletedPosition stays null until the
  *     user completes a routine session.
  */
-export const updateRoutine = withLogging('updateRoutine', async (
-  input: z.infer<typeof UpdateRoutineSchema>,
-) => {
-  const userId = await requireUser();
-  const data = UpdateRoutineSchema.parse(input);
+export const updateRoutine = withLogging(
+  'updateRoutine',
+  async (input: z.infer<typeof UpdateRoutineSchema>) => {
+    const userId = await requireUser();
+    const data = UpdateRoutineSchema.parse(input);
 
-  const routine = await db.routine.findUnique({ where: { userId } });
-  if (!routine) throw new Error('No routine to update');
+    const routine = await db.routine.findUnique({ where: { userId } });
+    if (!routine) throw new Error('No routine to update');
 
-  await db.$transaction(async (tx) => {
-    if (data.scheduleStyle && data.scheduleStyle !== routine.scheduleStyle) {
-      // Mode change: clear weekday pins; cursor reset is handled below in the
-      // routine update. Switching from weekday → sequence keeps days in their
-      // current `position` order; sequence → weekday leaves them unpinned for
-      // the user to assign.
-      await tx.routineDay.updateMany({
-        where: { routineId: routine.id },
-        data: { weekday: null },
+    await db.$transaction(async (tx) => {
+      if (data.scheduleStyle && data.scheduleStyle !== routine.scheduleStyle) {
+        // Mode change: clear weekday pins; cursor reset is handled below in the
+        // routine update. Switching from weekday → sequence keeps days in their
+        // current `position` order; sequence → weekday leaves them unpinned for
+        // the user to assign.
+        await tx.routineDay.updateMany({
+          where: { routineId: routine.id },
+          data: { weekday: null },
+        });
+      }
+      await tx.routine.update({
+        where: { id: routine.id },
+        data: {
+          ...(data.name !== undefined ? { name: data.name } : {}),
+          ...(data.description !== undefined ? { description: data.description || null } : {}),
+          ...(data.scheduleStyle !== undefined
+            ? {
+                scheduleStyle: data.scheduleStyle,
+                lastCompletedPosition: null,
+              }
+            : {}),
+        },
       });
-    }
-    await tx.routine.update({
-      where: { id: routine.id },
-      data: {
-        ...(data.name !== undefined ? { name: data.name } : {}),
-        ...(data.description !== undefined
-          ? { description: data.description || null }
-          : {}),
-        ...(data.scheduleStyle !== undefined
-          ? {
-              scheduleStyle: data.scheduleStyle,
-              lastCompletedPosition: null,
-            }
-          : {}),
-      },
     });
-  });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 /**
  * Delete the user's routine and all the per-day templates it owns. The
@@ -1530,77 +1539,77 @@ const AddRoutineDaySchema = z
  * pre-check for a friendly error. For sequence mode, weekday is silently
  * ignored (stored as null even if provided).
  */
-export const addRoutineDay = withLogging('addRoutineDay', async (
-  input: z.infer<typeof AddRoutineDaySchema>,
-) => {
-  const userId = await requireUser();
-  const { seedTemplateId, exerciseIds, name, label, weekday } =
-    AddRoutineDaySchema.parse(input);
+export const addRoutineDay = withLogging(
+  'addRoutineDay',
+  async (input: z.infer<typeof AddRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { seedTemplateId, exerciseIds, name, label, weekday } = AddRoutineDaySchema.parse(input);
 
-  const routine = await db.routine.findUnique({
-    where: { userId },
-    include: { _count: { select: { days: true } } },
-  });
-  if (!routine) throw new Error('No routine — create one first');
-
-  if (routine._count.days >= MAX_ROUTINE_DAYS) {
-    throw new Error(`A routine can have at most ${MAX_ROUTINE_DAYS} days.`);
-  }
-
-  const effectiveWeekday =
-    routine.scheduleStyle === 'weekday' && weekday != null ? weekday : null;
-  if (effectiveWeekday !== null) {
-    const collision = await db.routineDay.findFirst({
-      where: { routineId: routine.id, weekday: effectiveWeekday },
-      select: { id: true },
+    const routine = await db.routine.findUnique({
+      where: { userId },
+      include: { _count: { select: { days: true } } },
     });
-    if (collision) {
-      throw new Error('That weekday is already taken in your routine.');
+    if (!routine) throw new Error('No routine — create one first');
+
+    if (routine._count.days >= MAX_ROUTINE_DAYS) {
+      throw new Error(`A routine can have at most ${MAX_ROUTINE_DAYS} days.`);
     }
-  }
 
-  const fallbackName =
-    name ||
-    (effectiveWeekday !== null
-      ? WEEKDAY_LONG[effectiveWeekday]
-      : `Day ${routine._count.days + 1}`);
-
-  await db.$transaction(async (tx) => {
-    // If a seed was given, look up its name once so the clone inherits it
-    // (overridable by the explicit `name` arg).
-    let templateBaseName = name || fallbackName;
-    if (!name && seedTemplateId) {
-      const seed = await tx.workoutTemplate.findFirst({
-        where: { id: seedTemplateId },
-        select: { name: true },
+    const effectiveWeekday =
+      routine.scheduleStyle === 'weekday' && weekday != null ? weekday : null;
+    if (effectiveWeekday !== null) {
+      const collision = await db.routineDay.findFirst({
+        where: { routineId: routine.id, weekday: effectiveWeekday },
+        select: { id: true },
       });
-      if (seed) templateBaseName = seed.name;
+      if (collision) {
+        throw new Error('That weekday is already taken in your routine.');
+      }
     }
 
-    const templateId = seedTemplateId
-      ? await cloneTemplateForUser(tx, userId, seedTemplateId, templateBaseName)
-      : await freshTemplateForUser(
-          tx,
-          userId,
-          templateBaseName,
-          (exerciseIds ?? []).map((id) => ({ exerciseId: id })),
-        );
+    const fallbackName =
+      name ||
+      (effectiveWeekday !== null
+        ? WEEKDAY_LONG[effectiveWeekday]
+        : `Day ${routine._count.days + 1}`);
 
-    await tx.routineDay.create({
-      data: {
-        routineId: routine.id,
-        templateId,
-        position: routine._count.days,
-        weekday: effectiveWeekday,
-        label: label || null,
-      },
+    await db.$transaction(async (tx) => {
+      // If a seed was given, look up its name once so the clone inherits it
+      // (overridable by the explicit `name` arg).
+      let templateBaseName = name || fallbackName;
+      if (!name && seedTemplateId) {
+        const seed = await tx.workoutTemplate.findFirst({
+          where: { id: seedTemplateId },
+          select: { name: true },
+        });
+        if (seed) templateBaseName = seed.name;
+      }
+
+      const templateId = seedTemplateId
+        ? await cloneTemplateForUser(tx, userId, seedTemplateId, templateBaseName)
+        : await freshTemplateForUser(
+            tx,
+            userId,
+            templateBaseName,
+            (exerciseIds ?? []).map((id) => ({ exerciseId: id })),
+          );
+
+      await tx.routineDay.create({
+        data: {
+          routineId: routine.id,
+          templateId,
+          position: routine._count.days,
+          weekday: effectiveWeekday,
+          label: label || null,
+        },
+      });
     });
-  });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 const WEEKDAY_LONG = [
   'Sunday',
@@ -1633,66 +1642,67 @@ const UpdateRoutineDaySchema = z.object({
     .optional(),
 });
 
-export const updateRoutineDay = withLogging('updateRoutineDay', async (
-  input: z.infer<typeof UpdateRoutineDaySchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId, label, weekday, name, description } = UpdateRoutineDaySchema.parse(input);
+export const updateRoutineDay = withLogging(
+  'updateRoutineDay',
+  async (input: z.infer<typeof UpdateRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, label, weekday, name, description } = UpdateRoutineDaySchema.parse(input);
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    include: { routine: { select: { id: true, scheduleStyle: true } } },
-  });
-  if (!day) throw new Error('Routine day not found');
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      include: { routine: { select: { id: true, scheduleStyle: true } } },
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  // Weekday update only meaningful in weekday mode; ignore in sequence mode
-  // so a stale client can't introduce inconsistent state.
-  let effectiveWeekday: number | null | undefined = undefined;
-  if (weekday !== undefined) {
-    if (day.routine.scheduleStyle !== 'weekday') {
-      effectiveWeekday = null;
-    } else if (weekday !== null) {
-      const collision = await db.routineDay.findFirst({
-        where: {
-          routineId: day.routine.id,
-          weekday: weekday,
-          NOT: { id: routineDayId },
-        },
-        select: { id: true },
-      });
-      if (collision) {
-        throw new Error('That weekday is already taken in your routine.');
+    // Weekday update only meaningful in weekday mode; ignore in sequence mode
+    // so a stale client can't introduce inconsistent state.
+    let effectiveWeekday: number | null | undefined = undefined;
+    if (weekday !== undefined) {
+      if (day.routine.scheduleStyle !== 'weekday') {
+        effectiveWeekday = null;
+      } else if (weekday !== null) {
+        const collision = await db.routineDay.findFirst({
+          where: {
+            routineId: day.routine.id,
+            weekday: weekday,
+            NOT: { id: routineDayId },
+          },
+          select: { id: true },
+        });
+        if (collision) {
+          throw new Error('That weekday is already taken in your routine.');
+        }
+        effectiveWeekday = weekday;
+      } else {
+        effectiveWeekday = null;
       }
-      effectiveWeekday = weekday;
-    } else {
-      effectiveWeekday = null;
     }
-  }
 
-  await db.$transaction(async (tx) => {
-    if (name !== undefined) {
-      const resolved = await uniqueTemplateName(tx, userId, name);
-      await tx.workoutTemplate.update({
-        where: { id: day.templateId },
-        data: { name: resolved },
-      });
-    }
-    if (label !== undefined || effectiveWeekday !== undefined || description !== undefined) {
-      await tx.routineDay.update({
-        where: { id: routineDayId },
-        data: {
-          ...(label !== undefined ? { label: label || null } : {}),
-          ...(effectiveWeekday !== undefined ? { weekday: effectiveWeekday } : {}),
-          ...(description !== undefined ? { description } : {}),
-        },
-      });
-    }
-  });
+    await db.$transaction(async (tx) => {
+      if (name !== undefined) {
+        const resolved = await uniqueTemplateName(tx, userId, name);
+        await tx.workoutTemplate.update({
+          where: { id: day.templateId },
+          data: { name: resolved },
+        });
+      }
+      if (label !== undefined || effectiveWeekday !== undefined || description !== undefined) {
+        await tx.routineDay.update({
+          where: { id: routineDayId },
+          data: {
+            ...(label !== undefined ? { label: label || null } : {}),
+            ...(effectiveWeekday !== undefined ? { weekday: effectiveWeekday } : {}),
+            ...(description !== undefined ? { description } : {}),
+          },
+        });
+      }
+    });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 const RemoveRoutineDaySchema = z.object({ routineDayId: z.string().min(1) });
 
@@ -1706,61 +1716,62 @@ const RemoveRoutineDaySchema = z.object({ routineDayId: z.string().min(1) });
  * could skip a position. Simplest correct fix: if cursor was past the
  * deleted day, decrement it.
  */
-export const removeRoutineDay = withLogging('removeRoutineDay', async (
-  input: z.infer<typeof RemoveRoutineDaySchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId } = RemoveRoutineDaySchema.parse(input);
+export const removeRoutineDay = withLogging(
+  'removeRoutineDay',
+  async (input: z.infer<typeof RemoveRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { routineDayId } = RemoveRoutineDaySchema.parse(input);
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    include: {
-      routine: { select: { id: true, lastCompletedPosition: true } },
-    },
-  });
-  if (!day) throw new Error('Routine day not found');
-
-  await db.$transaction(async (tx) => {
-    await tx.routineDay.delete({ where: { id: routineDayId } });
-
-    // The day owned its template — drop it now that nothing references it.
-    // Skipped for the rare legacy case where a routine day pointed at a
-    // built-in template (userId null) before we moved to per-day cloning.
-    await tx.workoutTemplate.deleteMany({
-      where: { id: day.templateId, userId },
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      include: {
+        routine: { select: { id: true, lastCompletedPosition: true } },
+      },
     });
+    if (!day) throw new Error('Routine day not found');
 
-    // Renumber: any day with position > the removed one shifts down by 1.
-    const remaining = await tx.routineDay.findMany({
-      where: { routineId: day.routine.id },
-      orderBy: { position: 'asc' },
-      select: { id: true, position: true },
-    });
-    for (let i = 0; i < remaining.length; i++) {
-      if (remaining[i].position !== i) {
-        await tx.routineDay.update({
-          where: { id: remaining[i].id },
-          data: { position: i },
+    await db.$transaction(async (tx) => {
+      await tx.routineDay.delete({ where: { id: routineDayId } });
+
+      // The day owned its template — drop it now that nothing references it.
+      // Skipped for the rare legacy case where a routine day pointed at a
+      // built-in template (userId null) before we moved to per-day cloning.
+      await tx.workoutTemplate.deleteMany({
+        where: { id: day.templateId, userId },
+      });
+
+      // Renumber: any day with position > the removed one shifts down by 1.
+      const remaining = await tx.routineDay.findMany({
+        where: { routineId: day.routine.id },
+        orderBy: { position: 'asc' },
+        select: { id: true, position: true },
+      });
+      for (let i = 0; i < remaining.length; i++) {
+        if (remaining[i].position !== i) {
+          await tx.routineDay.update({
+            where: { id: remaining[i].id },
+            data: { position: i },
+          });
+        }
+      }
+
+      // Cursor adjustment: if cursor was at or beyond the removed position,
+      // decrement (clamped at -1, which we represent as null).
+      const cursor = day.routine.lastCompletedPosition;
+      if (cursor !== null && cursor >= day.position) {
+        const newCursor = cursor - 1;
+        await tx.routine.update({
+          where: { id: day.routine.id },
+          data: { lastCompletedPosition: newCursor < 0 ? null : newCursor },
         });
       }
-    }
+    });
 
-    // Cursor adjustment: if cursor was at or beyond the removed position,
-    // decrement (clamped at -1, which we represent as null).
-    const cursor = day.routine.lastCompletedPosition;
-    if (cursor !== null && cursor >= day.position) {
-      const newCursor = cursor - 1;
-      await tx.routine.update({
-        where: { id: day.routine.id },
-        data: { lastCompletedPosition: newCursor < 0 ? null : newCursor },
-      });
-    }
-  });
-
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 // ============================================================
 // Editing a routine day's exercises (operates on the day's owned template)
@@ -1797,49 +1808,50 @@ const AddExerciseToRoutineDaySchema = z.object({
   note: RoutineExerciseNoteSchema,
 });
 
-export const addExerciseToRoutineDay = withLogging('addExerciseToRoutineDay', async (
-  input: z.infer<typeof AddExerciseToRoutineDaySchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds, note } =
-    AddExerciseToRoutineDaySchema.parse(input);
+export const addExerciseToRoutineDay = withLogging(
+  'addExerciseToRoutineDay',
+  async (input: z.infer<typeof AddExerciseToRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds, note } =
+      AddExerciseToRoutineDaySchema.parse(input);
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    select: { templateId: true },
-  });
-  if (!day) throw new Error('Routine day not found');
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      select: { templateId: true },
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  await requireAvailableExercise(userId, exerciseId);
+    await requireAvailableExercise(userId, exerciseId);
 
-  const collision = await db.templateExercise.findFirst({
-    where: { templateId: day.templateId, exerciseId },
-    select: { id: true },
-  });
-  if (collision) throw new Error('That exercise is already in this day.');
+    const collision = await db.templateExercise.findFirst({
+      where: { templateId: day.templateId, exerciseId },
+      select: { id: true },
+    });
+    if (collision) throw new Error('That exercise is already in this day.');
 
-  const last = await db.templateExercise.findFirst({
-    where: { templateId: day.templateId },
-    orderBy: { position: 'desc' },
-    select: { position: true },
-  });
-  const nextPos = (last?.position ?? -1) + 1;
+    const last = await db.templateExercise.findFirst({
+      where: { templateId: day.templateId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    });
+    const nextPos = (last?.position ?? -1) + 1;
 
-  await db.templateExercise.create({
-    data: {
-      templateId: day.templateId,
-      exerciseId,
-      position: nextPos,
-      plannedSets: plannedSets ?? null,
-      plannedReps: plannedReps ?? null,
-      plannedSeconds: plannedSeconds ?? null,
-      note: note ?? null,
-    },
-  });
+    await db.templateExercise.create({
+      data: {
+        templateId: day.templateId,
+        exerciseId,
+        position: nextPos,
+        plannedSets: plannedSets ?? null,
+        plannedReps: plannedReps ?? null,
+        plannedSeconds: plannedSeconds ?? null,
+        note: note ?? null,
+      },
+    });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
 
 const UpdateRoutineDayExerciseSchema = z.object({
   routineDayId: z.string().min(1),
@@ -1855,38 +1867,39 @@ const UpdateRoutineDayExerciseSchema = z.object({
  * note. Pass null to clear a field; omit to leave it untouched. Operates on the
  * day's owned template.
  */
-export const updateRoutineDayExercise = withLogging('updateRoutineDayExercise', async (
-  input: z.infer<typeof UpdateRoutineDayExerciseSchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds, note } =
-    UpdateRoutineDayExerciseSchema.parse(input);
+export const updateRoutineDayExercise = withLogging(
+  'updateRoutineDayExercise',
+  async (input: z.infer<typeof UpdateRoutineDayExerciseSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds, note } =
+      UpdateRoutineDayExerciseSchema.parse(input);
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    select: { templateId: true },
-  });
-  if (!day) throw new Error('Routine day not found');
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      select: { templateId: true },
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  const target = await db.templateExercise.findFirst({
-    where: { templateId: day.templateId, exerciseId },
-    select: { id: true },
-  });
-  if (!target) throw new Error("That exercise isn't in this day.");
+    const target = await db.templateExercise.findFirst({
+      where: { templateId: day.templateId, exerciseId },
+      select: { id: true },
+    });
+    if (!target) throw new Error("That exercise isn't in this day.");
 
-  await db.templateExercise.update({
-    where: { id: target.id },
-    data: {
-      ...(plannedSets !== undefined ? { plannedSets } : {}),
-      ...(plannedReps !== undefined ? { plannedReps } : {}),
-      ...(plannedSeconds !== undefined ? { plannedSeconds } : {}),
-      ...(note !== undefined ? { note } : {}),
-    },
-  });
+    await db.templateExercise.update({
+      where: { id: target.id },
+      data: {
+        ...(plannedSets !== undefined ? { plannedSets } : {}),
+        ...(plannedReps !== undefined ? { plannedReps } : {}),
+        ...(plannedSeconds !== undefined ? { plannedSeconds } : {}),
+        ...(note !== undefined ? { note } : {}),
+      },
+    });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
 
 const RemoveExerciseFromRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
@@ -2027,12 +2040,14 @@ export const setRoutineDayExerciseOrder = withLogging(
       throw new Error("Reorder list doesn't match the day's exercises.");
     }
     const idByExercise = new Map(entries.map((e) => [e.exerciseId, e.id] as const));
-    if (exerciseIds.some((id) => !idByExercise.has(id))) {
-      throw new Error("Reorder list doesn't match the day's exercises.");
-    }
     if (new Set(exerciseIds).size !== exerciseIds.length) {
       throw new Error('Reorder list has duplicate exercises.');
     }
+    const placements = exerciseIds.map((exerciseId, position) => {
+      const id = idByExercise.get(exerciseId);
+      if (!id) throw new Error("Reorder list doesn't match the day's exercises.");
+      return { id, position };
+    });
 
     await db.$transaction([
       // Park everything at distinct negative positions to free up the target
@@ -2044,9 +2059,9 @@ export const setRoutineDayExerciseOrder = withLogging(
         }),
       ),
       // Now place each entry at its new position based on exerciseIds order.
-      ...exerciseIds.map((exerciseId, position) =>
+      ...placements.map(({ id, position }) =>
         db.templateExercise.update({
-          where: { id: idByExercise.get(exerciseId)! },
+          where: { id },
           data: { position },
         }),
       ),
@@ -2067,50 +2082,51 @@ const ReorderRoutineDaySchema = z.object({
  * Position is the unique key (routineId, position) so the swap goes through
  * an intermediate sentinel value to avoid colliding mid-update.
  */
-export const reorderRoutineDay = withLogging('reorderRoutineDay', async (
-  input: z.infer<typeof ReorderRoutineDaySchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId, direction } = ReorderRoutineDaySchema.parse(input);
+export const reorderRoutineDay = withLogging(
+  'reorderRoutineDay',
+  async (input: z.infer<typeof ReorderRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, direction } = ReorderRoutineDaySchema.parse(input);
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-  });
-  if (!day) throw new Error('Routine day not found');
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  const days = await db.routineDay.findMany({
-    where: { routineId: day.routineId },
-    orderBy: { position: 'asc' },
-    select: { id: true, position: true },
-  });
-  const myIndex = days.findIndex((d) => d.id === routineDayId);
-  const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
-  if (neighborIndex < 0 || neighborIndex >= days.length) return; // edge
+    const days = await db.routineDay.findMany({
+      where: { routineId: day.routineId },
+      orderBy: { position: 'asc' },
+      select: { id: true, position: true },
+    });
+    const myIndex = days.findIndex((d) => d.id === routineDayId);
+    const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
+    if (neighborIndex < 0 || neighborIndex >= days.length) return; // edge
 
-  const me = days[myIndex];
-  const neighbor = days[neighborIndex];
-  // Move via a sentinel position to dodge the unique constraint.
-  const sentinel = -1;
+    const me = days[myIndex];
+    const neighbor = days[neighborIndex];
+    // Move via a sentinel position to dodge the unique constraint.
+    const sentinel = -1;
 
-  await db.$transaction([
-    db.routineDay.update({
-      where: { id: me.id },
-      data: { position: sentinel },
-    }),
-    db.routineDay.update({
-      where: { id: neighbor.id },
-      data: { position: me.position },
-    }),
-    db.routineDay.update({
-      where: { id: me.id },
-      data: { position: neighbor.position },
-    }),
-  ]);
+    await db.$transaction([
+      db.routineDay.update({
+        where: { id: me.id },
+        data: { position: sentinel },
+      }),
+      db.routineDay.update({
+        where: { id: neighbor.id },
+        data: { position: me.position },
+      }),
+      db.routineDay.update({
+        where: { id: me.id },
+        data: { position: neighbor.position },
+      }),
+    ]);
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 const DuplicateRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
@@ -2125,68 +2141,69 @@ const DuplicateRoutineDaySchema = z.object({
  * weekday explicitly to avoid silent overwrites or surprise re-orderings.
  * Refuses past MAX_ROUTINE_DAYS.
  */
-export const duplicateRoutineDay = withLogging('duplicateRoutineDay', async (
-  input: z.infer<typeof DuplicateRoutineDaySchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId } = DuplicateRoutineDaySchema.parse(input);
+export const duplicateRoutineDay = withLogging(
+  'duplicateRoutineDay',
+  async (input: z.infer<typeof DuplicateRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { routineDayId } = DuplicateRoutineDaySchema.parse(input);
 
-  const source = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    include: {
-      template: {
-        include: {
-          exercises: { orderBy: { position: 'asc' } },
+    const source = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      include: {
+        template: {
+          include: {
+            exercises: { orderBy: { position: 'asc' } },
+          },
         },
-      },
-      routine: { select: { id: true, _count: { select: { days: true } } } },
-    },
-  });
-  if (!source) throw new Error('Routine day not found');
-
-  if (source.routine._count.days >= MAX_ROUTINE_DAYS) {
-    throw new Error(`Routine is already at the ${MAX_ROUTINE_DAYS}-day cap.`);
-  }
-
-  const nextPosition = source.routine._count.days;
-  const newTemplateName = await uniqueTemplateName(db, userId, source.template.name);
-
-  await db.$transaction(async (tx) => {
-    const newTemplate = await tx.workoutTemplate.create({
-      data: {
-        userId,
-        isBuiltin: false,
-        name: newTemplateName,
-        exercises: {
-          create: source.template.exercises.map((te) => ({
-            exerciseId: te.exerciseId,
-            position: te.position,
-            plannedSets: te.plannedSets,
-            plannedReps: te.plannedReps,
-            plannedSeconds: te.plannedSeconds,
-            plannedWeight: te.plannedWeight,
-            note: te.note,
-          })),
-        },
+        routine: { select: { id: true, _count: { select: { days: true } } } },
       },
     });
-    await tx.routineDay.create({
-      data: {
-        routineId: source.routine.id,
-        templateId: newTemplate.id,
-        position: nextPosition,
-        // Always unpinned — the user assigns a weekday explicitly. See the
-        // action's doc comment for why we don't carry source.weekday over.
-        weekday: null,
-        label: source.label,
-        description: source.description,
-      },
-    });
-  });
+    if (!source) throw new Error('Routine day not found');
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-});
+    if (source.routine._count.days >= MAX_ROUTINE_DAYS) {
+      throw new Error(`Routine is already at the ${MAX_ROUTINE_DAYS}-day cap.`);
+    }
+
+    const nextPosition = source.routine._count.days;
+    const newTemplateName = await uniqueTemplateName(db, userId, source.template.name);
+
+    await db.$transaction(async (tx) => {
+      const newTemplate = await tx.workoutTemplate.create({
+        data: {
+          userId,
+          isBuiltin: false,
+          name: newTemplateName,
+          exercises: {
+            create: source.template.exercises.map((te) => ({
+              exerciseId: te.exerciseId,
+              position: te.position,
+              plannedSets: te.plannedSets,
+              plannedReps: te.plannedReps,
+              plannedSeconds: te.plannedSeconds,
+              plannedWeight: te.plannedWeight,
+              note: te.note,
+            })),
+          },
+        },
+      });
+      await tx.routineDay.create({
+        data: {
+          routineId: source.routine.id,
+          templateId: newTemplate.id,
+          position: nextPosition,
+          // Always unpinned — the user assigns a weekday explicitly. See the
+          // action's doc comment for why we don't carry source.weekday over.
+          weekday: null,
+          label: source.label,
+          description: source.description,
+        },
+      });
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
 
 const SetPendingSwapSchema = z.object({
   routineDayId: z.string().min(1),
@@ -2204,75 +2221,77 @@ const SetPendingSwapSchema = z.object({
  * Idempotent: re-staging the same (out → new) replaces any existing swap
  * for that out exercise.
  */
-export const setPendingSwap = withLogging('setPendingSwap', async (
-  input: z.infer<typeof SetPendingSwapSchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId, outExerciseId, inExerciseId } = SetPendingSwapSchema.parse(input);
+export const setPendingSwap = withLogging(
+  'setPendingSwap',
+  async (input: z.infer<typeof SetPendingSwapSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, outExerciseId, inExerciseId } = SetPendingSwapSchema.parse(input);
 
-  if (outExerciseId === inExerciseId) {
-    // No-op; treat as remove-existing for self-consistency.
-    await db.routineDayPendingSwap.deleteMany({
-      where: { routineDayId, outExerciseId, routineDay: { routine: { userId } } },
-    });
-    revalidatePath('/');
-    return;
-  }
+    if (outExerciseId === inExerciseId) {
+      // No-op; treat as remove-existing for self-consistency.
+      await db.routineDayPendingSwap.deleteMany({
+        where: { routineDayId, outExerciseId, routineDay: { routine: { userId } } },
+      });
+      revalidatePath('/');
+      return;
+    }
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    include: {
-      template: {
-        include: {
-          exercises: { select: { exerciseId: true } },
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      include: {
+        template: {
+          include: {
+            exercises: { select: { exerciseId: true } },
+          },
         },
       },
-    },
-  });
-  if (!day) throw new Error('Routine day not found');
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  const templateExerciseIds = new Set(day.template.exercises.map((te) => te.exerciseId));
-  if (!templateExerciseIds.has(outExerciseId)) {
-    throw new Error("That exercise isn't in this day's template.");
-  }
-  if (templateExerciseIds.has(inExerciseId)) {
-    throw new Error('That exercise is already in this day.');
-  }
+    const templateExerciseIds = new Set(day.template.exercises.map((te) => te.exerciseId));
+    if (!templateExerciseIds.has(outExerciseId)) {
+      throw new Error("That exercise isn't in this day's template.");
+    }
+    if (templateExerciseIds.has(inExerciseId)) {
+      throw new Error('That exercise is already in this day.');
+    }
 
-  await requireAvailableExercise(userId, inExerciseId);
+    await requireAvailableExercise(userId, inExerciseId);
 
-  await db.routineDayPendingSwap.upsert({
-    where: {
-      routineDayId_outExerciseId: { routineDayId, outExerciseId },
-    },
-    create: { routineDayId, outExerciseId, inExerciseId },
-    update: { inExerciseId },
-  });
+    await db.routineDayPendingSwap.upsert({
+      where: {
+        routineDayId_outExerciseId: { routineDayId, outExerciseId },
+      },
+      create: { routineDayId, outExerciseId, inExerciseId },
+      update: { inExerciseId },
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const ClearPendingSwapSchema = z.object({
   routineDayId: z.string().min(1),
   outExerciseId: z.string().min(1),
 });
 
-export const clearPendingSwap = withLogging('clearPendingSwap', async (
-  input: z.infer<typeof ClearPendingSwapSchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId, outExerciseId } = ClearPendingSwapSchema.parse(input);
+export const clearPendingSwap = withLogging(
+  'clearPendingSwap',
+  async (input: z.infer<typeof ClearPendingSwapSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, outExerciseId } = ClearPendingSwapSchema.parse(input);
 
-  await db.routineDayPendingSwap.deleteMany({
-    where: {
-      routineDayId,
-      outExerciseId,
-      routineDay: { routine: { userId } },
-    },
-  });
+    await db.routineDayPendingSwap.deleteMany({
+      where: {
+        routineDayId,
+        outExerciseId,
+        routineDay: { routine: { userId } },
+      },
+    });
 
-  revalidatePath('/');
-});
+    revalidatePath('/');
+  },
+);
 
 const SwapInRoutineTemplateSchema = z.object({
   routineDayId: z.string().min(1),
@@ -2286,55 +2305,56 @@ const SwapInRoutineTemplateSchema = z.object({
  * template now, so this only affects this day — no other surface inherits
  * the change.
  */
-export const swapInRoutineTemplate = withLogging('swapInRoutineTemplate', async (
-  input: z.infer<typeof SwapInRoutineTemplateSchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId, outExerciseId, inExerciseId } = SwapInRoutineTemplateSchema.parse(input);
+export const swapInRoutineTemplate = withLogging(
+  'swapInRoutineTemplate',
+  async (input: z.infer<typeof SwapInRoutineTemplateSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, outExerciseId, inExerciseId } = SwapInRoutineTemplateSchema.parse(input);
 
-  if (outExerciseId === inExerciseId) return;
+    if (outExerciseId === inExerciseId) return;
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    include: { template: { select: { id: true } } },
-  });
-  if (!day) throw new Error('Routine day not found');
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      include: { template: { select: { id: true } } },
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  await requireAvailableExercise(userId, inExerciseId);
+    await requireAvailableExercise(userId, inExerciseId);
 
-  const targetEntry = await db.templateExercise.findFirst({
-    where: { templateId: day.template.id, exerciseId: outExerciseId },
-  });
-  if (!targetEntry) {
-    throw new Error("That exercise isn't in the template anymore.");
-  }
+    const targetEntry = await db.templateExercise.findFirst({
+      where: { templateId: day.template.id, exerciseId: outExerciseId },
+    });
+    if (!targetEntry) {
+      throw new Error("That exercise isn't in the template anymore.");
+    }
 
-  // Refuse if the new exercise is already in the template — would violate
-  // the (templateId, exerciseId) unique constraint and is probably user error.
-  const collision = await db.templateExercise.findFirst({
-    where: { templateId: day.template.id, exerciseId: inExerciseId },
-    select: { id: true },
-  });
-  if (collision) {
-    throw new Error('That exercise is already in the template.');
-  }
+    // Refuse if the new exercise is already in the template — would violate
+    // the (templateId, exerciseId) unique constraint and is probably user error.
+    const collision = await db.templateExercise.findFirst({
+      where: { templateId: day.template.id, exerciseId: inExerciseId },
+      select: { id: true },
+    });
+    if (collision) {
+      throw new Error('That exercise is already in the template.');
+    }
 
-  await db.$transaction([
-    db.templateExercise.update({
-      where: { id: targetEntry.id },
-      data: { exerciseId: inExerciseId },
-    }),
-    // If a one-time pending swap was staged for the outgoing exercise, drop
-    // it — the permanent change supersedes any pending one-shot.
-    db.routineDayPendingSwap.deleteMany({
-      where: { routineDayId, outExerciseId },
-    }),
-  ]);
+    await db.$transaction([
+      db.templateExercise.update({
+        where: { id: targetEntry.id },
+        data: { exerciseId: inExerciseId },
+      }),
+      // If a one-time pending swap was staged for the outgoing exercise, drop
+      // it — the permanent change supersedes any pending one-shot.
+      db.routineDayPendingSwap.deleteMany({
+        where: { routineDayId, outExerciseId },
+      }),
+    ]);
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 // Wizard-driven routine creation. Lets the user assemble a whole routine in
 // one shot — every day always seeds its own owned template (either by
@@ -2389,93 +2409,93 @@ const CreateRoutineFromDraftSchema = z.object({
  * source's exercises) or by starting with the supplied exerciseIds list.
  * Throws and rolls back if anything fails.
  */
-export const createRoutineFromDraft = withLogging('createRoutineFromDraft', async (
-  input: z.infer<typeof CreateRoutineFromDraftSchema>,
-) => {
-  const userId = await requireUser();
-  const { name, description, scheduleStyle, days } = CreateRoutineFromDraftSchema.parse(input);
+export const createRoutineFromDraft = withLogging(
+  'createRoutineFromDraft',
+  async (input: z.infer<typeof CreateRoutineFromDraftSchema>) => {
+    const userId = await requireUser();
+    const { name, description, scheduleStyle, days } = CreateRoutineFromDraftSchema.parse(input);
 
-  const existingRoutine = await db.routine.findUnique({ where: { userId } });
-  if (existingRoutine) {
-    throw new Error('You already have a routine. Edit it instead of creating a new one.');
-  }
-
-  // In weekday mode, each pinned weekday must be unique within the draft.
-  // Sequence mode silently drops weekday hints.
-  if (scheduleStyle === 'weekday') {
-    const seen = new Set<number>();
-    for (const day of days) {
-      if (day.weekday == null) continue;
-      if (seen.has(day.weekday)) {
-        throw new Error("Two days can't share the same weekday.");
-      }
-      seen.add(day.weekday);
+    const existingRoutine = await db.routine.findUnique({ where: { userId } });
+    if (existingRoutine) {
+      throw new Error('You already have a routine. Edit it instead of creating a new one.');
     }
-  }
 
-  await db.$transaction(async (tx) => {
-    const routine = await tx.routine.create({
-      data: {
-        userId,
-        name: name || 'My routine',
-        description: description || null,
-        scheduleStyle,
-      },
-    });
-
-    for (let i = 0; i < days.length; i++) {
-      const day = days[i];
-      const effectiveWeekday =
-        scheduleStyle === 'weekday' && day.weekday != null ? day.weekday : null;
-
-      // Determine the day's template name: explicit > seed's name > positional
-      // fallback. uniqueTemplateName will resolve any collisions on insert.
-      let baseName = day.name?.trim() || '';
-      if (!baseName && day.seedTemplateId) {
-        const seed = await tx.workoutTemplate.findFirst({
-          where: { id: day.seedTemplateId },
-          select: { name: true },
-        });
-        if (seed) baseName = seed.name;
+    // In weekday mode, each pinned weekday must be unique within the draft.
+    // Sequence mode silently drops weekday hints.
+    if (scheduleStyle === 'weekday') {
+      const seen = new Set<number>();
+      for (const day of days) {
+        if (day.weekday == null) continue;
+        if (seen.has(day.weekday)) {
+          throw new Error("Two days can't share the same weekday.");
+        }
+        seen.add(day.weekday);
       }
-      if (!baseName) {
-        baseName =
-          effectiveWeekday !== null ? WEEKDAY_LONG[effectiveWeekday] : `Day ${i + 1}`;
-      }
+    }
 
-      const templateId = day.seedTemplateId
-        ? await cloneTemplateForUser(tx, userId, day.seedTemplateId, baseName)
-        : await freshTemplateForUser(
-            tx,
-            userId,
-            baseName,
-            (day.exercises ?? []).map((e) => ({
-              exerciseId: e.exerciseId,
-              plannedSets: e.plannedSets ?? null,
-              plannedReps: e.plannedReps ?? null,
-              plannedSeconds: e.plannedSeconds ?? null,
-              note: e.note ?? null,
-            })),
-          );
-
-      await tx.routineDay.create({
+    await db.$transaction(async (tx) => {
+      const routine = await tx.routine.create({
         data: {
-          routineId: routine.id,
-          templateId,
-          position: i,
-          weekday: effectiveWeekday,
-          label: day.label?.trim() || null,
-          description: day.description ?? null,
+          userId,
+          name: name || 'My routine',
+          description: description || null,
+          scheduleStyle,
         },
       });
-    }
-  });
 
-  metrics.templatesUsed.inc();
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath('/settings');
-});
+      for (let i = 0; i < days.length; i++) {
+        const day = days[i];
+        const effectiveWeekday =
+          scheduleStyle === 'weekday' && day.weekday != null ? day.weekday : null;
+
+        // Determine the day's template name: explicit > seed's name > positional
+        // fallback. uniqueTemplateName will resolve any collisions on insert.
+        let baseName = day.name?.trim() || '';
+        if (!baseName && day.seedTemplateId) {
+          const seed = await tx.workoutTemplate.findFirst({
+            where: { id: day.seedTemplateId },
+            select: { name: true },
+          });
+          if (seed) baseName = seed.name;
+        }
+        if (!baseName) {
+          baseName = effectiveWeekday !== null ? WEEKDAY_LONG[effectiveWeekday] : `Day ${i + 1}`;
+        }
+
+        const templateId = day.seedTemplateId
+          ? await cloneTemplateForUser(tx, userId, day.seedTemplateId, baseName)
+          : await freshTemplateForUser(
+              tx,
+              userId,
+              baseName,
+              (day.exercises ?? []).map((e) => ({
+                exerciseId: e.exerciseId,
+                plannedSets: e.plannedSets ?? null,
+                plannedReps: e.plannedReps ?? null,
+                plannedSeconds: e.plannedSeconds ?? null,
+                note: e.note ?? null,
+              })),
+            );
+
+        await tx.routineDay.create({
+          data: {
+            routineId: routine.id,
+            templateId,
+            position: i,
+            weekday: effectiveWeekday,
+            label: day.label?.trim() || null,
+            description: day.description ?? null,
+          },
+        });
+      }
+    });
+
+    metrics.templatesUsed.inc();
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
 
 const StartFromRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
@@ -2490,129 +2510,128 @@ const StartFromRoutineDaySchema = z.object({
  * Refuses if there's already an active session — mirrors startFromTemplate.
  * After population, all pending swaps for this day are cleared.
  */
-export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
-  input: z.infer<typeof StartFromRoutineDaySchema>,
-) => {
-  const userId = await requireUser();
-  const { routineDayId } = StartFromRoutineDaySchema.parse(input);
+export const startFromRoutineDay = withLogging(
+  'startFromRoutineDay',
+  async (input: z.infer<typeof StartFromRoutineDaySchema>) => {
+    const userId = await requireUser();
+    const { routineDayId } = StartFromRoutineDaySchema.parse(input);
 
-  const existing = await findActiveSession(userId);
-  if (existing) {
-    throw new Error(
-      'You already have a workout in progress. Complete or discard it first.',
-    );
-  }
+    const existing = await findActiveSession(userId);
+    if (existing) {
+      throw new Error('You already have a workout in progress. Complete or discard it first.');
+    }
 
-  const day = await db.routineDay.findFirst({
-    where: { id: routineDayId, routine: { userId } },
-    include: {
-      template: {
-        include: {
-          exercises: {
-            orderBy: { position: 'asc' },
-            include: {
-              exercise: {
-                select: { id: true, deletedAt: true, ownerId: true },
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      include: {
+        template: {
+          include: {
+            exercises: {
+              orderBy: { position: 'asc' },
+              include: {
+                exercise: {
+                  select: { id: true, deletedAt: true, ownerId: true },
+                },
               },
             },
           },
         },
-      },
-      pendingSwaps: {
-        include: {
-          inExercise: {
-            select: { id: true, deletedAt: true, ownerId: true },
+        pendingSwaps: {
+          include: {
+            inExercise: {
+              select: { id: true, deletedAt: true, ownerId: true },
+            },
           },
         },
       },
-    },
-  });
-  if (!day) throw new Error('Routine day not found');
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  const swapsByOutId = new Map(
-    day.pendingSwaps
-      .filter((s) => {
-        const ex = s.inExercise;
-        if (ex.deletedAt !== null) return false;
-        if (ex.ownerId !== null && ex.ownerId !== userId) return false;
-        return true;
-      })
-      .map((s) => [s.outExerciseId, s.inExerciseId]),
-  );
+    const swapsByOutId = new Map(
+      day.pendingSwaps
+        .filter((s) => {
+          const ex = s.inExercise;
+          if (ex.deletedAt !== null) return false;
+          if (ex.ownerId !== null && ex.ownerId !== userId) return false;
+          return true;
+        })
+        .map((s) => [s.outExerciseId, s.inExerciseId]),
+    );
 
-  // Walk template exercises, substitute via pending swaps, drop unusable.
-  // The slot's plannedSets/plannedReps stay with the slot — a one-shot swap
-  // is "do exercise B in this slot today," not "import B's planning."
-  const lineup: {
-    exerciseId: string;
-    plannedSets: number | null;
-    plannedReps: number | null;
-    plannedSeconds: number | null;
-  }[] = [];
-  for (const te of day.template.exercises) {
-    const ex = te.exercise;
-    const replacement = swapsByOutId.get(te.exerciseId);
-    if (replacement !== undefined) {
-      lineup.push({
-        exerciseId: replacement,
-        plannedSets: te.plannedSets,
-        plannedReps: te.plannedReps,
-        plannedSeconds: te.plannedSeconds,
-      });
-    } else if (ex.deletedAt === null && (ex.ownerId === null || ex.ownerId === userId)) {
-      lineup.push({
-        exerciseId: te.exerciseId,
-        plannedSets: te.plannedSets,
-        plannedReps: te.plannedReps,
-        plannedSeconds: te.plannedSeconds,
-      });
+    // Walk template exercises, substitute via pending swaps, drop unusable.
+    // The slot's plannedSets/plannedReps stay with the slot — a one-shot swap
+    // is "do exercise B in this slot today," not "import B's planning."
+    const lineup: {
+      exerciseId: string;
+      plannedSets: number | null;
+      plannedReps: number | null;
+      plannedSeconds: number | null;
+    }[] = [];
+    for (const te of day.template.exercises) {
+      const ex = te.exercise;
+      const replacement = swapsByOutId.get(te.exerciseId);
+      if (replacement !== undefined) {
+        lineup.push({
+          exerciseId: replacement,
+          plannedSets: te.plannedSets,
+          plannedReps: te.plannedReps,
+          plannedSeconds: te.plannedSeconds,
+        });
+      } else if (ex.deletedAt === null && (ex.ownerId === null || ex.ownerId === userId)) {
+        lineup.push({
+          exerciseId: te.exerciseId,
+          plannedSets: te.plannedSets,
+          plannedReps: te.plannedReps,
+          plannedSeconds: te.plannedSeconds,
+        });
+      }
     }
-  }
 
-  if (lineup.length === 0) {
-    throw new Error('This day has no usable exercises right now.');
-  }
+    if (lineup.length === 0) {
+      throw new Error('This day has no usable exercises right now.');
+    }
 
-  // Create the session, then seed SetLogs from history + planned + prefs.
-  // Same shape as startFromTemplate — split the create from the seed so the
-  // exclude-self guard works cleanly.
-  const newSession = await db.workoutSession.create({
-    data: {
-      userId,
-      date: new Date(),
-      startedFromRoutineDayId: day.id,
-    },
-  });
-  const hints = new Map(
-    lineup.map((l) => [
-      l.exerciseId,
-      {
-        plannedSets: l.plannedSets,
-        plannedReps: l.plannedReps,
-        plannedSeconds: l.plannedSeconds,
+    // Create the session, then seed SetLogs from history + planned + prefs.
+    // Same shape as startFromTemplate — split the create from the seed so the
+    // exclude-self guard works cleanly.
+    const newSession = await db.workoutSession.create({
+      data: {
+        userId,
+        date: new Date(),
+        startedFromRoutineDayId: day.id,
       },
-    ]),
-  );
-  const rows = await buildSeededSetLogRows(
-    userId,
-    lineup.map((l, idx) => ({
-      exerciseId: l.exerciseId,
-      sessionId: newSession.id,
-      position: idx,
-    })),
-    newSession.id,
-    hints,
-  );
-  await db.$transaction([
-    db.setLog.createMany({ data: rows }),
-    db.routineDayPendingSwap.deleteMany({
-      where: { routineDayId: day.id },
-    }),
-  ]);
+    });
+    const hints = new Map(
+      lineup.map((l) => [
+        l.exerciseId,
+        {
+          plannedSets: l.plannedSets,
+          plannedReps: l.plannedReps,
+          plannedSeconds: l.plannedSeconds,
+        },
+      ]),
+    );
+    const rows = await buildSeededSetLogRows(
+      userId,
+      lineup.map((l, idx) => ({
+        exerciseId: l.exerciseId,
+        sessionId: newSession.id,
+        position: idx,
+      })),
+      newSession.id,
+      hints,
+    );
+    await db.$transaction([
+      db.setLog.createMany({ data: rows }),
+      db.routineDayPendingSwap.deleteMany({
+        where: { routineDayId: day.id },
+      }),
+    ]);
 
-  metrics.templatesUsed.inc();
-  revalidatePath('/');
-});
+    metrics.templatesUsed.inc();
+    revalidatePath('/');
+  },
+);
 
 // ================================================================
 // ROUTINE SHARING + NOTIFICATIONS
@@ -2708,46 +2727,48 @@ const MintShareSchema = z.object({
   label: z.string().trim().max(60).optional(),
 });
 
-export const mintRoutineShare = withLogging('mintRoutineShare', async (
-  input: z.infer<typeof MintShareSchema>,
-) => {
-  const userId = await requireUser();
-  const { label } = MintShareSchema.parse(input);
+export const mintRoutineShare = withLogging(
+  'mintRoutineShare',
+  async (input: z.infer<typeof MintShareSchema>) => {
+    const userId = await requireUser();
+    const { label } = MintShareSchema.parse(input);
 
-  const routine = await db.routine.findUnique({ where: { userId }, select: { id: true } });
-  if (!routine) throw new Error('No routine to share yet.');
+    const routine = await db.routine.findUnique({ where: { userId }, select: { id: true } });
+    if (!routine) throw new Error('No routine to share yet.');
 
-  const token = urlsafeRandom(SHARE_TOKEN_BYTES);
-  await db.routineShare.create({
-    data: { routineId: routine.id, token, label: label?.trim() || null },
-  });
+    const token = urlsafeRandom(SHARE_TOKEN_BYTES);
+    await db.routineShare.create({
+      data: { routineId: routine.id, token, label: label?.trim() || null },
+    });
 
-  revalidatePath('/routine');
-  revalidatePath('/routine/shares');
-});
+    revalidatePath('/routine');
+    revalidatePath('/routine/shares');
+  },
+);
 
 const RevokeShareSchema = z.object({ shareId: z.string().min(1) });
 
-export const revokeRoutineShare = withLogging('revokeRoutineShare', async (
-  input: z.infer<typeof RevokeShareSchema>,
-) => {
-  const userId = await requireUser();
-  const { shareId } = RevokeShareSchema.parse(input);
+export const revokeRoutineShare = withLogging(
+  'revokeRoutineShare',
+  async (input: z.infer<typeof RevokeShareSchema>) => {
+    const userId = await requireUser();
+    const { shareId } = RevokeShareSchema.parse(input);
 
-  const share = await db.routineShare.findFirst({
-    where: { id: shareId, routine: { userId } },
-    select: { id: true },
-  });
-  if (!share) throw new Error('Share link not found');
+    const share = await db.routineShare.findFirst({
+      where: { id: shareId, routine: { userId } },
+      select: { id: true },
+    });
+    if (!share) throw new Error('Share link not found');
 
-  await db.routineShare.update({
-    where: { id: shareId },
-    data: { revokedAt: new Date() },
-  });
+    await db.routineShare.update({
+      where: { id: shareId },
+      data: { revokedAt: new Date() },
+    });
 
-  revalidatePath('/routine');
-  revalidatePath('/routine/shares');
-});
+    revalidatePath('/routine');
+    revalidatePath('/routine/shares');
+  },
+);
 
 // ---------------- Owner actions: notifications ----------------
 
@@ -2756,97 +2777,101 @@ const MarkNotificationsReadSchema = z.object({
   all: z.boolean().optional(),
 });
 
-export const markNotificationsRead = withLogging('markNotificationsRead', async (
-  input: z.infer<typeof MarkNotificationsReadSchema>,
-) => {
-  const userId = await requireUser();
-  const parsed = MarkNotificationsReadSchema.parse(input);
+export const markNotificationsRead = withLogging(
+  'markNotificationsRead',
+  async (input: z.infer<typeof MarkNotificationsReadSchema>) => {
+    const userId = await requireUser();
+    const parsed = MarkNotificationsReadSchema.parse(input);
 
-  if (parsed.all) {
-    await db.notification.updateMany({
-      where: { userId, readAt: null },
-      data: { readAt: new Date() },
-    });
-  } else if (parsed.ids && parsed.ids.length > 0) {
-    await db.notification.updateMany({
-      where: { userId, id: { in: parsed.ids } },
-      data: { readAt: new Date() },
-    });
-  }
+    if (parsed.all) {
+      await db.notification.updateMany({
+        where: { userId, readAt: null },
+        data: { readAt: new Date() },
+      });
+    } else if (parsed.ids && parsed.ids.length > 0) {
+      await db.notification.updateMany({
+        where: { userId, id: { in: parsed.ids } },
+        data: { readAt: new Date() },
+      });
+    }
 
-  revalidatePath('/notifications');
-  revalidatePath('/');
-});
+    revalidatePath('/notifications');
+    revalidatePath('/');
+  },
+);
 
 // ---------------- Owner actions: comment / suggestion resolution ----------------
 
 const ResolveCommentSchema = z.object({ commentId: z.string().min(1) });
 
-export const resolveShareComment = withLogging('resolveShareComment', async (
-  input: z.infer<typeof ResolveCommentSchema>,
-) => {
-  const userId = await requireUser();
-  const { commentId } = ResolveCommentSchema.parse(input);
+export const resolveShareComment = withLogging(
+  'resolveShareComment',
+  async (input: z.infer<typeof ResolveCommentSchema>) => {
+    const userId = await requireUser();
+    const { commentId } = ResolveCommentSchema.parse(input);
 
-  const comment = await db.shareComment.findFirst({
-    where: { id: commentId, share: { routine: { userId } } },
-    select: { id: true, shareId: true },
-  });
-  if (!comment) throw new Error('Comment not found');
+    const comment = await db.shareComment.findFirst({
+      where: { id: commentId, share: { routine: { userId } } },
+      select: { id: true, shareId: true },
+    });
+    if (!comment) throw new Error('Comment not found');
 
-  await db.shareComment.update({
-    where: { id: comment.id },
-    data: { resolvedAt: new Date() },
-  });
+    await db.shareComment.update({
+      where: { id: comment.id },
+      data: { resolvedAt: new Date() },
+    });
 
-  revalidatePath(`/routine/shares/${comment.shareId}`);
-});
+    revalidatePath(`/routine/shares/${comment.shareId}`);
+  },
+);
 
 const RejectSuggestionSchema = z.object({ suggestionId: z.string().min(1) });
 
-export const rejectShareSuggestion = withLogging('rejectShareSuggestion', async (
-  input: z.infer<typeof RejectSuggestionSchema>,
-) => {
-  const userId = await requireUser();
-  const { suggestionId } = RejectSuggestionSchema.parse(input);
+export const rejectShareSuggestion = withLogging(
+  'rejectShareSuggestion',
+  async (input: z.infer<typeof RejectSuggestionSchema>) => {
+    const userId = await requireUser();
+    const { suggestionId } = RejectSuggestionSchema.parse(input);
 
-  const s = await db.shareSuggestion.findFirst({
-    where: { id: suggestionId, share: { routine: { userId } } },
-    select: { id: true, state: true, shareId: true },
-  });
-  if (!s) throw new Error('Suggestion not found');
-  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, share: { routine: { userId } } },
+      select: { id: true, state: true, shareId: true },
+    });
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
 
-  await db.shareSuggestion.update({
-    where: { id: s.id },
-    data: { state: 'rejected', resolvedAt: new Date() },
-  });
+    await db.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'rejected', resolvedAt: new Date() },
+    });
 
-  revalidatePath(`/routine/shares/${s.shareId}`);
-});
+    revalidatePath(`/routine/shares/${s.shareId}`);
+  },
+);
 
 const ResolveSuggestionSchema = z.object({ suggestionId: z.string().min(1) });
 
-export const resolveShareSuggestion = withLogging('resolveShareSuggestion', async (
-  input: z.infer<typeof ResolveSuggestionSchema>,
-) => {
-  const userId = await requireUser();
-  const { suggestionId } = ResolveSuggestionSchema.parse(input);
+export const resolveShareSuggestion = withLogging(
+  'resolveShareSuggestion',
+  async (input: z.infer<typeof ResolveSuggestionSchema>) => {
+    const userId = await requireUser();
+    const { suggestionId } = ResolveSuggestionSchema.parse(input);
 
-  const s = await db.shareSuggestion.findFirst({
-    where: { id: suggestionId, share: { routine: { userId } } },
-    select: { id: true, state: true, shareId: true },
-  });
-  if (!s) throw new Error('Suggestion not found');
-  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, share: { routine: { userId } } },
+      select: { id: true, state: true, shareId: true },
+    });
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
 
-  await db.shareSuggestion.update({
-    where: { id: s.id },
-    data: { state: 'resolved', resolvedAt: new Date() },
-  });
+    await db.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'resolved', resolvedAt: new Date() },
+    });
 
-  revalidatePath(`/routine/shares/${s.shareId}`);
-});
+    revalidatePath(`/routine/shares/${s.shareId}`);
+  },
+);
 
 // ---------------- Owner actions: one-click apply ----------------
 //
@@ -2861,355 +2886,361 @@ const ApplySwapSchema = z.object({
   inExerciseId: z.string().min(1).optional(),
 });
 
-export const applyShareSwap = withLogging('applyShareSwap', async (
-  input: z.infer<typeof ApplySwapSchema>,
-) => {
-  const userId = await requireUser();
-  const { suggestionId, inExerciseId: pickedInId } = ApplySwapSchema.parse(input);
+export const applyShareSwap = withLogging(
+  'applyShareSwap',
+  async (input: z.infer<typeof ApplySwapSchema>) => {
+    const userId = await requireUser();
+    const { suggestionId, inExerciseId: pickedInId } = ApplySwapSchema.parse(input);
 
-  const s = await db.shareSuggestion.findFirst({
-    where: { id: suggestionId, share: { routine: { userId } } },
-  });
-  if (!s) throw new Error('Suggestion not found');
-  if (s.state !== 'open') throw new Error('Suggestion already resolved');
-  if (!s.kind.startsWith('swap_')) throw new Error('Not a swap suggestion');
-  if (s.targetType !== 'routine_day' || !s.targetId) {
-    throw new Error('Cannot apply: target missing');
-  }
-
-  const payload = s.payload as {
-    outExerciseId?: string;
-    inExerciseId?: string;
-    candidateIds?: string[];
-  };
-  const outExerciseId = payload.outExerciseId;
-  if (!outExerciseId) throw new Error('Cannot apply: out exercise missing');
-
-  let inExerciseId: string | undefined = pickedInId;
-  if (!inExerciseId && s.kind === 'swap_specific') {
-    inExerciseId = payload.inExerciseId;
-  }
-  if (!inExerciseId) throw new Error('Cannot apply: pick which exercise to swap in');
-  if (
-    s.kind === 'swap_anyof' &&
-    payload.candidateIds &&
-    !payload.candidateIds.includes(inExerciseId)
-  ) {
-    throw new Error('Cannot apply: picked exercise was not suggested');
-  }
-
-  if (outExerciseId === inExerciseId) {
-    await db.shareSuggestion.update({
-      where: { id: s.id },
-      data: { state: 'applied', resolvedAt: new Date() },
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, share: { routine: { userId } } },
     });
-    return;
-  }
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (!s.kind.startsWith('swap_')) throw new Error('Not a swap suggestion');
+    if (s.targetType !== 'routine_day' || !s.targetId) {
+      throw new Error('Cannot apply: target missing');
+    }
 
-  const day = await db.routineDay.findFirst({
-    where: { id: s.targetId, routine: { userId } },
-    include: { template: { select: { id: true } } },
-  });
-  if (!day) throw new Error('Routine day not found');
+    const payload = s.payload as {
+      outExerciseId?: string;
+      inExerciseId?: string;
+      candidateIds?: string[];
+    };
+    const outExerciseId = payload.outExerciseId;
+    if (!outExerciseId) throw new Error('Cannot apply: out exercise missing');
 
-  await requireAvailableExercise(userId, inExerciseId);
+    let inExerciseId: string | undefined = pickedInId;
+    if (!inExerciseId && s.kind === 'swap_specific') {
+      inExerciseId = payload.inExerciseId;
+    }
+    if (!inExerciseId) throw new Error('Cannot apply: pick which exercise to swap in');
+    if (
+      s.kind === 'swap_anyof' &&
+      payload.candidateIds &&
+      !payload.candidateIds.includes(inExerciseId)
+    ) {
+      throw new Error('Cannot apply: picked exercise was not suggested');
+    }
 
-  const targetEntry = await db.templateExercise.findFirst({
-    where: { templateId: day.template.id, exerciseId: outExerciseId },
-  });
-  if (!targetEntry) throw new Error("That exercise isn't in the template anymore.");
+    if (outExerciseId === inExerciseId) {
+      await db.shareSuggestion.update({
+        where: { id: s.id },
+        data: { state: 'applied', resolvedAt: new Date() },
+      });
+      return;
+    }
 
-  const collision = await db.templateExercise.findFirst({
-    where: { templateId: day.template.id, exerciseId: inExerciseId },
-    select: { id: true },
-  });
-  if (collision) throw new Error('That exercise is already in the template.');
+    const day = await db.routineDay.findFirst({
+      where: { id: s.targetId, routine: { userId } },
+      include: { template: { select: { id: true } } },
+    });
+    if (!day) throw new Error('Routine day not found');
 
-  await db.$transaction([
-    db.templateExercise.update({
-      where: { id: targetEntry.id },
-      data: { exerciseId: inExerciseId },
-    }),
-    db.routineDayPendingSwap.deleteMany({
-      where: { routineDayId: day.id, outExerciseId },
-    }),
-    db.shareSuggestion.update({
-      where: { id: s.id },
-      data: { state: 'applied', resolvedAt: new Date() },
-    }),
-  ]);
+    await requireAvailableExercise(userId, inExerciseId);
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath(`/routine/shares/${s.shareId}`);
-});
+    const targetEntry = await db.templateExercise.findFirst({
+      where: { templateId: day.template.id, exerciseId: outExerciseId },
+    });
+    if (!targetEntry) throw new Error("That exercise isn't in the template anymore.");
+
+    const collision = await db.templateExercise.findFirst({
+      where: { templateId: day.template.id, exerciseId: inExerciseId },
+      select: { id: true },
+    });
+    if (collision) throw new Error('That exercise is already in the template.');
+
+    await db.$transaction([
+      db.templateExercise.update({
+        where: { id: targetEntry.id },
+        data: { exerciseId: inExerciseId },
+      }),
+      db.routineDayPendingSwap.deleteMany({
+        where: { routineDayId: day.id, outExerciseId },
+      }),
+      db.shareSuggestion.update({
+        where: { id: s.id },
+        data: { state: 'applied', resolvedAt: new Date() },
+      }),
+    ]);
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath(`/routine/shares/${s.shareId}`);
+  },
+);
 
 const ApplyRemoveSchema = z.object({ suggestionId: z.string().min(1) });
 
-export const applyShareRemove = withLogging('applyShareRemove', async (
-  input: z.infer<typeof ApplyRemoveSchema>,
-) => {
-  const userId = await requireUser();
-  const { suggestionId } = ApplyRemoveSchema.parse(input);
+export const applyShareRemove = withLogging(
+  'applyShareRemove',
+  async (input: z.infer<typeof ApplyRemoveSchema>) => {
+    const userId = await requireUser();
+    const { suggestionId } = ApplyRemoveSchema.parse(input);
 
-  const s = await db.shareSuggestion.findFirst({
-    where: { id: suggestionId, share: { routine: { userId } } },
-  });
-  if (!s) throw new Error('Suggestion not found');
-  if (s.state !== 'open') throw new Error('Suggestion already resolved');
-  if (s.kind !== 'remove') throw new Error('Cannot apply: not a remove suggestion');
-
-  const payload = s.payload as { templateExerciseId?: string };
-  if (!payload.templateExerciseId) throw new Error('Cannot apply: target missing');
-
-  const te = await db.templateExercise.findFirst({
-    where: {
-      id: payload.templateExerciseId,
-      template: { routineDays: { some: { routine: { userId } } } },
-    },
-    select: { id: true, templateId: true, position: true },
-  });
-  if (!te) throw new Error("That exercise isn't in the template anymore.");
-
-  await db.$transaction(async (tx) => {
-    await tx.templateExercise.delete({ where: { id: te.id } });
-    const remaining = await tx.templateExercise.findMany({
-      where: { templateId: te.templateId },
-      orderBy: { position: 'asc' },
-      select: { id: true },
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, share: { routine: { userId } } },
     });
-    for (let i = 0; i < remaining.length; i++) {
-      await tx.templateExercise.update({
-        where: { id: remaining[i].id },
-        data: { position: i },
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (s.kind !== 'remove') throw new Error('Cannot apply: not a remove suggestion');
+
+    const payload = s.payload as { templateExerciseId?: string };
+    if (!payload.templateExerciseId) throw new Error('Cannot apply: target missing');
+
+    const te = await db.templateExercise.findFirst({
+      where: {
+        id: payload.templateExerciseId,
+        template: { routineDays: { some: { routine: { userId } } } },
+      },
+      select: { id: true, templateId: true, position: true },
+    });
+    if (!te) throw new Error("That exercise isn't in the template anymore.");
+
+    await db.$transaction(async (tx) => {
+      await tx.templateExercise.delete({ where: { id: te.id } });
+      const remaining = await tx.templateExercise.findMany({
+        where: { templateId: te.templateId },
+        orderBy: { position: 'asc' },
+        select: { id: true },
       });
-    }
-    await tx.shareSuggestion.update({
-      where: { id: s.id },
-      data: { state: 'applied', resolvedAt: new Date() },
+      for (let i = 0; i < remaining.length; i++) {
+        await tx.templateExercise.update({
+          where: { id: remaining[i].id },
+          data: { position: i },
+        });
+      }
+      await tx.shareSuggestion.update({
+        where: { id: s.id },
+        data: { state: 'applied', resolvedAt: new Date() },
+      });
     });
-  });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath(`/routine/shares/${s.shareId}`);
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath(`/routine/shares/${s.shareId}`);
+  },
+);
 
 const ApplyReorderSchema = z.object({ suggestionId: z.string().min(1) });
 
-export const applyShareReorder = withLogging('applyShareReorder', async (
-  input: z.infer<typeof ApplyReorderSchema>,
-) => {
-  const userId = await requireUser();
-  const { suggestionId } = ApplyReorderSchema.parse(input);
+export const applyShareReorder = withLogging(
+  'applyShareReorder',
+  async (input: z.infer<typeof ApplyReorderSchema>) => {
+    const userId = await requireUser();
+    const { suggestionId } = ApplyReorderSchema.parse(input);
 
-  const s = await db.shareSuggestion.findFirst({
-    where: { id: suggestionId, share: { routine: { userId } } },
-  });
-  if (!s) throw new Error('Suggestion not found');
-  if (s.state !== 'open') throw new Error('Suggestion already resolved');
-  if (s.kind !== 'reorder') throw new Error('Cannot apply: not a reorder suggestion');
-  if (s.targetType !== 'routine_day' || !s.targetId) {
-    throw new Error('Cannot apply: target missing');
-  }
-
-  const payload = s.payload as { orderedTemplateExerciseIds?: string[] };
-  if (!payload.orderedTemplateExerciseIds || payload.orderedTemplateExerciseIds.length === 0) {
-    throw new Error('Cannot apply: order missing');
-  }
-
-  const day = await db.routineDay.findFirst({
-    where: { id: s.targetId, routine: { userId } },
-    include: { template: { include: { exercises: { select: { id: true } } } } },
-  });
-  if (!day) throw new Error('Routine day not found');
-
-  const currentIds = new Set(day.template.exercises.map((e) => e.id));
-  const orderIds = payload.orderedTemplateExerciseIds;
-  if (orderIds.length !== currentIds.size || !orderIds.every((id) => currentIds.has(id))) {
-    throw new Error('Cannot apply: lineup has changed since the suggestion');
-  }
-
-  await db.$transaction(async (tx) => {
-    for (let i = 0; i < orderIds.length; i++) {
-      await tx.templateExercise.update({
-        where: { id: orderIds[i] },
-        data: { position: i },
-      });
-    }
-    await tx.shareSuggestion.update({
-      where: { id: s.id },
-      data: { state: 'applied', resolvedAt: new Date() },
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, share: { routine: { userId } } },
     });
-  });
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (s.kind !== 'reorder') throw new Error('Cannot apply: not a reorder suggestion');
+    if (s.targetType !== 'routine_day' || !s.targetId) {
+      throw new Error('Cannot apply: target missing');
+    }
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath(`/routine/shares/${s.shareId}`);
-});
+    const payload = s.payload as { orderedTemplateExerciseIds?: string[] };
+    if (!payload.orderedTemplateExerciseIds || payload.orderedTemplateExerciseIds.length === 0) {
+      throw new Error('Cannot apply: order missing');
+    }
+
+    const day = await db.routineDay.findFirst({
+      where: { id: s.targetId, routine: { userId } },
+      include: { template: { include: { exercises: { select: { id: true } } } } },
+    });
+    if (!day) throw new Error('Routine day not found');
+
+    const currentIds = new Set(day.template.exercises.map((e) => e.id));
+    const orderIds = payload.orderedTemplateExerciseIds;
+    if (orderIds.length !== currentIds.size || !orderIds.every((id) => currentIds.has(id))) {
+      throw new Error('Cannot apply: lineup has changed since the suggestion');
+    }
+
+    await db.$transaction(async (tx) => {
+      for (let i = 0; i < orderIds.length; i++) {
+        await tx.templateExercise.update({
+          where: { id: orderIds[i] },
+          data: { position: i },
+        });
+      }
+      await tx.shareSuggestion.update({
+        where: { id: s.id },
+        data: { state: 'applied', resolvedAt: new Date() },
+      });
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath(`/routine/shares/${s.shareId}`);
+  },
+);
 
 const ApplyInsertSchema = z.object({
   suggestionId: z.string().min(1),
   exerciseIds: z.array(z.string().min(1)).optional(),
 });
 
-export const applyShareInsert = withLogging('applyShareInsert', async (
-  input: z.infer<typeof ApplyInsertSchema>,
-) => {
-  const userId = await requireUser();
-  const { suggestionId, exerciseIds: picked } = ApplyInsertSchema.parse(input);
+export const applyShareInsert = withLogging(
+  'applyShareInsert',
+  async (input: z.infer<typeof ApplyInsertSchema>) => {
+    const userId = await requireUser();
+    const { suggestionId, exerciseIds: picked } = ApplyInsertSchema.parse(input);
 
-  const s = await db.shareSuggestion.findFirst({
-    where: { id: suggestionId, share: { routine: { userId } } },
-  });
-  if (!s) throw new Error('Suggestion not found');
-  if (s.state !== 'open') throw new Error('Suggestion already resolved');
-  if (s.kind !== 'insert') throw new Error('Not an insert suggestion');
-  if (s.targetType !== 'routine_day' || !s.targetId) {
-    throw new Error('Cannot apply: target missing');
-  }
-
-  const payload = s.payload as { atPosition?: number; exerciseIds?: string[] };
-  const suggested = payload.exerciseIds ?? [];
-  const toInsert = (picked && picked.length > 0 ? picked : suggested).filter((id) =>
-    suggested.includes(id),
-  );
-  if (toInsert.length === 0) throw new Error('Cannot apply: pick at least one exercise');
-
-  const day = await db.routineDay.findFirst({
-    where: { id: s.targetId, routine: { userId } },
-    include: {
-      template: {
-        include: { exercises: { select: { id: true, position: true, exerciseId: true } } },
-      },
-    },
-  });
-  if (!day) throw new Error('Routine day not found');
-
-  const existingIds = new Set(day.template.exercises.map((e) => e.exerciseId));
-  const fresh = toInsert.filter((id) => !existingIds.has(id));
-  for (const id of fresh) {
-    await requireAvailableExercise(userId, id);
-  }
-  if (fresh.length === 0) {
-    await db.shareSuggestion.update({
-      where: { id: s.id },
-      data: { state: 'applied', resolvedAt: new Date() },
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, share: { routine: { userId } } },
     });
-    return;
-  }
-
-  const rawPos = payload.atPosition;
-  const insertAt =
-    typeof rawPos === 'number' && rawPos >= 0
-      ? Math.min(rawPos, day.template.exercises.length)
-      : day.template.exercises.length;
-
-  await db.$transaction(async (tx) => {
-    const shift = fresh.length;
-    const toShift = day.template.exercises
-      .filter((e) => e.position >= insertAt)
-      .sort((a, b) => b.position - a.position);
-    for (const e of toShift) {
-      await tx.templateExercise.update({
-        where: { id: e.id },
-        data: { position: e.position + shift },
-      });
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (s.kind !== 'insert') throw new Error('Not an insert suggestion');
+    if (s.targetType !== 'routine_day' || !s.targetId) {
+      throw new Error('Cannot apply: target missing');
     }
-    for (let i = 0; i < fresh.length; i++) {
-      await tx.templateExercise.create({
-        data: {
-          templateId: day.template.id,
-          exerciseId: fresh[i],
-          position: insertAt + i,
+
+    const payload = s.payload as { atPosition?: number; exerciseIds?: string[] };
+    const suggested = payload.exerciseIds ?? [];
+    const toInsert = (picked && picked.length > 0 ? picked : suggested).filter((id) =>
+      suggested.includes(id),
+    );
+    if (toInsert.length === 0) throw new Error('Cannot apply: pick at least one exercise');
+
+    const day = await db.routineDay.findFirst({
+      where: { id: s.targetId, routine: { userId } },
+      include: {
+        template: {
+          include: { exercises: { select: { id: true, position: true, exerciseId: true } } },
         },
-      });
-    }
-    await tx.shareSuggestion.update({
-      where: { id: s.id },
-      data: { state: 'applied', resolvedAt: new Date() },
+      },
     });
-  });
+    if (!day) throw new Error('Routine day not found');
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath(`/routine/shares/${s.shareId}`);
-});
+    const existingIds = new Set(day.template.exercises.map((e) => e.exerciseId));
+    const fresh = toInsert.filter((id) => !existingIds.has(id));
+    for (const id of fresh) {
+      await requireAvailableExercise(userId, id);
+    }
+    if (fresh.length === 0) {
+      await db.shareSuggestion.update({
+        where: { id: s.id },
+        data: { state: 'applied', resolvedAt: new Date() },
+      });
+      return;
+    }
+
+    const rawPos = payload.atPosition;
+    const insertAt =
+      typeof rawPos === 'number' && rawPos >= 0
+        ? Math.min(rawPos, day.template.exercises.length)
+        : day.template.exercises.length;
+
+    await db.$transaction(async (tx) => {
+      const shift = fresh.length;
+      const toShift = day.template.exercises
+        .filter((e) => e.position >= insertAt)
+        .sort((a, b) => b.position - a.position);
+      for (const e of toShift) {
+        await tx.templateExercise.update({
+          where: { id: e.id },
+          data: { position: e.position + shift },
+        });
+      }
+      for (let i = 0; i < fresh.length; i++) {
+        await tx.templateExercise.create({
+          data: {
+            templateId: day.template.id,
+            exerciseId: fresh[i],
+            position: insertAt + i,
+          },
+        });
+      }
+      await tx.shareSuggestion.update({
+        where: { id: s.id },
+        data: { state: 'applied', resolvedAt: new Date() },
+      });
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath(`/routine/shares/${s.shareId}`);
+  },
+);
 
 const ApplyCustomExerciseSchema = z.object({
   suggestionId: z.string().min(1),
   insertIntoRoutineDayId: z.string().min(1).optional(),
 });
 
-export const applyShareCustomExercise = withLogging('applyShareCustomExercise', async (
-  input: z.infer<typeof ApplyCustomExerciseSchema>,
-) => {
-  const userId = await requireUser();
-  const { suggestionId, insertIntoRoutineDayId } = ApplyCustomExerciseSchema.parse(input);
+export const applyShareCustomExercise = withLogging(
+  'applyShareCustomExercise',
+  async (input: z.infer<typeof ApplyCustomExerciseSchema>) => {
+    const userId = await requireUser();
+    const { suggestionId, insertIntoRoutineDayId } = ApplyCustomExerciseSchema.parse(input);
 
-  const s = await db.shareSuggestion.findFirst({
-    where: { id: suggestionId, share: { routine: { userId } } },
-  });
-  if (!s) throw new Error('Suggestion not found');
-  if (s.state !== 'open') throw new Error('Suggestion already resolved');
-  if (s.kind !== 'custom_exercise') throw new Error('Cannot apply: not a custom-exercise suggestion');
+    const s = await db.shareSuggestion.findFirst({
+      where: { id: suggestionId, share: { routine: { userId } } },
+    });
+    if (!s) throw new Error('Suggestion not found');
+    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (s.kind !== 'custom_exercise')
+      throw new Error('Cannot apply: not a custom-exercise suggestion');
 
-  const payload = s.payload as {
-    name?: string;
-    primaryMuscles?: string[];
-    secondaryMuscles?: string[];
-    module?: string;
-    metric?: 'reps' | 'time';
-  };
-  const name = payload.name?.trim();
-  if (!name) throw new Error('Cannot apply: custom exercise has no name');
+    const payload = s.payload as {
+      name?: string;
+      primaryMuscles?: string[];
+      secondaryMuscles?: string[];
+      module?: string;
+      metric?: 'reps' | 'time';
+    };
+    const name = payload.name?.trim();
+    if (!name) throw new Error('Cannot apply: custom exercise has no name');
 
-  let resolvedName = name;
-  const collision = await db.exercise.findFirst({
-    where: { ownerId: userId, name: resolvedName },
-    select: { id: true },
-  });
-  if (collision) resolvedName = `${name} (suggested)`;
+    let resolvedName = name;
+    const collision = await db.exercise.findFirst({
+      where: { ownerId: userId, name: resolvedName },
+      select: { id: true },
+    });
+    if (collision) resolvedName = `${name} (suggested)`;
 
-  const created = await db.exercise.create({
-    data: {
-      name: resolvedName,
-      module: payload.module || 'Custom',
-      primaryMuscles: payload.primaryMuscles ?? [],
-      secondaryMuscles: payload.secondaryMuscles ?? [],
-      metric: payload.metric === 'time' ? 'time' : 'reps',
-      isCustom: true,
-      ownerId: userId,
-    },
-  });
-
-  if (insertIntoRoutineDayId) {
-    const day = await db.routineDay.findFirst({
-      where: { id: insertIntoRoutineDayId, routine: { userId } },
-      include: {
-        template: { include: { exercises: { select: { id: true, exerciseId: true } } } },
+    const created = await db.exercise.create({
+      data: {
+        name: resolvedName,
+        module: payload.module || 'Custom',
+        primaryMuscles: payload.primaryMuscles ?? [],
+        secondaryMuscles: payload.secondaryMuscles ?? [],
+        metric: payload.metric === 'time' ? 'time' : 'reps',
+        isCustom: true,
+        ownerId: userId,
       },
     });
-    if (day && !day.template.exercises.some((e) => e.exerciseId === created.id)) {
-      await db.templateExercise.create({
-        data: {
-          templateId: day.template.id,
-          exerciseId: created.id,
-          position: day.template.exercises.length,
+
+    if (insertIntoRoutineDayId) {
+      const day = await db.routineDay.findFirst({
+        where: { id: insertIntoRoutineDayId, routine: { userId } },
+        include: {
+          template: { include: { exercises: { select: { id: true, exerciseId: true } } } },
         },
       });
+      if (day && !day.template.exercises.some((e) => e.exerciseId === created.id)) {
+        await db.templateExercise.create({
+          data: {
+            templateId: day.template.id,
+            exerciseId: created.id,
+            position: day.template.exercises.length,
+          },
+        });
+      }
     }
-  }
 
-  await db.shareSuggestion.update({
-    where: { id: s.id },
-    data: { state: 'applied', resolvedAt: new Date() },
-  });
+    await db.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'applied', resolvedAt: new Date() },
+    });
 
-  revalidatePath('/');
-  revalidatePath('/routine');
-  revalidatePath(`/routine/shares/${s.shareId}`);
-});
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath(`/routine/shares/${s.shareId}`);
+  },
+);
 
 // ---------------- Public actions ----------------
 
@@ -3220,48 +3251,49 @@ const RegisterReviewerSchema = z.object({
   displayName: DisplayNameSchema,
 });
 
-export const registerShareReviewer = withLogging('registerShareReviewer', async (
-  input: z.infer<typeof RegisterReviewerSchema>,
-) => {
-  const { token, displayName } = RegisterReviewerSchema.parse(input);
-  const cleaned = displayName.trim();
-  if (cleaned.length === 0) throw new Error('Display name cannot be empty');
+export const registerShareReviewer = withLogging(
+  'registerShareReviewer',
+  async (input: z.infer<typeof RegisterReviewerSchema>) => {
+    const { token, displayName } = RegisterReviewerSchema.parse(input);
+    const cleaned = displayName.trim();
+    if (cleaned.length === 0) throw new Error('Display name cannot be empty');
 
-  const share = await requireActiveShare(token);
+    const share = await requireActiveShare(token);
 
-  const jar = await cookies();
-  const cookieName = shareCookieName(share.id);
-  const existingKey = jar.get(cookieName)?.value;
+    const jar = await cookies();
+    const cookieName = shareCookieName(share.id);
+    const existingKey = jar.get(cookieName)?.value;
 
-  let reviewer = existingKey
-    ? await db.shareReviewer.findUnique({
-        where: { shareId_reviewerKey: { shareId: share.id, reviewerKey: existingKey } },
-      })
-    : null;
+    let reviewer = existingKey
+      ? await db.shareReviewer.findUnique({
+          where: { shareId_reviewerKey: { shareId: share.id, reviewerKey: existingKey } },
+        })
+      : null;
 
-  if (reviewer) {
-    if (reviewer.displayName !== cleaned) {
-      reviewer = await db.shareReviewer.update({
-        where: { id: reviewer.id },
-        data: { displayName: cleaned },
+    if (reviewer) {
+      if (reviewer.displayName !== cleaned) {
+        reviewer = await db.shareReviewer.update({
+          where: { id: reviewer.id },
+          data: { displayName: cleaned },
+        });
+      }
+    } else {
+      const key = urlsafeRandom(REVIEWER_KEY_BYTES);
+      reviewer = await db.shareReviewer.create({
+        data: { shareId: share.id, reviewerKey: key, displayName: cleaned },
+      });
+      jar.set(cookieName, key, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: `/share/${token}`,
+        maxAge: SHARE_COOKIE_MAX_AGE,
       });
     }
-  } else {
-    const key = urlsafeRandom(REVIEWER_KEY_BYTES);
-    reviewer = await db.shareReviewer.create({
-      data: { shareId: share.id, reviewerKey: key, displayName: cleaned },
-    });
-    jar.set(cookieName, key, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: `/share/${token}`,
-      maxAge: SHARE_COOKIE_MAX_AGE,
-    });
-  }
 
-  revalidatePath(`/share/${token}`);
-});
+    revalidatePath(`/share/${token}`);
+  },
+);
 
 const PostCommentSchema = z.object({
   token: z.string().min(1),
@@ -3270,36 +3302,37 @@ const PostCommentSchema = z.object({
   body: z.string().trim().min(1).max(2000),
 });
 
-export const postShareComment = withLogging('postShareComment', async (
-  input: z.infer<typeof PostCommentSchema>,
-) => {
-  const { token, targetType, targetId, body } = PostCommentSchema.parse(input);
-  if (body.trim().length === 0) throw new Error('Comment body cannot be empty');
+export const postShareComment = withLogging(
+  'postShareComment',
+  async (input: z.infer<typeof PostCommentSchema>) => {
+    const { token, targetType, targetId, body } = PostCommentSchema.parse(input);
+    if (body.trim().length === 0) throw new Error('Comment body cannot be empty');
 
-  const share = await requireActiveShare(token);
-  const reviewer = await requireReviewer(share.id);
+    const share = await requireActiveShare(token);
+    const reviewer = await requireReviewer(share.id);
 
-  const comment = await db.shareComment.create({
-    data: {
-      shareId: share.id,
-      reviewerId: reviewer.id,
-      targetType,
-      targetId,
-      body: body.trim(),
-    },
-  });
+    const comment = await db.shareComment.create({
+      data: {
+        shareId: share.id,
+        reviewerId: reviewer.id,
+        targetType,
+        targetId,
+        body: body.trim(),
+      },
+    });
 
-  await notifyRoutineOwner(share.routine.userId, {
-    kind: 'share_comment',
-    title: `${reviewer.displayName} commented`,
-    body: body.trim().slice(0, 200),
-    url: `/routine/shares/${share.id}#comment-${comment.id}`,
-    sourceType: 'share_comment',
-    sourceId: comment.id,
-  });
+    await notifyRoutineOwner(share.routine.userId, {
+      kind: 'share_comment',
+      title: `${reviewer.displayName} commented`,
+      body: body.trim().slice(0, 200),
+      url: `/routine/shares/${share.id}#comment-${comment.id}`,
+      sourceType: 'share_comment',
+      sourceId: comment.id,
+    });
 
-  revalidatePath(`/share/${token}`);
-});
+    revalidatePath(`/share/${token}`);
+  },
+);
 
 const SuggestionPayloadSchema = z.union([
   z.object({
@@ -3411,36 +3444,37 @@ function summarizeSuggestion(payload: z.infer<typeof SuggestionPayloadSchema>): 
   }
 }
 
-export const postShareSuggestion = withLogging('postShareSuggestion', async (
-  input: z.infer<typeof PostSuggestionSchema>,
-) => {
-  const { token, targetType, targetId, payload } = PostSuggestionSchema.parse(input);
+export const postShareSuggestion = withLogging(
+  'postShareSuggestion',
+  async (input: z.infer<typeof PostSuggestionSchema>) => {
+    const { token, targetType, targetId, payload } = PostSuggestionSchema.parse(input);
 
-  const share = await requireActiveShare(token);
-  const reviewer = await requireReviewer(share.id);
+    const share = await requireActiveShare(token);
+    const reviewer = await requireReviewer(share.id);
 
-  const created = await db.shareSuggestion.create({
-    data: {
-      shareId: share.id,
-      reviewerId: reviewer.id,
-      kind: payload.kind,
-      targetType,
-      targetId,
-      payload,
-    },
-  });
+    const created = await db.shareSuggestion.create({
+      data: {
+        shareId: share.id,
+        reviewerId: reviewer.id,
+        kind: payload.kind,
+        targetType,
+        targetId,
+        payload,
+      },
+    });
 
-  await notifyRoutineOwner(share.routine.userId, {
-    kind: 'share_suggestion',
-    title: `${reviewer.displayName} suggested a ${humanSuggestionKind(payload.kind)}`,
-    body: summarizeSuggestion(payload),
-    url: `/routine/shares/${share.id}#suggestion-${created.id}`,
-    sourceType: 'share_suggestion',
-    sourceId: created.id,
-  });
+    await notifyRoutineOwner(share.routine.userId, {
+      kind: 'share_suggestion',
+      title: `${reviewer.displayName} suggested a ${humanSuggestionKind(payload.kind)}`,
+      body: summarizeSuggestion(payload),
+      url: `/routine/shares/${share.id}#suggestion-${created.id}`,
+      sourceType: 'share_suggestion',
+      sourceId: created.id,
+    });
 
-  revalidatePath(`/share/${token}`);
-});
+    revalidatePath(`/share/${token}`);
+  },
+);
 
 const ToggleReactionSchema = z.object({
   token: z.string().min(1),
@@ -3449,39 +3483,40 @@ const ToggleReactionSchema = z.object({
   kind: z.literal('good'),
 });
 
-export const toggleShareReaction = withLogging('toggleShareReaction', async (
-  input: z.infer<typeof ToggleReactionSchema>,
-) => {
-  const { token, targetType, targetId, kind } = ToggleReactionSchema.parse(input);
+export const toggleShareReaction = withLogging(
+  'toggleShareReaction',
+  async (input: z.infer<typeof ToggleReactionSchema>) => {
+    const { token, targetType, targetId, kind } = ToggleReactionSchema.parse(input);
 
-  const share = await requireActiveShare(token);
-  const reviewer = await requireReviewer(share.id);
+    const share = await requireActiveShare(token);
+    const reviewer = await requireReviewer(share.id);
 
-  const existing = await db.shareReaction.findUnique({
-    where: {
-      reviewerId_targetType_targetId_kind: {
-        reviewerId: reviewer.id,
-        targetType,
-        targetId,
-        kind,
+    const existing = await db.shareReaction.findUnique({
+      where: {
+        reviewerId_targetType_targetId_kind: {
+          reviewerId: reviewer.id,
+          targetType,
+          targetId,
+          kind,
+        },
       },
-    },
-  });
-
-  if (existing) {
-    await db.shareReaction.delete({ where: { id: existing.id } });
-  } else {
-    await db.shareReaction.create({
-      data: { shareId: share.id, reviewerId: reviewer.id, targetType, targetId, kind },
     });
-    await notifyRoutineOwner(share.routine.userId, {
-      kind: 'share_reaction',
-      title: `${reviewer.displayName} liked an exercise`,
-      url: `/routine/shares/${share.id}`,
-      sourceType: 'share_reaction',
-      sourceId: targetId,
-    });
-  }
 
-  revalidatePath(`/share/${token}`);
-});
+    if (existing) {
+      await db.shareReaction.delete({ where: { id: existing.id } });
+    } else {
+      await db.shareReaction.create({
+        data: { shareId: share.id, reviewerId: reviewer.id, targetType, targetId, kind },
+      });
+      await notifyRoutineOwner(share.routine.userId, {
+        kind: 'share_reaction',
+        title: `${reviewer.displayName} liked an exercise`,
+        url: `/routine/shares/${share.id}`,
+        sourceType: 'share_reaction',
+        sourceId: targetId,
+      });
+    }
+
+    revalidatePath(`/share/${token}`);
+  },
+);

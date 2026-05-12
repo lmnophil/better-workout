@@ -21,8 +21,7 @@ export function AppNav() {
       `}
     >
       {TABS.map((tab) => {
-        const isActive =
-          tab.href === '/' ? pathname === '/' : pathname.startsWith(tab.href);
+        const isActive = tab.href === '/' ? pathname === '/' : pathname.startsWith(tab.href);
         const Icon = tab.icon;
         return (
           <Link

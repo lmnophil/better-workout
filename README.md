@@ -2,7 +2,7 @@
 
 A self-hosted workout tracker that supports flexible, freeform sessions guided by a visual coverage map. Browse exercises (built-in or your own customs), log sets and reps, see what you did last time, and check muscle group coverage so you can decide what to work on next.
 
-The app is deliberately neutral about *how* you train — no prescribed program, no opinionated suggestions. It just shows you the data: what you've done, what's been neglected, where you are versus your weekly volume targets. You craft the workout.
+The app is deliberately neutral about _how_ you train — no prescribed program, no opinionated suggestions. It just shows you the data: what you've done, what's been neglected, where you are versus your weekly volume targets. You craft the workout.
 
 > **For AI assistants and developers:** start with [`CLAUDE.md`](./CLAUDE.md) at the repo root. It's the standing brief on the project's stance, conventions, and gotchas. Substantive design decisions and the reasoning behind them are in [`docs/decisions.md`](./docs/decisions.md).
 

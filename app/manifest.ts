@@ -8,8 +8,7 @@ export default function manifest(): MetadataRoute.Manifest {
     id: '/',
     name: 'Workout Tracker',
     short_name: 'Workout',
-    description:
-      'Track sets, reps, and muscle group coverage. Self-hosted, no opinions.',
+    description: 'Track sets, reps, and muscle group coverage. Self-hosted, no opinions.',
     start_url: '/',
     display: 'standalone',
     orientation: 'portrait',

@@ -28,8 +28,12 @@ export function groupBy<T, K extends string | number>(
   const map = new Map<K, T[]>();
   for (const item of items) {
     const k = keyOf(item);
-    if (!map.has(k)) map.set(k, []);
-    map.get(k)!.push(item);
+    let bucket = map.get(k);
+    if (!bucket) {
+      bucket = [];
+      map.set(k, bucket);
+    }
+    bucket.push(item);
   }
   return map;
 }

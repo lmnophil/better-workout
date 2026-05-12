@@ -27,8 +27,12 @@ export function VolumeTargetsEditor({ muscles }: { muscles: MuscleSetting[] }) {
   // Group by category
   const grouped = new Map<string, MuscleSetting[]>();
   for (const m of muscles) {
-    if (!grouped.has(m.category)) grouped.set(m.category, []);
-    grouped.get(m.category)!.push(m);
+    let bucket = grouped.get(m.category);
+    if (!bucket) {
+      bucket = [];
+      grouped.set(m.category, bucket);
+    }
+    bucket.push(m);
   }
 
   return (

@@ -30,7 +30,7 @@ Two reasonable shapes — pick one.
 
 ```yaml
 ports:
-  - '192.168.1.42:3000:3000'   # the app server's own LAN IP
+  - '192.168.1.42:3000:3000' # the app server's own LAN IP
 ```
 
 This stops Docker from listening on every interface on the host — useful if the app server has multiple NICs or a public IP you don't want exposing `:3000`.
@@ -101,7 +101,7 @@ curl -i http://192.168.1.42:3000/api/healthz
 # expect: HTTP/1.1 200, {"status":"ok",...}
 ```
 
-From a laptop on the same LAN, but *not* the edge server:
+From a laptop on the same LAN, but _not_ the edge server:
 
 ```bash
 curl -i http://192.168.1.42:3000/api/healthz
@@ -129,7 +129,7 @@ The logged client IP should be your real public IP, not `192.168.x.x`. If it's t
 
 **Rate limits hitting unrelated users.** Every request looks like it's coming from one IP — the edge Caddy's. The trust chain is broken: either the edge Caddy isn't setting `X-Forwarded-For`, or the app is reading the wrong header. Re-check the three `header_up` lines and confirm `getClientIp()` reads `X-Forwarded-For` (it does, but if you've patched it, double-check).
 
-**`OAuthCallbackError: redirect_uri_mismatch`.** `AUTH_URL` in `.env` doesn't match the URL the user reached you on, or doesn't match what's registered in Google Cloud Console. It must be the *public* URL the user typed, with the exact scheme and host.
+**`OAuthCallbackError: redirect_uri_mismatch`.** `AUTH_URL` in `.env` doesn't match the URL the user reached you on, or doesn't match what's registered in Google Cloud Console. It must be the _public_ URL the user typed, with the exact scheme and host.
 
 **Magic links contain `http://192.168...` or `localhost`.** `AUTH_URL` on the app server is wrong. Auth.js uses it verbatim to build links. Fix it and `docker compose up -d app` to pick up the change.
 

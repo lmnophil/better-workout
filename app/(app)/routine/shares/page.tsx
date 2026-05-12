@@ -34,9 +34,7 @@ export default async function RoutineSharesPage() {
           <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
             Share your routine
           </div>
-          <h1 className="font-display text-2xl">
-            {routine?.name ?? 'No routine yet'}
-          </h1>
+          <h1 className="font-display text-2xl">{routine?.name ?? 'No routine yet'}</h1>
         </div>
         <Link href="/routine" className="text-xs text-ink-400 hover:text-ink-200">
           back to routine
