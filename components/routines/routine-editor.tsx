@@ -60,6 +60,17 @@ import {
 } from '@/lib/routine';
 import { EXERCISE_MODULES, moduleDescription } from '@/lib/exercises-data';
 import {
+  ESTIMATED_SETS_FALLBACK,
+  TIER_VISUALS,
+  computeDayVolumes,
+  computeRoutineVolumes,
+  formatSets,
+  tierFor as coverageTierFor,
+  type CoverageTier,
+  type MuscleVolume,
+  type MuscleVolumes,
+} from '@/lib/coverage';
+import {
   buildStarterRoutine,
   EQUIPMENT_GROUPS,
   EQUIPMENT_LABELS,
@@ -192,8 +203,10 @@ export type MuscleGroupClient = {
   id: string;
   label: string;
   category: 'lower' | 'upper' | 'trunk' | 'mobility' | 'other';
-  // Effective weekly volume target — user override if any, else seed default.
-  // Null for muscles tracked only by recency (mobility/balance/cardio).
+  // Effective weekly volume target and minimum from the user's tier preset
+  // combined with any per-muscle override. Both null for muscles tracked only
+  // by recency (mobility/balance/cardio).
+  min: number | null;
   target: number | null;
   isOverridden: boolean;
   // Plain-English description shown as a hover tooltip on the coverage row,
@@ -758,6 +771,9 @@ function DraftEditor({
               isPending={isPending}
               seedTemplates={seedTemplates}
               restByExerciseId={restByExerciseId}
+              muscleGroups={muscleGroups}
+              exerciseById={exerciseById}
+              routineTotals={totals}
               onAddDay={addDay}
               onRenameDay={(id, name) => updateDay(id, (d) => ({ ...d, name }))}
               onSetWeekday={(id, weekday) => updateDay(id, (d) => ({ ...d, weekday }))}
@@ -1333,6 +1349,9 @@ function LiveEditor({
         isPending={isPending}
         seedTemplates={seedTemplates}
         restByExerciseId={restByExerciseId}
+        muscleGroups={muscleGroups}
+        exerciseById={exerciseById}
+        routineTotals={totals}
         onAddDay={(weekday) => {
           startTransition(async () => {
             try {
@@ -1771,6 +1790,12 @@ type DaysSectionProps = {
   // Per-exercise effective rest seconds (override → global default). Lets
   // DayCard estimate per-exercise time without re-resolving the user's prefs.
   restByExerciseId: Map<string, number>;
+  // Coverage context — DayCard renders a per-day strip showing what each day
+  // contributes, coloured by the muscle's *weekly* status so the user can see
+  // "this day hits chest, which is currently below min weekly".
+  muscleGroups: MuscleGroupClient[];
+  exerciseById: Map<string, ExerciseInfo>;
+  routineTotals: MuscleTotals;
 };
 
 function DaysSection(props: DaysSectionProps) {
@@ -1929,6 +1954,9 @@ function dispatchProps(p: DaysSectionProps) {
     onUpdateExercisePlanned: p.onUpdateExercisePlanned,
     onSwapExercise: p.onSwapExercise,
     restByExerciseId: p.restByExerciseId,
+    muscleGroups: p.muscleGroups,
+    exerciseById: p.exerciseById,
+    routineTotals: p.routineTotals,
   };
 }
 
@@ -1958,6 +1986,9 @@ type DayCardProps = {
   onUpdateExercisePlanned: (id: string, exerciseId: string, patch: PlannedPatch) => void;
   onSwapExercise: ((id: string, exerciseId: string) => void) | null;
   restByExerciseId: Map<string, number>;
+  muscleGroups: MuscleGroupClient[];
+  exerciseById: Map<string, ExerciseInfo>;
+  routineTotals: MuscleTotals;
 };
 
 function DayCard({
@@ -1983,6 +2014,9 @@ function DayCard({
   onUpdateExercisePlanned,
   onSwapExercise,
   restByExerciseId,
+  muscleGroups,
+  exerciseById,
+  routineTotals,
 }: DayCardProps) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(day.name);
@@ -2202,6 +2236,15 @@ function DayCard({
           >
             + Add a note for this day
           </button>
+        )}
+
+        {day.exercises.length > 0 && (
+          <PerDayCoverageStrip
+            day={day}
+            muscleGroups={muscleGroups}
+            exerciseById={exerciseById}
+            routineTotals={routineTotals}
+          />
         )}
 
         {day.exercises.length > 0 ? (
@@ -2635,112 +2678,133 @@ function PlannedInputs({
 // here we're answering "is the plan I'm building balanced?", not "what have
 // I worked recently?"
 //
-// Computation mirrors getWeeklyVolume:
-//   - Each set credits primary muscles 1.0, secondary 0.5
-//   - Total sets = sum across all days of plannedSets ?? ESTIMATED_SETS_FALLBACK
-//
-// Defaults to 3 sets when plannedSets is null so the panel still shows a
-// reasonable estimate before the user has filled in numbers — the same
-// fallback the seeder uses. A tiny "?" badge marks any totals that include
-// estimated entries so the user knows where the number is firm vs. inferred.
+// Volume math and tier logic live in lib/coverage.ts (imported above) so the
+// /coverage page, share view, and suggestion-diff preview all agree on what
+// "meets target" and "below minimum" mean. We adapt the editor's day shape
+// to the shared PlannedDay shape here.
 
-const ESTIMATED_SETS_FALLBACK = 3;
-
-type MuscleTotal = { sets: number; estimated: boolean };
-type MuscleTotals = Map<string, MuscleTotal>;
+type MuscleTotal = MuscleVolume;
+type MuscleTotals = MuscleVolumes;
 
 function computeMuscleTotals(
   days: EditorDay[],
   exerciseById: Map<string, ExerciseInfo>,
 ): { totals: MuscleTotals; anyEstimated: boolean } {
-  const totals: MuscleTotals = new Map();
-  let anyEstimated = false;
-  for (const day of days) {
-    for (const dx of day.exercises) {
-      const ex = exerciseById.get(dx.exerciseId);
-      if (!ex) continue;
-      const sets = dx.plannedSets ?? ESTIMATED_SETS_FALLBACK;
-      const estimated = dx.plannedSets === null;
-      if (estimated) anyEstimated = true;
-      for (const m of ex.primaryMuscles) {
-        const cur = totals.get(m) ?? { sets: 0, estimated: false };
-        totals.set(m, {
-          sets: cur.sets + sets,
-          estimated: cur.estimated || estimated,
-        });
-      }
-      for (const m of ex.secondaryMuscles) {
-        const cur = totals.get(m) ?? { sets: 0, estimated: false };
-        totals.set(m, {
-          sets: cur.sets + sets * 0.5,
-          estimated: cur.estimated || estimated,
-        });
-      }
-    }
-  }
-  return { totals, anyEstimated };
+  return computeRoutineVolumes(
+    days.map((d) => ({
+      exercises: d.exercises.map((dx) => ({
+        exerciseId: dx.exerciseId,
+        plannedSets: dx.plannedSets,
+      })),
+    })),
+    exerciseById,
+  );
 }
 
-// Coverage tier for a single muscle's structural total. Mirrors the language
-// of /coverage's recency tiers but speaks volume instead: at/over target,
-// partial, none-with-target, or untracked entirely.
-type CoverageTier = 'meets' | 'under' | 'gap' | 'untracked';
-
-function tierFor(sets: number, target: number | null): CoverageTier {
-  if (target === null || target === 0) return 'untracked';
-  if (sets >= target) return 'meets';
-  if (sets > 0) return 'under';
-  return 'gap';
+// Bounds adapter: muscle group → { min, target } for tierFor. Returns null
+// when the muscle isn't tracked by volume (mobility / balance / cardio).
+function boundsFor(m: MuscleGroupClient): { min: number; target: number } | null {
+  if (m.target === null || m.target === 0) return null;
+  return { min: m.min ?? Math.round(m.target * 0.5), target: m.target };
 }
 
-// Tier palette — we use rgba inline rather than introducing new tailwind
-// tokens so the visuals stay consistent with /coverage's existing palette.
-// `bg` tints the row, `bar` colors the volume bar, `dot` is the small
-// indicator. Lifted greens/reds match the coverage view's "fresh"/"neglected"
-// hexes deliberately so the two surfaces speak the same color language.
-const TIER_TOKENS: Record<CoverageTier, { bg: string; border: string; bar: string; dot: string }> =
-  {
-    meets: {
-      bg: 'rgba(132, 204, 22, 0.10)',
-      border: 'rgba(132, 204, 22, 0.55)',
-      bar: '#84cc16',
-      dot: '#84cc16',
-    },
-    under: {
-      bg: 'rgba(180, 100, 70, 0.10)',
-      border: 'rgba(180, 100, 70, 0.5)',
-      bar: '#b46446',
-      dot: '#b46446',
-    },
-    gap: {
-      bg: 'rgba(220, 80, 60, 0.12)',
-      border: 'rgba(220, 80, 60, 0.6)',
-      bar: '#dc503c',
-      dot: '#dc503c',
-    },
-    untracked: {
-      bg: 'rgba(60, 50, 45, 0.20)',
-      border: 'rgba(60, 50, 45, 0.4)',
-      bar: '#3a2f25',
-      dot: '#3a2f25',
-    },
-  };
+function tierFor(sets: number, m: MuscleGroupClient): CoverageTier {
+  return coverageTierFor(sets, boundsFor(m));
+}
 
 // The set of muscle ids the routine is currently *short* on — has a target,
 // and the planned sets are below it. Drives the picker's gap-filling
 // highlight. "Untracked" muscles never enter this set: there's no target to
-// be short of.
+// be short of. "Emphasis" doesn't either — extra work isn't a gap.
 function gapMusclesFromTotals(
   totals: MuscleTotals,
   muscleGroups: MuscleGroupClient[],
 ): Set<string> {
   const out = new Set<string>();
   for (const m of muscleGroups) {
-    if (m.target === null || m.target === 0) continue;
+    const b = boundsFor(m);
+    if (b === null) continue;
     const sets = totals.get(m.id)?.sets ?? 0;
-    if (sets < m.target) out.add(m.id);
+    const t = coverageTierFor(sets, b);
+    if (t === 'under' || t === 'gap') out.add(m.id);
   }
   return out;
+}
+
+// ============ PER-DAY COVERAGE STRIP ============
+//
+// One compact line per day showing what muscles the day hits and at what
+// volume. Each muscle pill is coloured by its *weekly* coverage tier (so the
+// user can see at a glance whether this day is contributing to a muscle that's
+// already on target vs one that's a gap). Top 6 muscles by day-local sets, so
+// the strip stays scannable on a 4-exercise day or a 12-exercise one.
+
+function PerDayCoverageStrip({
+  day,
+  muscleGroups,
+  exerciseById,
+  routineTotals,
+}: {
+  day: EditorDay;
+  muscleGroups: MuscleGroupClient[];
+  exerciseById: Map<string, ExerciseInfo>;
+  routineTotals: MuscleTotals;
+}) {
+  const top = useMemo(() => {
+    const { totals } = computeDayVolumes(
+      {
+        exercises: day.exercises.map((dx) => ({
+          exerciseId: dx.exerciseId,
+          plannedSets: dx.plannedSets,
+        })),
+      },
+      exerciseById,
+    );
+    const byId = new Map(muscleGroups.map((m) => [m.id, m]));
+    const rows: { id: string; label: string; sets: number; tier: CoverageTier }[] = [];
+    for (const [muscleId, vol] of totals) {
+      if (vol.sets <= 0) continue;
+      const m = byId.get(muscleId);
+      if (!m) continue;
+      const weeklyTier = tierFor(routineTotals.get(muscleId)?.sets ?? 0, m);
+      rows.push({ id: muscleId, label: m.label, sets: vol.sets, tier: weeklyTier });
+    }
+    // Sort by sets desc so the muscles this day actually emphasizes lead.
+    rows.sort((a, b) => b.sets - a.sets);
+    return rows.slice(0, 6);
+  }, [day, muscleGroups, exerciseById, routineTotals]);
+
+  if (top.length === 0) return null;
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap py-0.5">
+      <span
+        className="text-[9px] tracking-[0.2em] uppercase text-ink-600 shrink-0 mr-0.5"
+        title="What this day hits, coloured by the muscle's weekly coverage tier."
+      >
+        Hits
+      </span>
+      {top.map((m) => {
+        const tok = TIER_VISUALS[m.tier];
+        return (
+          <span
+            key={m.id}
+            className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border"
+            style={{ background: tok.bg, borderColor: tok.border }}
+            title={`${m.label}: ${formatSets(m.sets)} sets this day · weekly tier: ${tok.label}`}
+          >
+            <span
+              className="w-1 h-1 rounded-full shrink-0"
+              style={{ background: tok.dot }}
+              aria-hidden="true"
+            />
+            <span className="text-ink-200">{m.label}</span>
+            <span className="text-ink-500">{formatSets(m.sets)}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 // ============ COVERAGE PANEL ============
@@ -2772,20 +2836,25 @@ function CoveragePanel({
   // Headline counts for the summary line. Untracked muscles are excluded
   // from the denominator — they aren't graded.
   const summary = useMemo(() => {
-    let meets = 0;
+    let onTarget = 0;
+    let ok = 0;
     let under = 0;
     let gap = 0;
+    let emphasis = 0;
     let trackedTotal = 0;
     for (const m of muscleGroups) {
-      if (m.target === null || m.target === 0) continue;
+      const b = boundsFor(m);
+      if (b === null) continue;
       trackedTotal++;
       const sets = totals.get(m.id)?.sets ?? 0;
-      const t = tierFor(sets, m.target);
-      if (t === 'meets') meets++;
+      const t = coverageTierFor(sets, b);
+      if (t === 'target') onTarget++;
+      else if (t === 'ok') ok++;
       else if (t === 'under') under++;
       else if (t === 'gap') gap++;
+      else if (t === 'emphasis') emphasis++;
     }
-    return { meets, under, gap, trackedTotal };
+    return { target: onTarget, ok, under, gap, emphasis, trackedTotal };
   }, [totals, muscleGroups]);
 
   const hasAnything = totals.size > 0;
@@ -2838,16 +2907,24 @@ function CoverageLegend() {
         What do these colors mean?
       </summary>
       <div className="mt-2 mb-1 pl-3 border-l border-ink-800 space-y-1.5 text-[11px] text-ink-300 leading-relaxed">
-        <LegendRow tier="meets" label="On target">
-          Weekly sets meet the target. Hover any muscle for details on what hits it.
+        <LegendRow tier="target" label="On target">
+          Weekly sets meet or exceed the target. The stretch goal — solid week.
         </LegendRow>
-        <LegendRow tier="under" label="Below target">
-          Some work is happening, but not enough for the weekly target. Often fine for smaller
-          postural muscles; consider adding a set or two for the main movers.
+        <LegendRow tier="ok" label="Good">
+          Above the minimum but below the target. A solid maintenance dose for most lifters;
+          push higher only if growth is the goal.
+        </LegendRow>
+        <LegendRow tier="under" label="Below min">
+          Some work is happening, but less than the floor. Worth adding a set or two — even a
+          postural muscle benefits from getting past the minimum.
         </LegendRow>
         <LegendRow tier="gap" label="Gap">
           Zero sets across the cycle on a muscle that has a target. Worth a deliberate choice —
           either tag-fill (add an exercise) or override the target down.
+        </LegendRow>
+        <LegendRow tier="emphasis" label="Emphasis">
+          Well above target. Not a problem — flagged in case you wanted balanced coverage and
+          this slipped past. Often intentional (specialization, lagging part).
         </LegendRow>
         <LegendRow tier="untracked" label="Untracked">
           Mobility, balance, and cardio rows. Tracked by recency on the Coverage page, not weekly
@@ -2856,7 +2933,7 @@ function CoverageLegend() {
         <p className="text-[10px] italic text-ink-500 pt-1">
           A smaller target (like Lower traps at 6 or Adductors at 4) doesn’t mean the muscle is less
           important — it’s a small/postural muscle that gets a lot of secondary credit from the main
-          lifts, so less direct work is needed. Override any target in Settings.
+          lifts, so less direct work is needed. Tier and per-muscle overrides live in Settings.
         </p>
       </div>
     </details>
@@ -2872,7 +2949,7 @@ function LegendRow({
   label: string;
   children: React.ReactNode;
 }) {
-  const tok = TIER_TOKENS[tier];
+  const tok = TIER_VISUALS[tier];
   return (
     <div className="flex items-baseline gap-2">
       <span
@@ -2891,15 +2968,17 @@ function LegendRow({
 function SummaryStrip({
   summary,
 }: {
-  summary: { meets: number; under: number; gap: number; trackedTotal: number };
+  summary: { target: number; ok: number; under: number; gap: number; emphasis: number };
 }) {
-  // Three small chips. Hidden when nothing falls into that tier, so the strip
+  // Small chips. Hidden when nothing falls into a tier, so the strip
   // collapses cleanly when the routine is fully built or fully empty.
   const items = (
     [
-      { tier: 'meets', label: 'on target', count: summary.meets },
-      { tier: 'under', label: 'below', count: summary.under },
+      { tier: 'target', label: 'on target', count: summary.target },
+      { tier: 'ok', label: 'good', count: summary.ok },
+      { tier: 'under', label: 'below min', count: summary.under },
       { tier: 'gap', label: 'gap', count: summary.gap },
+      { tier: 'emphasis', label: 'emphasis', count: summary.emphasis },
     ] satisfies { tier: CoverageTier; label: string; count: number }[]
   ).filter((i) => i.count > 0);
 
@@ -2908,7 +2987,7 @@ function SummaryStrip({
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {items.map((i) => {
-        const tok = TIER_TOKENS[i.tier];
+        const tok = TIER_VISUALS[i.tier];
         return (
           <span
             key={i.tier}
@@ -2942,20 +3021,22 @@ function CoverageCategory({
   items: MuscleGroupClient[];
   totals: MuscleTotals;
 }) {
-  // Category-level rollup: dominant tier wins, with gap > under > meets >
-  // untracked precedence. Surfaces an at-a-glance dot next to the heading so
-  // the user can scan categories before reading rows.
+  // Category-level rollup: dominant tier wins. gap > under > emphasis > ok >
+  // target > untracked — so a single under-trained muscle in a category dot's
+  // the heading red rather than hiding behind the other rows.
   const heading = useMemo(() => {
     let dominant: CoverageTier = 'untracked';
     const order: Record<CoverageTier, number> = {
-      gap: 3,
-      under: 2,
-      meets: 1,
+      gap: 5,
+      under: 4,
+      emphasis: 3,
+      ok: 2,
+      target: 1,
       untracked: 0,
     };
     for (const m of items) {
       const sets = totals.get(m.id)?.sets ?? 0;
-      const t = tierFor(sets, m.target);
+      const t = tierFor(sets, m);
       if (order[t] > order[dominant]) dominant = t;
     }
     return dominant;
@@ -2966,7 +3047,7 @@ function CoverageCategory({
       <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5 flex items-center gap-2">
         <span
           className="w-1.5 h-1.5 rounded-full shrink-0"
-          style={{ background: TIER_TOKENS[heading].dot }}
+          style={{ background: TIER_VISUALS[heading].dot }}
           aria-hidden="true"
         />
         {CATEGORY_LABEL[category]}
@@ -2990,18 +3071,17 @@ function CoverageRow({
 }) {
   const sets = total?.sets ?? 0;
   const target = muscle.target;
+  const min = muscle.min;
   const hasTarget = target !== null && target > 0;
+  // Cap at target — "100% bar" means "hit target". Emphasis lifts the bar to
+  // 100% tinted blue so the user sees a saturated bar in that case too.
   const ratio = hasTarget ? Math.min(sets / target, 1) : 0;
-  const tier = tierFor(sets, target);
-  const tok = TIER_TOKENS[tier];
+  const minRatio = hasTarget && min !== null && min > 0 ? Math.min(min / target, 1) : 0;
+  const tier = tierFor(sets, muscle);
+  const tok = TIER_VISUALS[tier];
 
-  // Tooltip text combines the description with a target hint when relevant.
-  // Falls through to a plain label-as-tooltip if no description is loaded
-  // (e.g. on a stale client bundle), so the row never goes silent.
   const tooltip = muscle.description
-    ? hasTarget
-      ? `${muscle.label} — ${muscle.description}`
-      : `${muscle.label} — ${muscle.description}`
+    ? `${muscle.label} — ${muscle.description}`
     : muscle.label;
 
   return (
@@ -3021,7 +3101,7 @@ function CoverageRow({
 
       {hasTarget ? (
         <>
-          <div className="flex-1 max-w-[120px] h-1.5 bg-ink-900 rounded-full overflow-hidden">
+          <div className="relative flex-1 max-w-[120px] h-1.5 bg-ink-900 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all"
               style={{
@@ -3029,6 +3109,14 @@ function CoverageRow({
                 background: tok.bar,
               }}
             />
+            {minRatio > 0 && minRatio < 1 && (
+              <div
+                className="absolute top-[-2px] bottom-[-2px] w-px bg-ink-500/60"
+                style={{ left: `${minRatio * 100}%` }}
+                aria-hidden="true"
+                title={`Minimum: ${min} sets`}
+              />
+            )}
           </div>
           <span className="font-mono text-[10px] text-ink-400 shrink-0 w-16 text-right">
             {formatSets(sets)}/{muscle.target}
@@ -3042,10 +3130,6 @@ function CoverageRow({
       )}
     </div>
   );
-}
-
-function formatSets(n: number): string {
-  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 // ============ DANGER ZONE (Live mode) ============

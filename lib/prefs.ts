@@ -9,6 +9,8 @@
 // lib/actions.ts#updateUserPreferences (writes). Runtime context lives at
 // components/ui/prefs-context.tsx.
 
+import { DEFAULT_VOLUME_TIER, type VolumeTier } from './coverage';
+
 export type UserPrefs = {
   // Rest timer
   restTimerEnabled: boolean;
@@ -23,6 +25,9 @@ export type UserPrefs = {
   // Weight stepper: how much the +/- buttons next to the weight input nudge
   // the value by, when no per-exercise override is set.
   defaultWeightIncrement: number;
+
+  // Volume tier preset for coverage. Scales muscle (min, target) bounds.
+  volumeTier: VolumeTier;
 };
 
 export const PREFS_DEFAULTS: UserPrefs = {
@@ -32,4 +37,5 @@ export const PREFS_DEFAULTS: UserPrefs = {
   restTimerVibrate: true,
   defaultSetsPerExercise: 3,
   defaultWeightIncrement: 5,
+  volumeTier: DEFAULT_VOLUME_TIER,
 };

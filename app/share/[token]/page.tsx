@@ -6,8 +6,15 @@
 import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { db } from '@/lib/db';
-import { getShareByToken, getShareActivity } from '@/lib/queries';
+import {
+  getShareByToken,
+  getShareActivity,
+  getUserPreferences,
+  getUserVolumeTargets,
+} from '@/lib/queries';
 import { isScheduleStyle } from '@/lib/routine';
+import { MUSCLE_GROUPS } from '@/lib/exercises-data';
+import { computeRoutineVolumes, effectiveBounds } from '@/lib/coverage';
 import { ReviewerGate } from '@/components/share/reviewer-gate';
 import { ShareView } from '@/components/share/share-view';
 
@@ -30,7 +37,10 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   // picker. The reviewer sees built-ins only — the owner's custom exercises
   // outside this routine aren't part of the share's surface, and customs
   // already on the routine are visible through the routine itself.
-  const [activity, libraryExercises] = await Promise.all([
+  //
+  // Coverage data: load the owner's tier preset + per-muscle overrides so the
+  // reviewer's panel matches what the owner sees in their own routine editor.
+  const [activity, libraryExercises, ownerPrefs, ownerOverrides] = await Promise.all([
     getShareActivity(share.id),
     db.exercise.findMany({
       where: { ownerId: null, deletedAt: null },
@@ -44,6 +54,8 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         metric: true,
       },
     }),
+    getUserPreferences(share.routine.user.id),
+    getUserVolumeTargets(share.routine.user.id),
   ]);
 
   const jar = await cookies();
@@ -55,9 +67,6 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       })
     : null;
 
-  // First-time visitor — collect display name before showing any UI that
-  // would let them post. Server actions also enforce this; the gate is a
-  // friendlier surface than a runtime error.
   if (!reviewer) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6">
@@ -105,6 +114,58 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     })),
   };
 
+  // Compute structural coverage now so the reviewer panel renders with the
+  // numbers baked in. Suggestion diffs are recomputed client-side from the
+  // same per-muscle bounds — they only depend on the (already shipped)
+  // exercise→muscle data plus the proposed payload.
+  const exerciseLookup = new Map<string, { primaryMuscles: string[]; secondaryMuscles: string[] }>();
+  for (const ex of libraryExercises) {
+    exerciseLookup.set(ex.id, {
+      primaryMuscles: ex.primaryMuscles,
+      secondaryMuscles: ex.secondaryMuscles,
+    });
+  }
+  for (const d of routineForClient.days) {
+    for (const ex of d.exercises) {
+      if (!exerciseLookup.has(ex.exerciseId)) {
+        exerciseLookup.set(ex.exerciseId, {
+          primaryMuscles: ex.primaryMuscles,
+          secondaryMuscles: ex.secondaryMuscles,
+        });
+      }
+    }
+  }
+
+  const { totals: baseTotals, anyEstimated } = computeRoutineVolumes(
+    routineForClient.days.map((d) => ({
+      exercises: d.exercises.map((ex) => ({
+        exerciseId: ex.exerciseId,
+        plannedSets: ex.plannedSets,
+      })),
+    })),
+    exerciseLookup,
+  );
+
+  const muscleGroupsForClient = MUSCLE_GROUPS.map((g) => {
+    const bounds = effectiveBounds(g, ownerPrefs.volumeTier, ownerOverrides.get(g.id));
+    return {
+      id: g.id,
+      label: g.label,
+      category: g.category,
+      min: bounds?.min ?? null,
+      target: bounds?.target ?? null,
+      isOverridden: ownerOverrides.has(g.id),
+      description: g.description ?? null,
+    };
+  });
+
+  // Plain-object form for client transport (Maps are not serialized cleanly).
+  const baseTotalsForClient = Array.from(baseTotals.entries()).map(([id, v]) => ({
+    id,
+    sets: v.sets,
+    estimated: v.estimated,
+  }));
+
   return (
     <ShareView
       token={token}
@@ -142,6 +203,12 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         })),
       }}
       library={libraryExercises}
+      coverage={{
+        muscleGroups: muscleGroupsForClient,
+        baseTotals: baseTotalsForClient,
+        anyEstimated,
+        ownerTier: ownerPrefs.volumeTier,
+      }}
     />
   );
 }

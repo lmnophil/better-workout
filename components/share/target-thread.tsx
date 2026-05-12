@@ -12,6 +12,7 @@ import { useState, useTransition } from 'react';
 import { X } from 'lucide-react';
 import { postShareComment, deleteShareComment, deleteShareSuggestion } from '@/lib/actions';
 import type { LibraryExercise } from './reviewer-picker';
+import { SuggestionDiffStrip, type SuggestionDiffResult } from './share-coverage';
 
 type Comment = {
   id: string;
@@ -42,6 +43,16 @@ type Props = {
   libraryById: Map<string, LibraryExercise>;
   allowComment?: boolean;
   compact?: boolean;
+  // Callback owned by the share view — computes "if this suggestion were
+  // accepted, here's the coverage delta". Returning null hides the strip
+  // (e.g. for stickers that don't change set count or for sub-trees where
+  // the parent decided not to render diffs).
+  diffForSuggestion?: (s: {
+    id: string;
+    kind: string;
+    payload: Record<string, unknown>;
+    targetId: string | null;
+  }) => SuggestionDiffResult | null;
 };
 
 export function TargetThread({
@@ -54,6 +65,7 @@ export function TargetThread({
   libraryById,
   allowComment,
   compact,
+  diffForSuggestion,
 }: Props) {
   const [body, setBody] = useState('');
   const [pending, startTransition] = useTransition();
@@ -80,24 +92,40 @@ export function TargetThread({
           {suggestions.map((s) => {
             const mine = s.reviewerId === reviewer.id;
             const canDelete = mine && s.state === 'open';
+            // Only show the diff for still-open suggestions — once applied,
+            // the routine already reflects the change so the delta would be
+            // stale. Once rejected, the change isn't going to happen so the
+            // diff isn't useful either.
+            const diff =
+              s.state === 'open' && diffForSuggestion
+                ? diffForSuggestion({
+                    id: s.id,
+                    kind: s.kind,
+                    payload: s.payload,
+                    targetId,
+                  })
+                : null;
             return (
               <li
                 key={s.id}
-                className="text-xs bg-ink-900/60 border border-ink-800 rounded-md px-2 py-1.5 flex items-baseline justify-between gap-2"
+                className="text-xs bg-ink-900/60 border border-ink-800 rounded-md px-2 py-1.5"
               >
-                <span className="text-ink-300">
-                  <span className="text-ink-100 font-medium">{s.reviewerName}</span>{' '}
-                  <SuggestionInline kind={s.kind} payload={s.payload} libraryById={libraryById} />
-                </span>
-                <span className="flex items-center gap-2 shrink-0">
-                  <SuggestionState state={s.state} />
-                  {canDelete && (
-                    <DeleteButton
-                      label="Remove your suggestion"
-                      onConfirm={() => deleteShareSuggestion({ token, suggestionId: s.id })}
-                    />
-                  )}
-                </span>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-ink-300 min-w-0">
+                    <span className="text-ink-100 font-medium">{s.reviewerName}</span>{' '}
+                    <SuggestionInline kind={s.kind} payload={s.payload} libraryById={libraryById} />
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <SuggestionState state={s.state} />
+                    {canDelete && (
+                      <DeleteButton
+                        label="Remove your suggestion"
+                        onConfirm={() => deleteShareSuggestion({ token, suggestionId: s.id })}
+                      />
+                    )}
+                  </span>
+                </div>
+                {diff && <SuggestionDiffStrip result={diff} />}
               </li>
             );
           })}

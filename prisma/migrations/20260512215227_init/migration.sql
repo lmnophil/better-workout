@@ -112,6 +112,7 @@ CREATE TABLE "UserPreferences" (
     "restTimerVibrate" BOOLEAN NOT NULL DEFAULT true,
     "defaultSetsPerExercise" INTEGER NOT NULL DEFAULT 3,
     "defaultWeightIncrement" DOUBLE PRECISION NOT NULL DEFAULT 5,
+    "volumeTier" TEXT NOT NULL DEFAULT 'balanced',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

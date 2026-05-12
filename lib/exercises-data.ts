@@ -1377,10 +1377,16 @@ export type MuscleGroup = {
   id: string;
   label: string;
   category: MuscleCategory;
-  // Weekly sets target as a sensible default. Per-user overrides live in the
-  // UserVolumeTarget table. Undefined for mobility/balance — those are
-  // frequency-based and tracked through the Coverage view, not volume.
+  // Weekly sets target as a sensible default. The "stretch" goal for the
+  // canonical (balanced) tier. Per-user overrides live in the UserVolumeTarget
+  // table. Undefined for mobility/balance — those are frequency-based and
+  // tracked through the Coverage view, not volume.
   weeklyVolumeTarget?: number;
+  // Floor for "good enough" coverage at the canonical tier. Anything between
+  // minimumWeeklySets and weeklyVolumeTarget counts as solid for most lifters
+  // — only below the minimum is the muscle genuinely under-trained. Defaults
+  // to ~50% of target when omitted.
+  minimumWeeklySets?: number;
   // One-line plain-English description surfaced in coverage tooltips. Tells the
   // user what the muscle is and what kinds of exercises hit it, so the row
   // labels aren't bare jargon. Lower-target ("postural") muscles deliberately
@@ -1390,7 +1396,10 @@ export type MuscleGroup = {
 
 // Defaults are middle-of-the-road hypertrophy targets (~10 sets/week for major
 // muscles, ~8 for smaller assistance muscles, lower for corrective/postural work).
-// Users can override per-muscle in settings. Not gospel — just a reasonable start.
+// Each tracked muscle has a (minimum, target) pair — anywhere in that range is
+// "good enough" for most lifters, only below the minimum is under-trained.
+// Users can override per-muscle in settings; tier presets in lib/coverage.ts
+// scale both numbers up/down for "maintenance" and "athlete" volume levels.
 //
 // A note on the lower targets (lower traps 6, lower back 6, adductors 4): those
 // numbers reflect that these muscles get a lot of secondary credit from main
@@ -1402,6 +1411,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Glutes',
     category: 'lower',
     weeklyVolumeTarget: 12,
+    minimumWeeklySets: 6,
     description:
       'The primary hip extensor — built by squats, deadlifts, hip thrusts, lunges, and dedicated glute work.',
   },
@@ -1410,6 +1420,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Hamstrings',
     category: 'lower',
     weeklyVolumeTarget: 10,
+    minimumWeeklySets: 5,
     description:
       'Back-of-thigh hip extensors and knee flexors. Hit by deadlifts, RDLs, leg curls, and lunges.',
   },
@@ -1418,6 +1429,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Quads',
     category: 'lower',
     weeklyVolumeTarget: 10,
+    minimumWeeklySets: 5,
     description: 'Front-of-thigh knee extensors. Hit by squats, lunges, leg press, step-ups.',
   },
   {
@@ -1425,6 +1437,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Adductors',
     category: 'lower',
     weeklyVolumeTarget: 4,
+    minimumWeeklySets: 2,
     description:
       'Inner-thigh hip stabilizers. Mostly trained as spillover from squats, lunges, and split squats — rarely programmed directly. Lower target reflects the realistic spillover dose.',
   },
@@ -1433,6 +1446,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Chest',
     category: 'upper',
     weeklyVolumeTarget: 10,
+    minimumWeeklySets: 5,
     description: 'Pecs — horizontal pushers. Hit by bench press, push-ups, dips, dumbbell press.',
   },
   {
@@ -1440,6 +1454,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Back',
     category: 'upper',
     weeklyVolumeTarget: 12,
+    minimumWeeklySets: 6,
     description: 'Lats, mid-traps, rhomboids — pulled by rows, pulldowns, pull-ups, deadlifts.',
   },
   {
@@ -1447,6 +1462,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Scapular stabilizers',
     category: 'upper',
     weeklyVolumeTarget: 8,
+    minimumWeeklySets: 4,
     description:
       'Small muscles that anchor the shoulder blade. Hit by face pulls, pull-aparts, Y/T raises, prone work. Postural — keeps shoulders healthy.',
   },
@@ -1455,6 +1471,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Rear delts',
     category: 'upper',
     weeklyVolumeTarget: 8,
+    minimumWeeklySets: 4,
     description:
       'Back of the shoulder. Hit by face pulls, reverse fly, pull-aparts, and rows (secondary). Often underdosed when training is bench-heavy.',
   },
@@ -1463,6 +1480,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Lower traps',
     category: 'upper',
     weeklyVolumeTarget: 6,
+    minimumWeeklySets: 3,
     description:
       'Postural muscles between the shoulder blades. Hit by Y raises, face pulls, pull-aparts, and rows (secondary). Lower target — small muscle, big impact on shoulder health.',
   },
@@ -1471,6 +1489,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Biceps',
     category: 'upper',
     weeklyVolumeTarget: 8,
+    minimumWeeklySets: 4,
     description: 'Front of the upper arm. Hit by curls and pulling movements (secondary).',
   },
   {
@@ -1478,6 +1497,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Triceps',
     category: 'upper',
     weeklyVolumeTarget: 8,
+    minimumWeeklySets: 4,
     description: 'Back of the upper arm. Hit by tricep work and pressing movements (secondary).',
   },
   {
@@ -1485,6 +1505,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Shoulders',
     category: 'upper',
     weeklyVolumeTarget: 10,
+    minimumWeeklySets: 5,
     description:
       'Front and side delts — overhead and lateral raising. Hit by overhead press, lateral raises, and bench/push-ups (secondary).',
   },
@@ -1493,6 +1514,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Core',
     category: 'trunk',
     weeklyVolumeTarget: 8,
+    minimumWeeklySets: 4,
     description:
       'Abs and obliques. Hit by planks, hollow holds, carries, and braced compound lifts (secondary).',
   },
@@ -1501,6 +1523,7 @@ export const MUSCLE_GROUPS: MuscleGroup[] = [
     label: 'Lower back',
     category: 'trunk',
     weeklyVolumeTarget: 6,
+    minimumWeeklySets: 3,
     description:
       'Spinal erectors. Hit primarily as secondary on deadlifts, RDLs, good mornings, and bird-dog work. Lower target — usually well-served by hinge variants.',
   },

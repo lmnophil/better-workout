@@ -4,6 +4,7 @@
 import { cache } from 'react';
 import { db } from '@/lib/db';
 import { PREFS_DEFAULTS, type UserPrefs } from '@/lib/prefs';
+import { DEFAULT_VOLUME_TIER, isVolumeTier } from '@/lib/coverage';
 
 export type ActiveSession = Awaited<ReturnType<typeof getActiveSession>>;
 export type AvailableExercise = Awaited<ReturnType<typeof getAvailableExercises>>[number];
@@ -367,6 +368,7 @@ export const getUserPreferences = cache(async function getUserPreferences(
     restTimerVibrate: row.restTimerVibrate,
     defaultSetsPerExercise: row.defaultSetsPerExercise,
     defaultWeightIncrement: row.defaultWeightIncrement,
+    volumeTier: isVolumeTier(row.volumeTier) ? row.volumeTier : DEFAULT_VOLUME_TIER,
   };
 });
 

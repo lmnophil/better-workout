@@ -10,10 +10,12 @@ import {
   getAvailableExercises,
   getRoutineForUser,
   getTemplates,
+  getUserPreferences,
   getUserVolumeTargets,
 } from '@/lib/queries';
 import { isScheduleStyle } from '@/lib/routine';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
+import { effectiveBounds } from '@/lib/coverage';
 import { RoutineEditor } from '@/components/routines/routine-editor';
 
 export const metadata = { title: 'Routine — Tracker' };
@@ -23,25 +25,30 @@ export default async function RoutinePage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const [routine, templates, availableExercises, userTargets] = await Promise.all([
+  const [routine, templates, availableExercises, userTargets, prefs] = await Promise.all([
     getRoutineForUser(userId),
     getTemplates(userId),
     getAvailableExercises(userId),
     getUserVolumeTargets(userId),
+    getUserPreferences(userId),
   ]);
 
   // Project muscle groups + per-user target overrides into a flat shape the
   // editor can use to build its structural coverage panel without re-fetching.
   // Mobility/balance entries with no default target stay in the list — the
   // panel surfaces them as "recency-only" so they're visible but not graded.
-  const muscleGroups = MUSCLE_GROUPS.map((g) => ({
-    id: g.id,
-    label: g.label,
-    category: g.category,
-    target: userTargets.get(g.id) ?? g.weeklyVolumeTarget ?? null,
-    isOverridden: userTargets.has(g.id),
-    description: g.description ?? null,
-  }));
+  const muscleGroups = MUSCLE_GROUPS.map((g) => {
+    const bounds = effectiveBounds(g, prefs.volumeTier, userTargets.get(g.id));
+    return {
+      id: g.id,
+      label: g.label,
+      category: g.category,
+      min: bounds?.min ?? null,
+      target: bounds?.target ?? null,
+      isOverridden: userTargets.has(g.id),
+      description: g.description ?? null,
+    };
+  });
 
   // Project the routine into a client-friendly shape. Each day's identity is
   // its owned template's name; we surface the exercise lineup in display order

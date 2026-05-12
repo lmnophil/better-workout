@@ -818,6 +818,7 @@ const UpdatePreferencesSchema = z.object({
   restTimerVibrate: z.boolean().optional(),
   defaultSetsPerExercise: z.number().int().min(1).max(20).optional(),
   defaultWeightIncrement: z.number().min(0.25).max(50).optional(),
+  volumeTier: z.enum(['maintenance', 'balanced', 'athlete']).optional(),
 });
 
 /**
@@ -838,6 +839,8 @@ export const updateUserPreferences = withLogging(
 
     revalidatePath('/');
     revalidatePath('/settings');
+    revalidatePath('/coverage');
+    revalidatePath('/routine');
   },
 );
 

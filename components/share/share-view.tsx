@@ -7,7 +7,7 @@
 // authenticated PrefsProvider). All cosmetic settings are either hard-coded
 // or derived from the share payload.
 
-import { useMemo, useState, useTransition } from 'react';
+import { useCallback, useMemo, useState, useTransition } from 'react';
 import { ChevronDown, ChevronUp, ThumbsUp, Wand2, Plus, Pencil } from 'lucide-react';
 import { TargetThread } from './target-thread';
 import { SuggestionBuilder } from './suggestion-builder';
@@ -24,6 +24,12 @@ import {
   estimatePlannedExerciseSeconds,
   formatEstimateCompact,
 } from '@/lib/time-estimate';
+import type { ExerciseMuscleShape, MuscleVolumes, VolumeTier } from '@/lib/coverage';
+import {
+  ShareCoveragePanel,
+  computeSuggestionDiff,
+  type ShareMuscleGroup,
+} from './share-coverage';
 
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -89,12 +95,20 @@ export type ShareActivity = {
   }>;
 };
 
+export type ShareCoverageData = {
+  muscleGroups: ShareMuscleGroup[];
+  baseTotals: { id: string; sets: number; estimated: boolean }[];
+  anyEstimated: boolean;
+  ownerTier: VolumeTier;
+};
+
 type Props = {
   token: string;
   reviewer: { id: string; displayName: string };
   routine: RoutineForShare;
   activity: ShareActivity;
   library: LibraryExercise[];
+  coverage: ShareCoverageData;
 };
 
 type BuilderState =
@@ -125,8 +139,56 @@ type BuilderState =
       kind: 'holistic_remove';
     };
 
-export function ShareView({ token, reviewer, routine, activity, library }: Props) {
+export function ShareView({ token, reviewer, routine, activity, library, coverage }: Props) {
   const [builder, setBuilder] = useState<BuilderState>({ kind: 'none' });
+
+  // Rehydrate the server-shipped totals into a Map so callers can use it the
+  // same shape that lib/coverage.ts produces.
+  const baseTotalsMap = useMemo<MuscleVolumes>(() => {
+    const m = new Map<string, { sets: number; estimated: boolean }>();
+    for (const row of coverage.baseTotals) m.set(row.id, { sets: row.sets, estimated: row.estimated });
+    return m;
+  }, [coverage.baseTotals]);
+
+  // Lookup of exercise muscle data — used by the suggestion-diff helper to
+  // recompute "what would the routine look like after this swap/insert". The
+  // share view already builds a library map below; this one is keyed slimmer.
+  const exerciseLookup = useMemo<Map<string, ExerciseMuscleShape>>(() => {
+    const m = new Map<string, ExerciseMuscleShape>();
+    for (const ex of library) {
+      m.set(ex.id, { primaryMuscles: ex.primaryMuscles, secondaryMuscles: ex.secondaryMuscles });
+    }
+    for (const d of routine.days) {
+      for (const ex of d.exercises) {
+        if (!m.has(ex.exerciseId)) {
+          m.set(ex.exerciseId, {
+            primaryMuscles: ex.primaryMuscles,
+            secondaryMuscles: ex.secondaryMuscles,
+          });
+        }
+      }
+    }
+    return m;
+  }, [library, routine]);
+
+  // Closure over the static inputs the diff needs. Passed into each TargetThread
+  // so per-suggestion diffs can be computed lazily as the thread renders.
+  const diffForSuggestion = useCallback(
+    (s: {
+      id: string;
+      kind: string;
+      payload: Record<string, unknown>;
+      targetId: string | null;
+    }) =>
+      computeSuggestionDiff({
+        routine,
+        suggestion: s,
+        exerciseLookup,
+        muscleGroups: coverage.muscleGroups,
+        baseTotals: baseTotalsMap,
+      }),
+    [routine, exerciseLookup, coverage.muscleGroups, baseTotalsMap],
+  );
 
   // Build O(1) lookups so per-target panels don't filter the whole list each
   // render. The maps stay small (one share's worth of activity), but the
@@ -238,6 +300,16 @@ export function ShareView({ token, reviewer, routine, activity, library }: Props
         </div>
       </header>
 
+      {/* Coverage panel — read-only summary of what the routine hits, against
+          the share owner's volume tier + per-muscle overrides. */}
+      <ShareCoveragePanel
+        muscleGroups={coverage.muscleGroups}
+        totals={baseTotalsMap}
+        anyEstimated={coverage.anyEstimated}
+        ownerTier={coverage.ownerTier}
+        ownerName={routine.ownerName}
+      />
+
       {/* Days */}
       {routine.days.map((day) => {
         const dayKey = targetKey('routine_day', day.id);
@@ -306,6 +378,7 @@ export function ShareView({ token, reviewer, routine, activity, library }: Props
               libraryById={libraryById}
               allowComment
               compact
+              diffForSuggestion={diffForSuggestion}
             />
 
             {/* Exercises */}
@@ -391,6 +464,7 @@ export function ShareView({ token, reviewer, routine, activity, library }: Props
                       libraryById={libraryById}
                       allowComment
                       compact
+                      diffForSuggestion={diffForSuggestion}
                     />
                   </li>
                 );
@@ -414,6 +488,7 @@ export function ShareView({ token, reviewer, routine, activity, library }: Props
         libraryById={libraryById}
         headerCounts={headerCounts}
         onOpenBuilder={setBuilder}
+        diffForSuggestion={diffForSuggestion}
       />
 
       {/* Builder modals */}
@@ -540,6 +615,7 @@ function FloatingNotes({
   libraryById,
   headerCounts,
   onOpenBuilder,
+  diffForSuggestion,
 }: {
   token: string;
   reviewer: { id: string; displayName: string };
@@ -549,6 +625,12 @@ function FloatingNotes({
   libraryById: Map<string, LibraryExercise>;
   headerCounts: { c: number; s: number; r: number };
   onOpenBuilder: (state: BuilderState) => void;
+  diffForSuggestion: (s: {
+    id: string;
+    kind: string;
+    payload: Record<string, unknown>;
+    targetId: string | null;
+  }) => import('./share-coverage').SuggestionDiffResult;
 }) {
   // The composer stays mounted at the page bottom so the reviewer can jot a
   // thought from any scroll position. Existing notes and the structured
@@ -619,6 +701,7 @@ function FloatingNotes({
             libraryById={libraryById}
             allowComment={false}
             compact
+            diffForSuggestion={diffForSuggestion}
           />
         </div>
       )}

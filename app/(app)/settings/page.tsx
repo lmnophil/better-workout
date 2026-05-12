@@ -6,6 +6,7 @@ import { redirect } from 'next/navigation';
 import { getUserVolumeTargets, getHiddenBuiltinTemplates } from '@/lib/queries';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { VolumeTargetsEditor } from '@/components/settings/volume-targets-editor';
+import { VolumeTierEditor } from '@/components/settings/volume-tier-editor';
 import { RestTimerEditor } from '@/components/settings/rest-timer-editor';
 import { WorkoutDefaultsEditor } from '@/components/settings/workout-defaults-editor';
 import { HiddenTemplatesEditor } from '@/components/settings/hidden-templates-editor';
@@ -77,10 +78,23 @@ export default async function SettingsPage() {
 
       <section className="mb-8">
         <div className="mb-3">
+          <h2 className="font-display text-xl">Volume tier</h2>
+          <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
+            Scales every muscle&apos;s (minimum, target) bounds. Pick the level that matches the
+            volume you want to chase. Per-muscle overrides below override this for individual
+            muscles.
+          </p>
+        </div>
+        <VolumeTierEditor />
+      </section>
+
+      <section className="mb-8">
+        <div className="mb-3">
           <h2 className="font-display text-xl">Weekly volume targets</h2>
           <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
-            How many sets per week you&apos;re aiming to hit each muscle group. Defaults are
-            middle-of-the-road hypertrophy targets — adjust them to your goals.
+            Per-muscle target overrides. Defaults come from your volume tier above; set a number
+            here for any muscle you want pinned specifically. The minimum auto-derives as ~50% of
+            the target.
           </p>
         </div>
         <VolumeTargetsEditor muscles={trackable} />

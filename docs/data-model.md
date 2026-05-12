@@ -186,7 +186,7 @@ Per-(user, muscle) override of the weekly volume target. Default targets live as
 
 One row per user, **lazily created on first write**. The query `getUserPreferences()` returns hard-coded defaults when no row exists, so reading is cheap on every page load and we only write when something actually changes.
 
-The fields are all rest-timer related right now (`restTimerEnabled`, `restTimerSeconds`, `restTimerSound`, `restTimerVibrate`). Future preferences (units, theme, notification settings) would slot in here.
+Fields cover rest-timer behaviour (`restTimerEnabled`, `restTimerSeconds`, `restTimerSound`, `restTimerVibrate`), workout defaults (`defaultSetsPerExercise`, `defaultWeightIncrement`), and the `volumeTier` preset that drives the coverage view's (min, target) bounds (`'maintenance' | 'balanced' | 'athlete'`, default `'balanced'`). The tier scales the canonical numbers on each `MUSCLE_GROUP`; `UserVolumeTarget` overrides still win on top of it. See `lib/coverage.ts` for the resolver.
 
 ## Routines
 

@@ -240,6 +240,13 @@ model UserPreferences {
   // can use 1.25, 2.5, etc. Per-exercise overrides live on ExerciseUserSettings.
   defaultWeightIncrement Float @default(5)
 
+  // Volume tier preset for coverage. Scales the (min, target) pair on each
+  // muscle so users can size the bar to their goals without hand-editing
+  // every override. See lib/coverage.ts → VOLUME_TIER_LABELS. String column
+  // rather than an enum because muscle ids are strings and we keep the schema
+  // consistent on that axis.
+  volumeTier String @default("balanced")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
