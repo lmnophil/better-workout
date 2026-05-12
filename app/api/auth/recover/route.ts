@@ -29,5 +29,10 @@ export async function GET(request: Request) {
   for (const name of SESSION_COOKIE_CANDIDATES) {
     response.cookies.delete(name);
   }
+  // Don't let any cache (PWA service worker, browser bfcache, intermediate
+  // proxy) keep this response: it's the one response that's explicitly
+  // clearing a stale auth cookie, and a cached copy would keep stripping
+  // valid cookies on later visits.
+  response.headers.set('Cache-Control', 'no-store');
   return response;
 }

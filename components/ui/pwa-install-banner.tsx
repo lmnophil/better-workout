@@ -29,13 +29,29 @@ export function PWAInstallBanner() {
     // iOS-specific check (Safari sets navigator.standalone when installed)
     if ((window.navigator as { standalone?: boolean }).standalone === true) return;
 
-    // Don't show if dismissed
-    if (localStorage.getItem(DISMISSED_KEY)) return;
+    // Don't show if dismissed. localStorage access can throw under some
+    // strict-privacy settings (Safari ITP in private mode) — treat any read
+    // failure as "not dismissed" so the banner can still appear.
+    try {
+      if (localStorage.getItem(DISMISSED_KEY)) return;
+    } catch {
+      // ignore — fall through to detection
+    }
 
-    // iOS Safari path — no beforeinstallprompt event, just show instructions
+    // iOS Safari path — no beforeinstallprompt event, just show instructions.
+    // iPadOS 13+ reports a Mac UA in Safari ("desktop site" by default), so
+    // the legacy /iPad|iPhone|iPod/ check misses iPads entirely. Detect by
+    // combining UA with a touch-capable Mac heuristic (real Macs report
+    // maxTouchPoints === 0; touch iPads report 5).
     const ua = navigator.userAgent;
-    const onIOS = /iPad|iPhone|iPod/.test(ua) && !(/CriOS|FxiOS|EdgiOS/.test(ua));
-    if (onIOS) {
+    const isLegacyIDevice =
+      /iPad|iPhone|iPod/.test(ua) && !/CriOS|FxiOS|EdgiOS/.test(ua);
+    const isModernIPad =
+      /Macintosh/.test(ua) &&
+      typeof navigator.maxTouchPoints === 'number' &&
+      navigator.maxTouchPoints > 1 &&
+      !/CriOS|FxiOS|EdgiOS/.test(ua);
+    if (isLegacyIDevice || isModernIPad) {
       setIsIOS(true);
       setShow(true);
       return;

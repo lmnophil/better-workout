@@ -2,6 +2,10 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    // `id` pins the PWA identity independently of `start_url`, so a future
+    // tweak to start_url doesn't make installed copies look like a different
+    // app to the browser and trigger a re-install / loss-of-state prompt.
+    id: '/',
     name: 'Workout Tracker',
     short_name: 'Workout',
     description:

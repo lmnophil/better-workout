@@ -21,13 +21,22 @@ import { NextResponse } from 'next/server';
 // Metrics endpoint behavior should be runtime-driven — never statically cached.
 export const dynamic = 'force-dynamic';
 
+// Belt-and-suspenders against intermediate caches (PWA service worker, CDN,
+// browser back/forward cache). `force-dynamic` keeps Next from caching its
+// own response; `no-store` keeps everything downstream honest. The scraped
+// values are sensitive operator data and would also go stale instantly.
+const NO_STORE = { 'Cache-Control': 'no-store' } as const;
+
 export async function GET(request: Request) {
   const expected = process.env.METRICS_TOKEN;
   if (!expected) {
     // Fail closed if the operator hasn't configured a token. Better than
     // accidentally exposing internal counters publicly.
     logger.warn({}, 'metrics.endpoint_disabled_no_token');
-    return new NextResponse('Metrics endpoint not configured', { status: 503 });
+    return new NextResponse('Metrics endpoint not configured', {
+      status: 503,
+      headers: NO_STORE,
+    });
   }
 
   // Accept either Authorization: Bearer <token> or ?token= query param
@@ -37,12 +46,15 @@ export async function GET(request: Request) {
   const provided = headerToken ?? queryToken;
 
   if (provided !== expected) {
-    return new NextResponse('Forbidden', { status: 403 });
+    return new NextResponse('Forbidden', { status: 403, headers: NO_STORE });
   }
 
   const body = await metrics.registry.metrics();
   return new NextResponse(body, {
     status: 200,
-    headers: { 'Content-Type': metrics.registry.contentType },
+    headers: {
+      'Content-Type': metrics.registry.contentType,
+      ...NO_STORE,
+    },
   });
 }

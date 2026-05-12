@@ -51,18 +51,21 @@ export async function getActiveSession(userId: string) {
  * use the user's global default). Loaded as a single inner query so we don't N+1.
  */
 export async function getAvailableExercises(userId: string) {
-  const exercises = await db.exercise.findMany({
-    where: {
-      OR: [{ ownerId: null }, { ownerId: userId }],
-      deletedAt: null,
-    },
-    orderBy: [{ isCustom: 'asc' }, { module: 'asc' }, { name: 'asc' }],
-  });
-
-  const settings = await db.exerciseUserSettings.findMany({
-    where: { userId },
-    select: { exerciseId: true, restTimerSeconds: true, weightIncrement: true },
-  });
+  // The two reads are independent — fire them in parallel so we don't wait
+  // for the exercise list before starting the per-user settings query.
+  const [exercises, settings] = await Promise.all([
+    db.exercise.findMany({
+      where: {
+        OR: [{ ownerId: null }, { ownerId: userId }],
+        deletedAt: null,
+      },
+      orderBy: [{ isCustom: 'asc' }, { module: 'asc' }, { name: 'asc' }],
+    }),
+    db.exerciseUserSettings.findMany({
+      where: { userId },
+      select: { exerciseId: true, restTimerSeconds: true, weightIncrement: true },
+    }),
+  ]);
   const settingsByExerciseId = new Map(
     settings.map((s) => [s.exerciseId, s] as const),
   );
@@ -94,6 +97,9 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
   const since = new Date();
   since.setDate(since.getDate() - 180);
 
+  // Use `select` to pull only the columns we serialize to the client. Skipping
+  // setLog id/sessionId/position trims wire and memory cost for users with
+  // hundreds of trailing-180-day sessions.
   const sessions = await db.workoutSession.findMany({
     where: {
       userId,
@@ -102,8 +108,19 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
       ...(excludeSessionId ? { id: { not: excludeSessionId } } : {}),
     },
     orderBy: { date: 'desc' },
-    include: {
-      setLogs: { orderBy: { setNumber: 'asc' } },
+    select: {
+      date: true,
+      setLogs: {
+        orderBy: { setNumber: 'asc' },
+        select: {
+          exerciseId: true,
+          setNumber: true,
+          reps: true,
+          weight: true,
+          seconds: true,
+          notes: true,
+        },
+      },
     },
   });
 
@@ -123,26 +140,29 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
   >();
 
   for (const session of sessions) {
-    // Group this session's setLogs by exerciseId
+    // Group this session's setLogs by exerciseId, skipping any already claimed
+    // by a newer session so we don't waste work building unused arrays.
     const byExercise = new Map<string, typeof session.setLogs>();
     for (const set of session.setLogs) {
-      if (!byExercise.has(set.exerciseId)) byExercise.set(set.exerciseId, []);
-      byExercise.get(set.exerciseId)!.push(set);
-    }
-    // Claim any exercises not yet seen
-    for (const [exerciseId, sets] of byExercise) {
-      if (!result.has(exerciseId)) {
-        result.set(exerciseId, {
-          sessionDate: session.date,
-          sets: sets.map((s) => ({
-            setNumber: s.setNumber,
-            reps: s.reps,
-            weight: s.weight,
-            seconds: s.seconds,
-            notes: s.notes,
-          })),
-        });
+      if (result.has(set.exerciseId)) continue;
+      let bucket = byExercise.get(set.exerciseId);
+      if (!bucket) {
+        bucket = [];
+        byExercise.set(set.exerciseId, bucket);
       }
+      bucket.push(set);
+    }
+    for (const [exerciseId, sets] of byExercise) {
+      result.set(exerciseId, {
+        sessionDate: session.date,
+        sets: sets.map((s) => ({
+          setNumber: s.setNumber,
+          reps: s.reps,
+          weight: s.weight,
+          seconds: s.seconds,
+          notes: s.notes,
+        })),
+      });
     }
   }
 
@@ -183,10 +203,16 @@ export async function getLastSetsForExerciseIds(
       setLogs: { some: { exerciseId: { in: exerciseIds } } },
     },
     orderBy: { date: 'desc' },
-    include: {
+    select: {
       setLogs: {
         where: { exerciseId: { in: exerciseIds } },
         orderBy: { setNumber: 'asc' },
+        select: {
+          exerciseId: true,
+          reps: true,
+          weight: true,
+          seconds: true,
+        },
       },
     },
   });
@@ -196,13 +222,25 @@ export async function getLastSetsForExerciseIds(
     { sets: { reps: number | null; weight: number | null; seconds: number | null }[] }
   >();
   for (const session of sessions) {
-    for (const set of session.setLogs) {
-      if (result.has(set.exerciseId)) continue;
-      // Collect every set for this exerciseId in this session, in order.
-      const sets = session.setLogs
-        .filter((s) => s.exerciseId === set.exerciseId)
-        .map((s) => ({ reps: s.reps, weight: s.weight, seconds: s.seconds }));
-      result.set(set.exerciseId, { sets });
+    // Group this session's filtered setLogs by exerciseId in one pass —
+    // skipping ones already claimed by a newer session so we don't build
+    // arrays we'd discard. Replaces a prior nested `filter` that was O(n²)
+    // in the session's setLog count.
+    const byExercise = new Map<
+      string,
+      { reps: number | null; weight: number | null; seconds: number | null }[]
+    >();
+    for (const s of session.setLogs) {
+      if (result.has(s.exerciseId)) continue;
+      let bucket = byExercise.get(s.exerciseId);
+      if (!bucket) {
+        bucket = [];
+        byExercise.set(s.exerciseId, bucket);
+      }
+      bucket.push({ reps: s.reps, weight: s.weight, seconds: s.seconds });
+    }
+    for (const [exerciseId, sets] of byExercise) {
+      result.set(exerciseId, { sets });
     }
     if (result.size === exerciseIds.length) break;
   }
@@ -231,24 +269,26 @@ export async function getCoverageData(userId: string) {
   const sessions = await db.workoutSession.findMany({
     where: { userId, completedAt: { not: null }, date: { gte: since } },
     orderBy: { date: 'desc' },
-    include: {
+    select: {
+      date: true,
       setLogs: {
-        include: {
+        select: {
           exercise: { select: { primaryMuscles: true, secondaryMuscles: true } },
         },
       },
     },
   });
 
-  // Walk newest-first; first appearance wins
+  // Walk newest-first; first appearance wins.
   const lastWorkedByMuscle = new Map<string, Date>();
   for (const session of sessions) {
     for (const setLog of session.setLogs) {
-      const allMuscles = [
-        ...setLog.exercise.primaryMuscles,
-        ...setLog.exercise.secondaryMuscles,
-      ];
-      for (const muscle of allMuscles) {
+      for (const muscle of setLog.exercise.primaryMuscles) {
+        if (!lastWorkedByMuscle.has(muscle)) {
+          lastWorkedByMuscle.set(muscle, session.date);
+        }
+      }
+      for (const muscle of setLog.exercise.secondaryMuscles) {
         if (!lastWorkedByMuscle.has(muscle)) {
           lastWorkedByMuscle.set(muscle, session.date);
         }
@@ -281,7 +321,7 @@ export async function getWeeklyVolume(userId: string) {
         date: { gte: sevenDaysAgo },
       },
     },
-    include: {
+    select: {
       exercise: { select: { primaryMuscles: true, secondaryMuscles: true } },
     },
   });

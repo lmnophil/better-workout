@@ -5,7 +5,7 @@
 // Uses isPending from useTransition to disable buttons during in-flight actions
 // (prevents double-submit) and useConfirm for on-brand confirmation dialogs.
 
-import { useState, useTransition, useEffect } from 'react';
+import { useState, useTransition, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Plus, Check, Calendar, Clock, Trash2, BookmarkPlus, ArrowRight } from 'lucide-react';
 import {
@@ -168,23 +168,43 @@ export function WorkoutView({
   const toggleSound = () => updatePrefs({ restTimerSound: !prefs.restTimerSound });
   const toggleVibrate = () => updatePrefs({ restTimerVibrate: !prefs.restTimerVibrate });
 
-  // Quick lookups
-  const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
-  const lastByExercise = new Map(lastSets.map((l) => [l.exerciseId, l]));
-  const routineNoteByExercise = new Map(
-    routineExerciseNotes.map((n) => [n.exerciseId, n.note]),
+  // Quick lookups — memoized so they aren't rebuilt on unrelated state changes
+  // (picker open, transition pending, save-template dialog, etc.). With dozens
+  // of exercises this avoids a small but real allocation churn each render.
+  const exerciseById = useMemo(
+    () => new Map(availableExercises.map((e) => [e.id, e])),
+    [availableExercises],
+  );
+  const lastByExercise = useMemo(
+    () => new Map(lastSets.map((l) => [l.exerciseId, l])),
+    [lastSets],
+  );
+  const routineNoteByExercise = useMemo(
+    () => new Map(routineExerciseNotes.map((n) => [n.exerciseId, n.note])),
+    [routineExerciseNotes],
   );
 
-  // Group active session's setLogs by exerciseId, preserving order of first appearance
-  const setLogsByExercise = groupBy(activeSession?.setLogs ?? [], (s) => s.exerciseId);
-  const exerciseOrderInSession: string[] = [];
-  for (const set of activeSession?.setLogs ?? []) {
-    if (!exerciseOrderInSession.includes(set.exerciseId)) {
-      exerciseOrderInSession.push(set.exerciseId);
+  // Group active session's setLogs by exerciseId, preserving first-appearance
+  // order. Use a Set for the seen-check so we stay O(n) — `Array.includes`
+  // inside the loop was O(n²) for sessions with many exercises.
+  const { setLogsByExercise, exerciseOrderInSession } = useMemo(() => {
+    const setLogs = activeSession?.setLogs ?? [];
+    const byExercise = groupBy(setLogs, (s) => s.exerciseId);
+    const seen = new Set<string>();
+    const order: string[] = [];
+    for (const set of setLogs) {
+      if (!seen.has(set.exerciseId)) {
+        seen.add(set.exerciseId);
+        order.push(set.exerciseId);
+      }
     }
-  }
+    return { setLogsByExercise: byExercise, exerciseOrderInSession: order };
+  }, [activeSession?.setLogs]);
 
-  const exerciseIdsAlreadyInSession = new Set(exerciseOrderInSession);
+  const exerciseIdsAlreadyInSession = useMemo(
+    () => new Set(exerciseOrderInSession),
+    [exerciseOrderInSession],
+  );
   const sessionStarted = activeSession !== null && exerciseOrderInSession.length > 0;
 
   // Active-session time estimate. Walks the exercises in their session order
@@ -698,6 +718,13 @@ function EmptyState({
   routine: Omit<RoutineTimelineProps, 'availableExercises'> | null;
   availableExercises: ExerciseInfo[];
 }) {
+  // Built once and reused by every TemplateRow's time estimate — without this
+  // each row built its own copy of the same map.
+  const exerciseById = useMemo(
+    () => new Map(availableExercises.map((e) => [e.id, e])),
+    [availableExercises],
+  );
+
   // Layered surface: a routine timeline (when the user has one) leads, with
   // template-list and ad-hoc paths underneath. Without a routine, the layout
   // is what it always was — templates and the picker.
@@ -725,7 +752,7 @@ function EmptyState({
               <TemplateRow
                 key={t.id}
                 template={t}
-                availableExercises={availableExercises}
+                exerciseById={exerciseById}
                 onStart={() => onStartFromTemplate(t.id)}
                 onDelete={() =>
                   t.isBuiltin
@@ -790,16 +817,18 @@ function BuildRoutineCTA() {
 
 function TemplateRow({
   template,
-  availableExercises,
+  exerciseById,
   onStart,
   onDelete,
   disabled,
 }: {
   template: TemplateClient;
-  // Used to resolve each planned exercise's metric and per-user rest override
-  // when computing the time estimate. Templates ship the planned dimensions
-  // (sets/reps/seconds) but not the exercise's metric, so we reach across.
-  availableExercises: ExerciseInfo[];
+  // Shared lookup built once by EmptyState — avoids each row rebuilding the
+  // same map. Used to resolve each planned exercise's metric and per-user
+  // rest override when computing the time estimate. Templates ship the
+  // planned dimensions (sets/reps/seconds) but not the exercise's metric,
+  // so we reach across.
+  exerciseById: Map<string, ExerciseInfo>;
   // Called when the user taps the trash icon. The parent decides whether
   // this means "delete" (user template) or "hide" (built-in) — by the time
   // it reaches here both look the same.
@@ -810,7 +839,6 @@ function TemplateRow({
   const trailingActionLabel = template.isBuiltin ? 'Hide' : 'Delete';
   const { prefs } = usePrefs();
 
-  const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
   const templateEstimateSec = estimatePlannedTotalSeconds(
     template.plannedExercises.flatMap((p) => {
       const ex = exerciseById.get(p.exerciseId);

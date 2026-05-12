@@ -1,6 +1,8 @@
 // Offline fallback. Shown by the service worker when a navigation request
 // can't be served from network or cache. Kept deliberately spartan.
 
+import { OfflineAutoReload } from './auto-reload';
+
 export const metadata = { title: 'Offline — Workout Tracker' };
 
 export default function OfflinePage() {
@@ -26,6 +28,7 @@ export default function OfflinePage() {
         >
           Try again
         </a>
+        <OfflineAutoReload />
       </div>
     </div>
   );

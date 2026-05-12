@@ -11,7 +11,15 @@
 // The actual persistence still happens via `updateUserPreferences` server
 // action — the context is just the in-memory shared state.
 
-import { createContext, useContext, useState, ReactNode, useTransition } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  useTransition,
+  type ReactNode,
+} from 'react';
 import { updateUserPreferences } from '@/lib/actions';
 import type { UserPrefs } from '@/lib/prefs';
 
@@ -33,18 +41,19 @@ export function PrefsProvider({
   const [prefs, setPrefs] = useState(initial);
   const [, startTransition] = useTransition();
 
-  const updatePrefs = (patch: Partial<UserPrefs>) => {
+  // Stable identity so consumers that depend on `updatePrefs` in an effect
+  // don't re-fire whenever this provider re-renders.
+  const updatePrefs = useCallback((patch: Partial<UserPrefs>) => {
     setPrefs((p) => ({ ...p, ...patch }));
     startTransition(() => {
       updateUserPreferences(patch);
     });
-  };
+  }, []);
 
-  return (
-    <PrefsContext.Provider value={{ prefs, updatePrefs }}>
-      {children}
-    </PrefsContext.Provider>
-  );
+  // Memo the context value so unchanged prefs don't churn the object identity.
+  const value = useMemo(() => ({ prefs, updatePrefs }), [prefs, updatePrefs]);
+
+  return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
 }
 
 /**
