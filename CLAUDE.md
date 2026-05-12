@@ -18,6 +18,19 @@ A few working agreements that matter more than any specific fact in this documen
 
 A self-hosted workout tracker. Single-user or small-group deployment, runs on the user's own hardware (Proxmox LXC, Oracle Cloud Free Tier, etc.) via Docker Compose. The user logs sets and reps; the app shows them what they did last time, what muscles they've neglected, and where they are versus weekly volume targets.
 
+## Project status: pre-production, solo dev
+
+There are no live users and no production deployment yet. The user is the only developer. Concretely:
+
+- **Database is disposable.** No data needs to be preserved. `prisma migrate reset --force` and `docker compose down -v` are both fine; treat them as normal tools, not last resorts.
+- **Don't preserve migration history.** When the schema changes, prefer editing the existing `init` migration and re-resetting over stacking new migrations on top. The first prod deploy will be a fresh `init`, not a cutover from a staged history.
+- **No back-compat shims.** Don't add data-migration glue, fallback fields, deprecation paths, or staged rollouts. Just change the code.
+- **No multi-user concerns.** Don't harden against threats this single-dev / soon-self-hosted model doesn't have. Rate limiting, session length, etc. are already deliberately loose — leave them.
+
+This calculus flips the moment the user actually deploys to prod with real data. If you see signs of that (a backup pipeline being exercised, the user mentioning a real first user, mention of cutover), pause and re-read this section before recommending destructive ops.
+
+## Philosophical stance
+
 The philosophical stance is the most important thing about this app, and the easiest thing to accidentally undo:
 
 - **The app is neutral.** It does not prescribe workouts, suggest exercises, or tell the user what to do. It shows them their own data, and reflects back the structures the user has declared. The original trigger was a user who couldn't follow a fitness program because it was too prescriptive; this app is the opposite of that.
@@ -33,7 +46,7 @@ If a feature request feels like it's pulling toward "tell the user what to do" (
 
 - **Next.js 15** (App Router, React 19, Server Actions). Stable, not bleeding-edge — but recent enough that older patterns are real footguns.
 - **TypeScript** strict throughout.
-- **Prisma 7** + **Postgres 16** for persistence. The Rust query engine is gone — queries run through the `@prisma/adapter-pg` driver adapter (see `lib/db.ts`). Generator output goes to `prisma/generated/prisma/` (gitignored), not `node_modules/.prisma`. CLI config lives in `prisma.config.ts` at the repo root, not the deprecated `package.json#prisma` block. Migrations are committed; `npm run db:migrate` after schema changes.
+- **Prisma 7** + **Postgres 16** for persistence. The Rust query engine is gone — queries run through the `@prisma/adapter-pg` driver adapter (see `lib/db.ts`). Generator output goes to `prisma/generated/prisma/` (gitignored), not `node_modules/.prisma`. CLI config lives in `prisma.config.ts` at the repo root, not the deprecated `package.json#prisma` block. While we're pre-prod, prefer rewriting the `init` migration + reset over adding incremental migrations (see project status section above).
 - **Auth.js v5** (`next-auth@5.0.0-beta`). Google OAuth + Resend magic links. JWT session strategy (1-year lifetime — see `docs/decisions.md` for why).
 - **Tailwind 3** + custom design tokens. Warm dark theme, Fraunces / Bricolage Grotesque / JetBrains Mono via `next/font/google` (self-hosted at build time, no runtime CDN call).
 - **Pino** for structured JSON logging. **prom-client** for Prometheus metrics.
@@ -156,13 +169,14 @@ If a request seems to push in any of these directions, surface the tension befor
 Read in this order:
 
 1. This file (you're here).
-2. `docs/architecture.svg` — one-page diagram of the services and how they call each other. Faster orientation than reading code.
-3. `docs/api.md` — the actions, queries, and HTTP routes that exist, what each does, and the conventions for adding new ones.
-4. `docs/data-model.md` — the entities, their relationships, and cross-cutting patterns (soft-delete, ownership scoping, etc.).
-5. `docs/decisions.md` — the substantive design decisions and why.
-6. `docs/roadmap.md` — what's deferred and why, so you don't suggest things we already discussed and chose not to do.
-7. The relevant subdirectory `CLAUDE.md` if you're working in `prisma/`, `app/api/`, `components/workout/`, or `scripts/`.
-8. The actual code files involved in the change.
+2. `docs/codebase-map.md` — point-in-time, code-grounded reference: schema, seeded exercises, action/query index, routes, components, infra. Skim instead of re-discovering the codebase. Header notes when it was generated and how to check staleness — if it's stale enough to mislead, regenerate it (recipe is in the doc) before relying on specific counts or signatures.
+3. `docs/architecture.svg` — one-page diagram of the services and how they call each other. Faster orientation than reading code.
+4. `docs/api.md` — the actions, queries, and HTTP routes that exist, what each does, and the conventions for adding new ones.
+5. `docs/data-model.md` — the entities, their relationships, and cross-cutting patterns (soft-delete, ownership scoping, etc.).
+6. `docs/decisions.md` — the substantive design decisions and why.
+7. `docs/roadmap.md` — what's deferred and why, so you don't suggest things we already discussed and chose not to do.
+8. The relevant subdirectory `CLAUDE.md` if you're working in `prisma/`, `app/api/`, `components/workout/`, or `scripts/`.
+9. The actual code files involved in the change.
 
 Don't read the whole codebase up front. The structure above is enough to navigate.
 
