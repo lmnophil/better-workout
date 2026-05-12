@@ -150,6 +150,7 @@ CREATE TABLE "TemplateExercise" (
     "plannedSets" INTEGER,
     "plannedReps" INTEGER,
     "plannedSeconds" INTEGER,
+    "plannedWeight" DOUBLE PRECISION,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "TemplateExercise_pkey" PRIMARY KEY ("id")
@@ -207,6 +208,92 @@ CREATE TABLE "RoutineDayPendingSwap" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "RoutineDayPendingSwap_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RoutineShare" (
+    "id" TEXT NOT NULL,
+    "routineId" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "label" TEXT,
+    "revokedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RoutineShare_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ShareReviewer" (
+    "id" TEXT NOT NULL,
+    "shareId" TEXT NOT NULL,
+    "reviewerKey" TEXT NOT NULL,
+    "displayName" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ShareReviewer_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ShareComment" (
+    "id" TEXT NOT NULL,
+    "shareId" TEXT NOT NULL,
+    "reviewerId" TEXT NOT NULL,
+    "targetType" TEXT NOT NULL,
+    "targetId" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "resolvedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ShareComment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ShareSuggestion" (
+    "id" TEXT NOT NULL,
+    "shareId" TEXT NOT NULL,
+    "reviewerId" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "targetType" TEXT,
+    "targetId" TEXT,
+    "payload" JSONB NOT NULL,
+    "state" TEXT NOT NULL DEFAULT 'open',
+    "resolvedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ShareSuggestion_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ShareReaction" (
+    "id" TEXT NOT NULL,
+    "shareId" TEXT NOT NULL,
+    "reviewerId" TEXT NOT NULL,
+    "targetType" TEXT NOT NULL,
+    "targetId" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ShareReaction_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Notification" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "kind" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "body" TEXT,
+    "url" TEXT NOT NULL,
+    "sourceType" TEXT,
+    "sourceId" TEXT,
+    "readAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Notification_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -302,6 +389,39 @@ CREATE INDEX "RoutineDayPendingSwap_routineDayId_idx" ON "RoutineDayPendingSwap"
 -- CreateIndex
 CREATE UNIQUE INDEX "RoutineDayPendingSwap_routineDayId_outExerciseId_key" ON "RoutineDayPendingSwap"("routineDayId", "outExerciseId");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "RoutineShare_token_key" ON "RoutineShare"("token");
+
+-- CreateIndex
+CREATE INDEX "RoutineShare_routineId_idx" ON "RoutineShare"("routineId");
+
+-- CreateIndex
+CREATE INDEX "ShareReviewer_shareId_idx" ON "ShareReviewer"("shareId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ShareReviewer_shareId_reviewerKey_key" ON "ShareReviewer"("shareId", "reviewerKey");
+
+-- CreateIndex
+CREATE INDEX "ShareComment_shareId_targetType_targetId_idx" ON "ShareComment"("shareId", "targetType", "targetId");
+
+-- CreateIndex
+CREATE INDEX "ShareSuggestion_shareId_state_idx" ON "ShareSuggestion"("shareId", "state");
+
+-- CreateIndex
+CREATE INDEX "ShareSuggestion_shareId_targetType_targetId_idx" ON "ShareSuggestion"("shareId", "targetType", "targetId");
+
+-- CreateIndex
+CREATE INDEX "ShareReaction_shareId_targetType_targetId_idx" ON "ShareReaction"("shareId", "targetType", "targetId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ShareReaction_reviewerId_targetType_targetId_kind_key" ON "ShareReaction"("reviewerId", "targetType", "targetId", "kind");
+
+-- CreateIndex
+CREATE INDEX "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt");
+
+-- CreateIndex
+CREATE INDEX "Notification_userId_createdAt_idx" ON "Notification"("userId", "createdAt");
+
 -- AddForeignKey
 ALTER TABLE "Account" ADD CONSTRAINT "Account_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
@@ -367,3 +487,30 @@ ALTER TABLE "RoutineDayPendingSwap" ADD CONSTRAINT "RoutineDayPendingSwap_outExe
 
 -- AddForeignKey
 ALTER TABLE "RoutineDayPendingSwap" ADD CONSTRAINT "RoutineDayPendingSwap_inExerciseId_fkey" FOREIGN KEY ("inExerciseId") REFERENCES "Exercise"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "RoutineShare" ADD CONSTRAINT "RoutineShare_routineId_fkey" FOREIGN KEY ("routineId") REFERENCES "Routine"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ShareReviewer" ADD CONSTRAINT "ShareReviewer_shareId_fkey" FOREIGN KEY ("shareId") REFERENCES "RoutineShare"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ShareComment" ADD CONSTRAINT "ShareComment_shareId_fkey" FOREIGN KEY ("shareId") REFERENCES "RoutineShare"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ShareComment" ADD CONSTRAINT "ShareComment_reviewerId_fkey" FOREIGN KEY ("reviewerId") REFERENCES "ShareReviewer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ShareSuggestion" ADD CONSTRAINT "ShareSuggestion_shareId_fkey" FOREIGN KEY ("shareId") REFERENCES "RoutineShare"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ShareSuggestion" ADD CONSTRAINT "ShareSuggestion_reviewerId_fkey" FOREIGN KEY ("reviewerId") REFERENCES "ShareReviewer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ShareReaction" ADD CONSTRAINT "ShareReaction_shareId_fkey" FOREIGN KEY ("shareId") REFERENCES "RoutineShare"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ShareReaction" ADD CONSTRAINT "ShareReaction_reviewerId_fkey" FOREIGN KEY ("reviewerId") REFERENCES "ShareReviewer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

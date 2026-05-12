@@ -4,6 +4,8 @@
 
 import { auth } from '@/auth';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import { Share2 } from 'lucide-react';
 import {
   getAvailableExercises,
   getRoutineForUser,
@@ -92,7 +94,18 @@ export default async function RoutinePage() {
   }));
 
   return (
-    <RoutineEditor
+    <>
+      {routine && (
+        <div className="px-5 pt-4 -mb-2 flex justify-end">
+          <Link
+            href="/routine/shares"
+            className="inline-flex items-center gap-1.5 text-xs text-ink-300 hover:text-ink-100 border border-ink-700 hover:border-ink-500 rounded-md px-2 py-1"
+          >
+            <Share2 size={12} /> share for review
+          </Link>
+        </div>
+      )}
+      <RoutineEditor
       routine={routineForClient}
       seedTemplates={seedTemplates}
       availableExercises={availableExercises.map((e) => ({
@@ -111,5 +124,6 @@ export default async function RoutinePage() {
       }))}
       muscleGroups={muscleGroups}
     />
+    </>
   );
 }

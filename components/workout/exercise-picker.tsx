@@ -297,6 +297,19 @@ function BrowseTab({
       if (!groups.has(ex.module)) groups.set(ex.module, []);
       groups.get(ex.module)!.push(ex);
     }
+    // Within each module, sort by first primary muscle, then by name. This
+    // keeps like-exercises adjacent in the list so a user (or a reviewer
+    // browsing for a swap candidate) doesn't have to scroll past dissimilar
+    // movements to find the next "same-muscle" option. Modules with no
+    // primary-muscle metadata fall back to plain name order.
+    for (const [, arr] of groups) {
+      arr.sort((a, b) => {
+        const am = a.primaryMuscles[0] ?? '';
+        const bm = b.primaryMuscles[0] ?? '';
+        if (am !== bm) return am.localeCompare(bm);
+        return a.name.localeCompare(b.name);
+      });
+    }
     return groups;
   }, [
     availableExercises,

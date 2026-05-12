@@ -6,7 +6,7 @@ For schema-editing operational guidance (migrations, seed compilation, things-th
 
 ## Entity overview
 
-Fifteen models, in four groups:
+Twenty-one models, in five groups:
 
 | Group | Models | Notes |
 |---|---|---|
@@ -14,6 +14,7 @@ Fifteen models, in four groups:
 | Core domain | `Exercise`, `WorkoutSession`, `SetLog` | The spine of the app. Every workout is a session containing setLogs that reference exercises. |
 | User-customization layer | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, saved workout lineups, and per-user hide markers for built-in templates. |
 | Routines | `Routine`, `RoutineDay`, `RoutineDayPendingSwap` | The user's named cycle of templates and any one-time substitutions staged for upcoming days. Capped at 7 days per routine. |
+| Routine sharing + notifications | `RoutineShare`, `ShareReviewer`, `ShareComment`, `ShareSuggestion`, `ShareReaction`, `Notification` | Owner-minted share links, anonymous-by-cookie reviewer identities, and the in-app inbox the owner reviews. See [decisions.md](./decisions.md) for the philosophical framing. |
 
 ## Diagram
 
@@ -213,6 +214,34 @@ A one-time exercise substitution staged on a routine day. The user can preview a
 Persists across calendar days — if you stage a swap Tuesday for "next Wednesday" and don't actually start the session until Friday, the swap still applies. The unique `(routineDayId, outExerciseId)` constraint means re-staging a swap for the same outgoing exercise replaces the previous one.
 
 Permanent swaps don't go through this table — they edit the underlying `TemplateExercise` row directly via `swapInRoutineTemplate`, and (for safety) refuse to modify built-in templates.
+
+## Routine sharing + notifications
+
+The owner mints a token-based URL that gives an anonymous reviewer read access to their routine and a structured way to propose changes (swap, reorder, insert, remove, custom exercise, sticker, holistic) plus free-text comments and "good" reactions. Reviewer identity lives in a per-share HttpOnly cookie, never in `User`. The owner reviews everything in an in-app inbox. All six models live in `lib/queries.ts` under "Routine sharing + notifications" and mutate through the share-section actions in `lib/actions.ts`. The philosophical framing is in [decisions.md](./decisions.md) — short version: the owner authors the routine, reviewers propose, owner disposes.
+
+### `RoutineShare`
+
+A token-based grant to view (and propose changes against) a specific routine. The `token` is the URL-visible secret (24 random bytes, base64url) — `id` is internal. `revokedAt` is a soft-revoke; rows aren't deleted because the owner may want to look at historical activity even after revoking. Cascades from `Routine` so deleting the routine deletes its shares.
+
+### `ShareReviewer`
+
+One row per (share, anonymous identity). The `reviewerKey` is a server-minted random token, stored on this row and set as an HttpOnly cookie scoped to `/share/<token>`. Display name is reviewer-chosen at registration. The `(shareId, reviewerKey)` unique constraint is what `getReviewerFromCookie` looks up. Clearing cookies = new identity row.
+
+### `ShareComment`
+
+Polymorphic free-text comment. `(targetType, targetId)` discriminates: `'routine'` / `'routine_day'` / `'template_exercise'` / `'suggestion'`. No real foreign key on the target — validation happens at the action boundary. `resolvedAt` is the owner's "I've seen it" marker.
+
+### `ShareSuggestion`
+
+Polymorphic structured suggestion. `kind` discriminates the JSON payload (`swap_specific`, `swap_anyof`, `swap_category`, `reorder`, `insert`, `remove`, `sticker`, `custom_exercise`, `holistic_add`, `holistic_remove`). `state` cycles `'open' → 'applied' | 'rejected' | 'resolved'`. The `payload Json` shape is documented next to the schema definition and validated by the Zod union in `lib/actions.ts → SuggestionPayloadSchema`; new suggestion kinds can be added without a schema change. `targetType` and `targetId` are nullable so holistic ("whole-routine") suggestions can omit them.
+
+### `ShareReaction`
+
+Toggle-style thumbs-up per `(reviewer, target, kind)`. Currently only `kind: 'good'` exists; the field is permissive so other reaction kinds can be added later. The unique constraint makes the action a clean toggle (re-firing deletes the row).
+
+### `Notification`
+
+Generic in-app inbox for the routine owner. `kind` is `'share_comment' | 'share_suggestion' | 'share_reaction'` for the share feature; the field is permissive so other notification kinds can land here later. `sourceType` and `sourceId` are loose references (not FKs) so a deleted source doesn't take the notification with it before the owner reads it.
 
 ## Auth.js tables
 

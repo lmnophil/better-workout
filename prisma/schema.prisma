@@ -35,6 +35,7 @@ model User {
   templates        WorkoutTemplate[]
   hiddenTemplates  UserHiddenTemplate[]
   routine          Routine?
+  notifications    Notification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -326,6 +327,13 @@ model TemplateExercise {
   // by the exercise's metric; the actions enforce this rather than the schema.
   plannedSeconds Int?
 
+  // Optional target weight (in user's stored unit) for metric='reps' exercises.
+  // Null means "no plan — pick what feels right." Zero is allowed and means
+  // bodyweight intentionally (so a reviewer's 'bodyweight' sticker resolves to
+  // a concrete value). Like the other planned* fields, this is a hint surfaced
+  // during the session — it is *not* a prescription the app polices.
+  plannedWeight Float?
+
   createdAt DateTime @default(now())
 
   @@unique([templateId, exerciseId])
@@ -391,7 +399,8 @@ model Routine {
   // until the user completes their first routine session.
   lastCompletedPosition Int?
 
-  days RoutineDay[]
+  days   RoutineDay[]
+  shares RoutineShare[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -454,4 +463,180 @@ model RoutineDayPendingSwap {
 
   @@unique([routineDayId, outExerciseId])
   @@index([routineDayId])
+}
+
+// ================================================================
+// ROUTINE SHARING
+// ================================================================
+//
+// The owner mints an unguessable-token URL that gives a reviewer read access to
+// their routine and lets the reviewer comment, react ("good"), and propose
+// suggestions (structured: swap / reorder / insert / remove; advisory: sticker
+// chips for more/less sets-reps-weight and free-text notes). The owner reviews
+// the activity in an in-app inbox and one-click-applies structured suggestions
+// the reviewer made.
+//
+// Reviewers are anonymous: a per-share `reviewerKey` cookie + display name
+// they enter on first visit. Clearing cookies = new identity. This is a
+// friend-review tool, not a multi-user system; the share link is the only
+// access control. Owner can revoke the link to cut access.
+
+model RoutineShare {
+  id        String    @id @default(cuid())
+  routineId String
+  routine   Routine   @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  // Unguessable URL slug. Generated server-side via a 128-bit-ish random token.
+  // The id is internal; this is what shows up in URLs.
+  token     String    @unique
+  // Optional human label so the owner can keep multiple links straight
+  // ("Alice's review", "Coach feedback").
+  label     String?
+  revokedAt DateTime?
+
+  reviewers   ShareReviewer[]
+  comments    ShareComment[]
+  suggestions ShareSuggestion[]
+  reactions   ShareReaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([routineId])
+}
+
+// One row per (share, anonymous reviewer). reviewerKey is a long random
+// identifier minted server-side and set as an HttpOnly cookie scoped to the
+// share path. Two reviewers on the same browser can't accidentally collide
+// because the cookie is shareId-scoped.
+model ShareReviewer {
+  id          String  @id @default(cuid())
+  shareId     String
+  share       RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  reviewerKey String
+  displayName String
+
+  comments    ShareComment[]
+  suggestions ShareSuggestion[]
+  reactions   ShareReaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shareId, reviewerKey])
+  @@index([shareId])
+}
+
+// Polymorphic comment. `targetType` + `targetId` point at the routine itself,
+// a routine day, or a template-exercise row (per-exercise notes). We rely on
+// the app layer to validate the (type, id) shape rather than a real FK because
+// the target is genuinely polymorphic. The id is opaque to the schema.
+model ShareComment {
+  id         String @id @default(cuid())
+  shareId    String
+  share      RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer   ShareReviewer @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  // 'routine' | 'routine_day' | 'template_exercise' | 'suggestion'
+  targetType String
+  targetId   String
+
+  body       String
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shareId, targetType, targetId])
+}
+
+// Polymorphic structured suggestion. `kind` discriminates the payload JSON:
+//   - 'swap_specific'   payload: { outExerciseId, inExerciseId }
+//   - 'swap_anyof'      payload: { outExerciseId, candidateIds: string[] }
+//   - 'swap_category'   payload: { outExerciseId, primaryMuscle?: string, module?: string }
+//   - 'reorder'         payload: { orderedTemplateExerciseIds: string[] } (day-scoped)
+//   - 'insert'          payload: { atPosition: number, exerciseIds: string[] }
+//   - 'remove'          payload: { templateExerciseId }
+//   - 'sticker'         payload: { kind: 'more_sets'|'fewer_sets'|'more_reps'|'fewer_reps'|'more_weight'|'less_weight'|'bodyweight' }
+//   - 'custom_exercise' payload: { name, primaryMuscles: string[], module: string, notes?: string }
+//   - 'holistic_add'    payload: { exerciseIds?: string[], description?: string }
+//   - 'holistic_remove' payload: { exerciseIds?: string[], description?: string }
+//
+// `targetType` + `targetId` mirror ShareComment. For holistic suggestions the
+// target is the routine itself; for sticker/swap/insert/remove the target is
+// the routine day or template-exercise row depending on what makes sense.
+model ShareSuggestion {
+  id         String @id @default(cuid())
+  shareId    String
+  share      RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer   ShareReviewer @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  kind       String
+  targetType String?
+  targetId   String?
+
+  // JSON payload; shape depends on kind. Validated at action boundary.
+  payload Json
+
+  // 'open' | 'applied' | 'rejected' | 'resolved'
+  // 'applied' = owner one-click-applied the structured edit
+  // 'rejected' = owner dismissed
+  // 'resolved' = advisory-style suggestion the owner acknowledged (sticker, holistic)
+  state      String   @default("open")
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shareId, state])
+  @@index([shareId, targetType, targetId])
+}
+
+// Lightweight thumbs-up-style reaction. Currently only `kind: 'good'` exists,
+// the schema is permissive so we can extend later. Unique per
+// (reviewer, target, kind) so a reviewer's "good" is a toggle, not a tally.
+model ShareReaction {
+  id         String @id @default(cuid())
+  shareId    String
+  share      RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  reviewerId String
+  reviewer   ShareReviewer @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  targetType String // 'template_exercise' | 'routine_day' | 'routine'
+  targetId   String
+  kind       String // 'good'
+
+  createdAt DateTime @default(now())
+
+  @@unique([reviewerId, targetType, targetId, kind])
+  @@index([shareId, targetType, targetId])
+}
+
+// In-app inbox for the routine owner. Generic enough to extend to other
+// notification kinds later (we explicitly chose not to ship web push or
+// email yet — bell icon + dropdown is the only sink).
+model Notification {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 'share_comment' | 'share_suggestion' | 'share_reaction'
+  kind  String
+  title String
+  body  String?
+  // Where to navigate when clicked, relative URL.
+  url   String
+
+  // Loose reference to the source row. Not a real FK — the source might be
+  // deleted (revoked share, removed comment) and the notification should
+  // remain readable.
+  sourceType String?
+  sourceId   String?
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
 }

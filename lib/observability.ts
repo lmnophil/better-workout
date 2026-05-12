@@ -65,6 +65,18 @@ const EXPECTED_MESSAGES = [
   "Two days can't share",
   'Two new templates named',
   "A template can't list",
+  'Share link not found',
+  'Share link revoked',
+  'Reviewer not registered',
+  'Comment not found',
+  'Suggestion not found',
+  'Suggestion already resolved',
+  'Notification not found',
+  'Display name',
+  'Comment body',
+  'Cannot apply',
+  'Not a swap suggestion',
+  'Not an insert suggestion',
 ];
 
 function isExpectedError(err: unknown): boolean {

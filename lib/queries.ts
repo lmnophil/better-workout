@@ -464,3 +464,123 @@ export async function getHiddenBuiltinTemplates(userId: string) {
   // (shouldn't happen, but the schema doesn't enforce it). Filter those out.
   return rows.filter((r) => r.template.isBuiltin);
 }
+
+// ================================================================
+// ROUTINE SHARING + NOTIFICATIONS
+// ================================================================
+
+/**
+ * Fetch a routine purely by share token. Returns null if the token is unknown,
+ * the share is revoked, or the routine has been deleted. Includes the same
+ * nested shape as `getRoutineForUser` so the public view can render the full
+ * routine without re-fetching. Does NOT include the share's reviewer rows,
+ * comments, or suggestions — those are loaded separately so we can scope
+ * per-reviewer for the public page.
+ */
+export async function getShareByToken(token: string) {
+  const share = await db.routineShare.findUnique({
+    where: { token },
+    include: {
+      routine: {
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          days: {
+            orderBy: { position: 'asc' },
+            include: {
+              template: {
+                include: {
+                  exercises: {
+                    orderBy: { position: 'asc' },
+                    include: {
+                      exercise: {
+                        select: {
+                          id: true,
+                          name: true,
+                          module: true,
+                          metric: true,
+                          deletedAt: true,
+                          primaryMuscles: true,
+                          secondaryMuscles: true,
+                          prescription: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!share || share.revokedAt !== null) return null;
+  return share;
+}
+
+export type SharedRoutine = NonNullable<Awaited<ReturnType<typeof getShareByToken>>>;
+
+/**
+ * All comments + structured suggestions + reactions on a share, joined with
+ * the reviewer who created them. One query per kind keeps the shape tidy on
+ * the public page (which renders threads grouped by target).
+ */
+export async function getShareActivity(shareId: string) {
+  const [comments, suggestions, reactions] = await Promise.all([
+    db.shareComment.findMany({
+      where: { shareId },
+      orderBy: { createdAt: 'asc' },
+      include: { reviewer: { select: { id: true, displayName: true } } },
+    }),
+    db.shareSuggestion.findMany({
+      where: { shareId },
+      orderBy: { createdAt: 'asc' },
+      include: { reviewer: { select: { id: true, displayName: true } } },
+    }),
+    db.shareReaction.findMany({
+      where: { shareId },
+      orderBy: { createdAt: 'asc' },
+      include: { reviewer: { select: { id: true, displayName: true } } },
+    }),
+  ]);
+  return { comments, suggestions, reactions };
+}
+
+/**
+ * List every share link the user has minted. Includes a small open-count
+ * roll-up so the management UI can show "3 unresolved suggestions" at a
+ * glance without a separate query.
+ */
+export async function getRoutineSharesForUser(userId: string) {
+  const shares = await db.routineShare.findMany({
+    where: { routine: { userId } },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      _count: {
+        select: {
+          reviewers: true,
+          comments: { where: { resolvedAt: null } },
+          suggestions: { where: { state: 'open' } },
+          reactions: true,
+        },
+      },
+    },
+  });
+  return shares;
+}
+
+/**
+ * The owner-facing inbox feed. Unread first (`readAt: null` desc), then read
+ * by recency. Bounded so the dropdown stays small.
+ */
+export async function getNotificationsForUser(userId: string, take: number = 30) {
+  return db.notification.findMany({
+    where: { userId },
+    orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }],
+    take,
+  });
+}
+
+export async function getUnreadNotificationCount(userId: string): Promise<number> {
+  return db.notification.count({ where: { userId, readAt: null } });
+}

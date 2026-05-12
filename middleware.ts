@@ -9,7 +9,12 @@ import authConfig from './auth.config';
 
 const { auth } = NextAuth(authConfig);
 
-const PUBLIC_PATHS = ['/signin', '/verify-request'];
+// Public app paths — the middleware runs (so `req.auth` is populated for any
+// signed-in viewer), but unauthenticated users are not redirected away. The
+// share route is the only authenticated-or-anonymous app route in the app;
+// access control inside lives on the per-share token + reviewer cookie. See
+// docs/decisions.md (`Routine sharing — anonymous public reviewers`).
+const PUBLIC_PATHS = ['/signin', '/verify-request', '/share/'];
 
 export default auth((req) => {
   const { nextUrl } = req;
@@ -25,7 +30,12 @@ export default auth((req) => {
     return Response.redirect(url);
   }
 
-  if (isLoggedIn && isPublicPath) {
+  // Bounce already-signed-in users away from /signin and /verify-request, but
+  // don't bounce them away from /share/<token> — owners need to be able to
+  // visit their own share links to preview them.
+  const isSigninPath =
+    nextUrl.pathname.startsWith('/signin') || nextUrl.pathname.startsWith('/verify-request');
+  if (isLoggedIn && isSigninPath) {
     return Response.redirect(new URL('/', nextUrl));
   }
 });

@@ -16,6 +16,7 @@ import { PWAInstallBanner } from '@/components/ui/pwa-install-banner';
 import { CueToggle } from '@/components/ui/cue-toggle';
 import { PrefsProvider } from '@/components/ui/prefs-context';
 import { getUserPreferences } from '@/lib/queries';
+import { NotificationBell } from '@/components/layout/notification-bell';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -45,6 +46,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
           <div className="flex items-center gap-1">
             <CueToggle />
+            <NotificationBell userId={userId} />
             <Link
               href="/settings"
               aria-label="Settings"

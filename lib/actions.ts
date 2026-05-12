@@ -11,6 +11,8 @@
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
+import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { withLogging } from './observability';
 import { metrics } from './metrics';
@@ -2425,4 +2427,876 @@ export const startFromRoutineDay = withLogging('startFromRoutineDay', async (
 
   metrics.templatesUsed.inc();
   revalidatePath('/');
+});
+
+// ================================================================
+// ROUTINE SHARING + NOTIFICATIONS
+// ================================================================
+//
+// Two action surfaces here, deliberately split:
+//
+//   * Owner actions (mintRoutineShare, revokeRoutineShare, apply/reject*,
+//     resolveShareComment, markNotificationsRead) call `requireUser()` like
+//     every other action in this file.
+//
+//   * Public actions (registerShareReviewer, postShareComment, postShareSuggestion,
+//     toggleShareReaction) are the *only* mutations in this file that DO NOT
+//     call `requireUser()`. Auth comes from two things instead: (a) a valid,
+//     non-revoked share token, and (b) a per-share reviewerKey cookie the
+//     reviewer obtained at registration. Both are checked on every call.
+//
+// Reviewer identity is anonymous-by-design: the reviewerKey is a random
+// HttpOnly cookie minted in `registerShareReviewer`, scoped to the share's
+// path. Clearing cookies = new identity. See docs/decisions.md for the
+// philosophical framing.
+
+const SHARE_TOKEN_BYTES = 24; // 32 url-safe chars
+const REVIEWER_KEY_BYTES = 24;
+const SHARE_COOKIE_PREFIX = 'share_reviewer_';
+const SHARE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1y
+
+function urlsafeRandom(bytes: number): string {
+  return randomBytes(bytes).toString('base64url');
+}
+
+function shareCookieName(shareId: string): string {
+  return `${SHARE_COOKIE_PREFIX}${shareId}`;
+}
+
+async function requireActiveShare(token: string) {
+  const share = await db.routineShare.findUnique({
+    where: { token },
+    include: { routine: { select: { id: true, userId: true } } },
+  });
+  if (!share) throw new Error('Share link not found');
+  if (share.revokedAt) throw new Error('Share link revoked');
+  return share;
+}
+
+async function getReviewerFromCookie(shareId: string) {
+  const jar = await cookies();
+  const key = jar.get(shareCookieName(shareId))?.value;
+  if (!key) return null;
+  return db.shareReviewer.findUnique({
+    where: { shareId_reviewerKey: { shareId, reviewerKey: key } },
+  });
+}
+
+async function requireReviewer(shareId: string) {
+  const reviewer = await getReviewerFromCookie(shareId);
+  if (!reviewer) throw new Error('Reviewer not registered');
+  return reviewer;
+}
+
+// Notification is a side effect — never let it block the parent action.
+async function notifyRoutineOwner(
+  ownerUserId: string,
+  args: {
+    kind: 'share_comment' | 'share_suggestion' | 'share_reaction';
+    title: string;
+    body?: string | null;
+    url: string;
+    sourceType?: string;
+    sourceId?: string;
+  },
+) {
+  try {
+    await db.notification.create({
+      data: {
+        userId: ownerUserId,
+        kind: args.kind,
+        title: args.title,
+        body: args.body ?? null,
+        url: args.url,
+        sourceType: args.sourceType ?? null,
+        sourceId: args.sourceId ?? null,
+      },
+    });
+  } catch {
+    // Swallow.
+  }
+}
+
+// ---------------- Owner actions: share lifecycle ----------------
+
+const MintShareSchema = z.object({
+  label: z.string().trim().max(60).optional(),
+});
+
+export const mintRoutineShare = withLogging('mintRoutineShare', async (
+  input: z.infer<typeof MintShareSchema>,
+) => {
+  const userId = await requireUser();
+  const { label } = MintShareSchema.parse(input);
+
+  const routine = await db.routine.findUnique({ where: { userId }, select: { id: true } });
+  if (!routine) throw new Error('No routine to share yet.');
+
+  const token = urlsafeRandom(SHARE_TOKEN_BYTES);
+  await db.routineShare.create({
+    data: { routineId: routine.id, token, label: label?.trim() || null },
+  });
+
+  revalidatePath('/routine');
+  revalidatePath('/routine/shares');
+});
+
+const RevokeShareSchema = z.object({ shareId: z.string().min(1) });
+
+export const revokeRoutineShare = withLogging('revokeRoutineShare', async (
+  input: z.infer<typeof RevokeShareSchema>,
+) => {
+  const userId = await requireUser();
+  const { shareId } = RevokeShareSchema.parse(input);
+
+  const share = await db.routineShare.findFirst({
+    where: { id: shareId, routine: { userId } },
+    select: { id: true },
+  });
+  if (!share) throw new Error('Share link not found');
+
+  await db.routineShare.update({
+    where: { id: shareId },
+    data: { revokedAt: new Date() },
+  });
+
+  revalidatePath('/routine');
+  revalidatePath('/routine/shares');
+});
+
+// ---------------- Owner actions: notifications ----------------
+
+const MarkNotificationsReadSchema = z.object({
+  ids: z.array(z.string().min(1)).optional(),
+  all: z.boolean().optional(),
+});
+
+export const markNotificationsRead = withLogging('markNotificationsRead', async (
+  input: z.infer<typeof MarkNotificationsReadSchema>,
+) => {
+  const userId = await requireUser();
+  const parsed = MarkNotificationsReadSchema.parse(input);
+
+  if (parsed.all) {
+    await db.notification.updateMany({
+      where: { userId, readAt: null },
+      data: { readAt: new Date() },
+    });
+  } else if (parsed.ids && parsed.ids.length > 0) {
+    await db.notification.updateMany({
+      where: { userId, id: { in: parsed.ids } },
+      data: { readAt: new Date() },
+    });
+  }
+
+  revalidatePath('/notifications');
+  revalidatePath('/');
+});
+
+// ---------------- Owner actions: comment / suggestion resolution ----------------
+
+const ResolveCommentSchema = z.object({ commentId: z.string().min(1) });
+
+export const resolveShareComment = withLogging('resolveShareComment', async (
+  input: z.infer<typeof ResolveCommentSchema>,
+) => {
+  const userId = await requireUser();
+  const { commentId } = ResolveCommentSchema.parse(input);
+
+  const comment = await db.shareComment.findFirst({
+    where: { id: commentId, share: { routine: { userId } } },
+    select: { id: true, shareId: true },
+  });
+  if (!comment) throw new Error('Comment not found');
+
+  await db.shareComment.update({
+    where: { id: comment.id },
+    data: { resolvedAt: new Date() },
+  });
+
+  revalidatePath(`/routine/shares/${comment.shareId}`);
+});
+
+const RejectSuggestionSchema = z.object({ suggestionId: z.string().min(1) });
+
+export const rejectShareSuggestion = withLogging('rejectShareSuggestion', async (
+  input: z.infer<typeof RejectSuggestionSchema>,
+) => {
+  const userId = await requireUser();
+  const { suggestionId } = RejectSuggestionSchema.parse(input);
+
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+    select: { id: true, state: true, shareId: true },
+  });
+  if (!s) throw new Error('Suggestion not found');
+  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+
+  await db.shareSuggestion.update({
+    where: { id: s.id },
+    data: { state: 'rejected', resolvedAt: new Date() },
+  });
+
+  revalidatePath(`/routine/shares/${s.shareId}`);
+});
+
+const ResolveSuggestionSchema = z.object({ suggestionId: z.string().min(1) });
+
+export const resolveShareSuggestion = withLogging('resolveShareSuggestion', async (
+  input: z.infer<typeof ResolveSuggestionSchema>,
+) => {
+  const userId = await requireUser();
+  const { suggestionId } = ResolveSuggestionSchema.parse(input);
+
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+    select: { id: true, state: true, shareId: true },
+  });
+  if (!s) throw new Error('Suggestion not found');
+  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+
+  await db.shareSuggestion.update({
+    where: { id: s.id },
+    data: { state: 'resolved', resolvedAt: new Date() },
+  });
+
+  revalidatePath(`/routine/shares/${s.shareId}`);
+});
+
+// ---------------- Owner actions: one-click apply ----------------
+//
+// Routine days always own their own template (see createRoutineFromDraft and
+// the comment in swapInRoutineTemplate), so applying a structured edit is
+// just a direct mutation of that template — no built-in fork needed.
+
+const ApplySwapSchema = z.object({
+  suggestionId: z.string().min(1),
+  // Required for swap_anyof / swap_category: owner picks which candidate to swap in.
+  // For swap_specific it's optional and defaults to the payload's inExerciseId.
+  inExerciseId: z.string().min(1).optional(),
+});
+
+export const applyShareSwap = withLogging('applyShareSwap', async (
+  input: z.infer<typeof ApplySwapSchema>,
+) => {
+  const userId = await requireUser();
+  const { suggestionId, inExerciseId: pickedInId } = ApplySwapSchema.parse(input);
+
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+  });
+  if (!s) throw new Error('Suggestion not found');
+  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+  if (!s.kind.startsWith('swap_')) throw new Error('Not a swap suggestion');
+  if (s.targetType !== 'routine_day' || !s.targetId) {
+    throw new Error('Cannot apply: target missing');
+  }
+
+  const payload = s.payload as {
+    outExerciseId?: string;
+    inExerciseId?: string;
+    candidateIds?: string[];
+  };
+  const outExerciseId = payload.outExerciseId;
+  if (!outExerciseId) throw new Error('Cannot apply: out exercise missing');
+
+  let inExerciseId: string | undefined = pickedInId;
+  if (!inExerciseId && s.kind === 'swap_specific') {
+    inExerciseId = payload.inExerciseId;
+  }
+  if (!inExerciseId) throw new Error('Cannot apply: pick which exercise to swap in');
+  if (
+    s.kind === 'swap_anyof' &&
+    payload.candidateIds &&
+    !payload.candidateIds.includes(inExerciseId)
+  ) {
+    throw new Error('Cannot apply: picked exercise was not suggested');
+  }
+
+  if (outExerciseId === inExerciseId) {
+    await db.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'applied', resolvedAt: new Date() },
+    });
+    return;
+  }
+
+  const day = await db.routineDay.findFirst({
+    where: { id: s.targetId, routine: { userId } },
+    include: { template: { select: { id: true } } },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  await requireAvailableExercise(userId, inExerciseId);
+
+  const targetEntry = await db.templateExercise.findFirst({
+    where: { templateId: day.template.id, exerciseId: outExerciseId },
+  });
+  if (!targetEntry) throw new Error("That exercise isn't in the template anymore.");
+
+  const collision = await db.templateExercise.findFirst({
+    where: { templateId: day.template.id, exerciseId: inExerciseId },
+    select: { id: true },
+  });
+  if (collision) throw new Error('That exercise is already in the template.');
+
+  await db.$transaction([
+    db.templateExercise.update({
+      where: { id: targetEntry.id },
+      data: { exerciseId: inExerciseId },
+    }),
+    db.routineDayPendingSwap.deleteMany({
+      where: { routineDayId: day.id, outExerciseId },
+    }),
+    db.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'applied', resolvedAt: new Date() },
+    }),
+  ]);
+
+  revalidatePath('/');
+  revalidatePath('/routine');
+  revalidatePath(`/routine/shares/${s.shareId}`);
+});
+
+const ApplyRemoveSchema = z.object({ suggestionId: z.string().min(1) });
+
+export const applyShareRemove = withLogging('applyShareRemove', async (
+  input: z.infer<typeof ApplyRemoveSchema>,
+) => {
+  const userId = await requireUser();
+  const { suggestionId } = ApplyRemoveSchema.parse(input);
+
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+  });
+  if (!s) throw new Error('Suggestion not found');
+  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+  if (s.kind !== 'remove') throw new Error('Cannot apply: not a remove suggestion');
+
+  const payload = s.payload as { templateExerciseId?: string };
+  if (!payload.templateExerciseId) throw new Error('Cannot apply: target missing');
+
+  const te = await db.templateExercise.findFirst({
+    where: {
+      id: payload.templateExerciseId,
+      template: { routineDays: { some: { routine: { userId } } } },
+    },
+    select: { id: true, templateId: true, position: true },
+  });
+  if (!te) throw new Error("That exercise isn't in the template anymore.");
+
+  await db.$transaction(async (tx) => {
+    await tx.templateExercise.delete({ where: { id: te.id } });
+    const remaining = await tx.templateExercise.findMany({
+      where: { templateId: te.templateId },
+      orderBy: { position: 'asc' },
+      select: { id: true },
+    });
+    for (let i = 0; i < remaining.length; i++) {
+      await tx.templateExercise.update({
+        where: { id: remaining[i].id },
+        data: { position: i },
+      });
+    }
+    await tx.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'applied', resolvedAt: new Date() },
+    });
+  });
+
+  revalidatePath('/');
+  revalidatePath('/routine');
+  revalidatePath(`/routine/shares/${s.shareId}`);
+});
+
+const ApplyReorderSchema = z.object({ suggestionId: z.string().min(1) });
+
+export const applyShareReorder = withLogging('applyShareReorder', async (
+  input: z.infer<typeof ApplyReorderSchema>,
+) => {
+  const userId = await requireUser();
+  const { suggestionId } = ApplyReorderSchema.parse(input);
+
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+  });
+  if (!s) throw new Error('Suggestion not found');
+  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+  if (s.kind !== 'reorder') throw new Error('Cannot apply: not a reorder suggestion');
+  if (s.targetType !== 'routine_day' || !s.targetId) {
+    throw new Error('Cannot apply: target missing');
+  }
+
+  const payload = s.payload as { orderedTemplateExerciseIds?: string[] };
+  if (!payload.orderedTemplateExerciseIds || payload.orderedTemplateExerciseIds.length === 0) {
+    throw new Error('Cannot apply: order missing');
+  }
+
+  const day = await db.routineDay.findFirst({
+    where: { id: s.targetId, routine: { userId } },
+    include: { template: { include: { exercises: { select: { id: true } } } } },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  const currentIds = new Set(day.template.exercises.map((e) => e.id));
+  const orderIds = payload.orderedTemplateExerciseIds;
+  if (orderIds.length !== currentIds.size || !orderIds.every((id) => currentIds.has(id))) {
+    throw new Error('Cannot apply: lineup has changed since the suggestion');
+  }
+
+  await db.$transaction(async (tx) => {
+    for (let i = 0; i < orderIds.length; i++) {
+      await tx.templateExercise.update({
+        where: { id: orderIds[i] },
+        data: { position: i },
+      });
+    }
+    await tx.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'applied', resolvedAt: new Date() },
+    });
+  });
+
+  revalidatePath('/');
+  revalidatePath('/routine');
+  revalidatePath(`/routine/shares/${s.shareId}`);
+});
+
+const ApplyInsertSchema = z.object({
+  suggestionId: z.string().min(1),
+  exerciseIds: z.array(z.string().min(1)).optional(),
+});
+
+export const applyShareInsert = withLogging('applyShareInsert', async (
+  input: z.infer<typeof ApplyInsertSchema>,
+) => {
+  const userId = await requireUser();
+  const { suggestionId, exerciseIds: picked } = ApplyInsertSchema.parse(input);
+
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+  });
+  if (!s) throw new Error('Suggestion not found');
+  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+  if (s.kind !== 'insert') throw new Error('Not an insert suggestion');
+  if (s.targetType !== 'routine_day' || !s.targetId) {
+    throw new Error('Cannot apply: target missing');
+  }
+
+  const payload = s.payload as { atPosition?: number; exerciseIds?: string[] };
+  const suggested = payload.exerciseIds ?? [];
+  const toInsert = (picked && picked.length > 0 ? picked : suggested).filter((id) =>
+    suggested.includes(id),
+  );
+  if (toInsert.length === 0) throw new Error('Cannot apply: pick at least one exercise');
+
+  const day = await db.routineDay.findFirst({
+    where: { id: s.targetId, routine: { userId } },
+    include: {
+      template: {
+        include: { exercises: { select: { id: true, position: true, exerciseId: true } } },
+      },
+    },
+  });
+  if (!day) throw new Error('Routine day not found');
+
+  const existingIds = new Set(day.template.exercises.map((e) => e.exerciseId));
+  const fresh = toInsert.filter((id) => !existingIds.has(id));
+  for (const id of fresh) {
+    await requireAvailableExercise(userId, id);
+  }
+  if (fresh.length === 0) {
+    await db.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'applied', resolvedAt: new Date() },
+    });
+    return;
+  }
+
+  const rawPos = payload.atPosition;
+  const insertAt =
+    typeof rawPos === 'number' && rawPos >= 0
+      ? Math.min(rawPos, day.template.exercises.length)
+      : day.template.exercises.length;
+
+  await db.$transaction(async (tx) => {
+    const shift = fresh.length;
+    const toShift = day.template.exercises
+      .filter((e) => e.position >= insertAt)
+      .sort((a, b) => b.position - a.position);
+    for (const e of toShift) {
+      await tx.templateExercise.update({
+        where: { id: e.id },
+        data: { position: e.position + shift },
+      });
+    }
+    for (let i = 0; i < fresh.length; i++) {
+      await tx.templateExercise.create({
+        data: {
+          templateId: day.template.id,
+          exerciseId: fresh[i],
+          position: insertAt + i,
+        },
+      });
+    }
+    await tx.shareSuggestion.update({
+      where: { id: s.id },
+      data: { state: 'applied', resolvedAt: new Date() },
+    });
+  });
+
+  revalidatePath('/');
+  revalidatePath('/routine');
+  revalidatePath(`/routine/shares/${s.shareId}`);
+});
+
+const ApplyCustomExerciseSchema = z.object({
+  suggestionId: z.string().min(1),
+  insertIntoRoutineDayId: z.string().min(1).optional(),
+});
+
+export const applyShareCustomExercise = withLogging('applyShareCustomExercise', async (
+  input: z.infer<typeof ApplyCustomExerciseSchema>,
+) => {
+  const userId = await requireUser();
+  const { suggestionId, insertIntoRoutineDayId } = ApplyCustomExerciseSchema.parse(input);
+
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+  });
+  if (!s) throw new Error('Suggestion not found');
+  if (s.state !== 'open') throw new Error('Suggestion already resolved');
+  if (s.kind !== 'custom_exercise') throw new Error('Cannot apply: not a custom-exercise suggestion');
+
+  const payload = s.payload as {
+    name?: string;
+    primaryMuscles?: string[];
+    secondaryMuscles?: string[];
+    module?: string;
+    metric?: 'reps' | 'time';
+  };
+  const name = payload.name?.trim();
+  if (!name) throw new Error('Cannot apply: custom exercise has no name');
+
+  let resolvedName = name;
+  const collision = await db.exercise.findFirst({
+    where: { ownerId: userId, name: resolvedName },
+    select: { id: true },
+  });
+  if (collision) resolvedName = `${name} (suggested)`;
+
+  const created = await db.exercise.create({
+    data: {
+      name: resolvedName,
+      module: payload.module || 'Custom',
+      primaryMuscles: payload.primaryMuscles ?? [],
+      secondaryMuscles: payload.secondaryMuscles ?? [],
+      metric: payload.metric === 'time' ? 'time' : 'reps',
+      isCustom: true,
+      ownerId: userId,
+    },
+  });
+
+  if (insertIntoRoutineDayId) {
+    const day = await db.routineDay.findFirst({
+      where: { id: insertIntoRoutineDayId, routine: { userId } },
+      include: {
+        template: { include: { exercises: { select: { id: true, exerciseId: true } } } },
+      },
+    });
+    if (day && !day.template.exercises.some((e) => e.exerciseId === created.id)) {
+      await db.templateExercise.create({
+        data: {
+          templateId: day.template.id,
+          exerciseId: created.id,
+          position: day.template.exercises.length,
+        },
+      });
+    }
+  }
+
+  await db.shareSuggestion.update({
+    where: { id: s.id },
+    data: { state: 'applied', resolvedAt: new Date() },
+  });
+
+  revalidatePath('/');
+  revalidatePath('/routine');
+  revalidatePath(`/routine/shares/${s.shareId}`);
+});
+
+// ---------------- Public actions ----------------
+
+const DisplayNameSchema = z.string().trim().min(1).max(40);
+
+const RegisterReviewerSchema = z.object({
+  token: z.string().min(1),
+  displayName: DisplayNameSchema,
+});
+
+export const registerShareReviewer = withLogging('registerShareReviewer', async (
+  input: z.infer<typeof RegisterReviewerSchema>,
+) => {
+  const { token, displayName } = RegisterReviewerSchema.parse(input);
+  const cleaned = displayName.trim();
+  if (cleaned.length === 0) throw new Error('Display name cannot be empty');
+
+  const share = await requireActiveShare(token);
+
+  const jar = await cookies();
+  const cookieName = shareCookieName(share.id);
+  const existingKey = jar.get(cookieName)?.value;
+
+  let reviewer = existingKey
+    ? await db.shareReviewer.findUnique({
+        where: { shareId_reviewerKey: { shareId: share.id, reviewerKey: existingKey } },
+      })
+    : null;
+
+  if (reviewer) {
+    if (reviewer.displayName !== cleaned) {
+      reviewer = await db.shareReviewer.update({
+        where: { id: reviewer.id },
+        data: { displayName: cleaned },
+      });
+    }
+  } else {
+    const key = urlsafeRandom(REVIEWER_KEY_BYTES);
+    reviewer = await db.shareReviewer.create({
+      data: { shareId: share.id, reviewerKey: key, displayName: cleaned },
+    });
+    jar.set(cookieName, key, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: `/share/${token}`,
+      maxAge: SHARE_COOKIE_MAX_AGE,
+    });
+  }
+
+  revalidatePath(`/share/${token}`);
+});
+
+const PostCommentSchema = z.object({
+  token: z.string().min(1),
+  targetType: z.enum(['routine', 'routine_day', 'template_exercise', 'suggestion']),
+  targetId: z.string().min(1),
+  body: z.string().trim().min(1).max(2000),
+});
+
+export const postShareComment = withLogging('postShareComment', async (
+  input: z.infer<typeof PostCommentSchema>,
+) => {
+  const { token, targetType, targetId, body } = PostCommentSchema.parse(input);
+  if (body.trim().length === 0) throw new Error('Comment body cannot be empty');
+
+  const share = await requireActiveShare(token);
+  const reviewer = await requireReviewer(share.id);
+
+  const comment = await db.shareComment.create({
+    data: {
+      shareId: share.id,
+      reviewerId: reviewer.id,
+      targetType,
+      targetId,
+      body: body.trim(),
+    },
+  });
+
+  await notifyRoutineOwner(share.routine.userId, {
+    kind: 'share_comment',
+    title: `${reviewer.displayName} commented`,
+    body: body.trim().slice(0, 200),
+    url: `/routine/shares/${share.id}#comment-${comment.id}`,
+    sourceType: 'share_comment',
+    sourceId: comment.id,
+  });
+
+  revalidatePath(`/share/${token}`);
+});
+
+const SuggestionPayloadSchema = z.union([
+  z.object({
+    kind: z.literal('swap_specific'),
+    outExerciseId: z.string().min(1),
+    inExerciseId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal('swap_anyof'),
+    outExerciseId: z.string().min(1),
+    candidateIds: z.array(z.string().min(1)).min(1).max(20),
+  }),
+  z.object({
+    kind: z.literal('swap_category'),
+    outExerciseId: z.string().min(1),
+    primaryMuscle: z.string().min(1).optional(),
+    module: z.string().min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal('reorder'),
+    orderedTemplateExerciseIds: z.array(z.string().min(1)).min(2),
+  }),
+  z.object({
+    kind: z.literal('insert'),
+    atPosition: z.number().int().min(0),
+    exerciseIds: z.array(z.string().min(1)).min(1).max(10),
+  }),
+  z.object({
+    kind: z.literal('remove'),
+    templateExerciseId: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal('sticker'),
+    sticker: z.enum([
+      'more_sets',
+      'fewer_sets',
+      'more_reps',
+      'fewer_reps',
+      'more_weight',
+      'less_weight',
+      'bodyweight',
+    ]),
+    note: z.string().trim().max(300).optional(),
+  }),
+  z.object({
+    kind: z.literal('custom_exercise'),
+    name: z.string().trim().min(1).max(80),
+    primaryMuscles: z.array(z.string().min(1)).max(8).default([]),
+    secondaryMuscles: z.array(z.string().min(1)).max(8).default([]),
+    module: z.string().min(1).default('Custom'),
+    metric: z.enum(['reps', 'time']).default('reps'),
+    notes: z.string().trim().max(500).optional(),
+  }),
+  z.object({
+    kind: z.literal('holistic_add'),
+    exerciseIds: z.array(z.string().min(1)).max(20).optional(),
+    description: z.string().trim().max(500).optional(),
+  }),
+  z.object({
+    kind: z.literal('holistic_remove'),
+    exerciseIds: z.array(z.string().min(1)).max(20).optional(),
+    description: z.string().trim().max(500).optional(),
+  }),
+]);
+
+const PostSuggestionSchema = z.object({
+  token: z.string().min(1),
+  targetType: z.enum(['routine', 'routine_day', 'template_exercise']).nullable(),
+  targetId: z.string().min(1).nullable(),
+  payload: SuggestionPayloadSchema,
+});
+
+function humanSuggestionKind(kind: string): string {
+  switch (kind) {
+    case 'swap_specific':
+    case 'swap_anyof':
+    case 'swap_category':
+      return 'swap';
+    case 'reorder':
+      return 'reorder';
+    case 'insert':
+      return 'insert';
+    case 'remove':
+      return 'removal';
+    case 'sticker':
+      return 'sticker';
+    case 'custom_exercise':
+      return 'new custom exercise';
+    case 'holistic_add':
+      return 'broad add';
+    case 'holistic_remove':
+      return 'broad remove';
+    default:
+      return 'change';
+  }
+}
+
+function summarizeSuggestion(payload: z.infer<typeof SuggestionPayloadSchema>): string {
+  switch (payload.kind) {
+    case 'sticker':
+      return payload.sticker.replaceAll('_', ' ');
+    case 'custom_exercise':
+      return payload.name;
+    case 'holistic_add':
+    case 'holistic_remove':
+      return payload.description?.slice(0, 200) ?? '';
+    default:
+      return '';
+  }
+}
+
+export const postShareSuggestion = withLogging('postShareSuggestion', async (
+  input: z.infer<typeof PostSuggestionSchema>,
+) => {
+  const { token, targetType, targetId, payload } = PostSuggestionSchema.parse(input);
+
+  const share = await requireActiveShare(token);
+  const reviewer = await requireReviewer(share.id);
+
+  const created = await db.shareSuggestion.create({
+    data: {
+      shareId: share.id,
+      reviewerId: reviewer.id,
+      kind: payload.kind,
+      targetType,
+      targetId,
+      payload,
+    },
+  });
+
+  await notifyRoutineOwner(share.routine.userId, {
+    kind: 'share_suggestion',
+    title: `${reviewer.displayName} suggested a ${humanSuggestionKind(payload.kind)}`,
+    body: summarizeSuggestion(payload),
+    url: `/routine/shares/${share.id}#suggestion-${created.id}`,
+    sourceType: 'share_suggestion',
+    sourceId: created.id,
+  });
+
+  revalidatePath(`/share/${token}`);
+});
+
+const ToggleReactionSchema = z.object({
+  token: z.string().min(1),
+  targetType: z.enum(['template_exercise', 'routine_day', 'routine']),
+  targetId: z.string().min(1),
+  kind: z.literal('good'),
+});
+
+export const toggleShareReaction = withLogging('toggleShareReaction', async (
+  input: z.infer<typeof ToggleReactionSchema>,
+) => {
+  const { token, targetType, targetId, kind } = ToggleReactionSchema.parse(input);
+
+  const share = await requireActiveShare(token);
+  const reviewer = await requireReviewer(share.id);
+
+  const existing = await db.shareReaction.findUnique({
+    where: {
+      reviewerId_targetType_targetId_kind: {
+        reviewerId: reviewer.id,
+        targetType,
+        targetId,
+        kind,
+      },
+    },
+  });
+
+  if (existing) {
+    await db.shareReaction.delete({ where: { id: existing.id } });
+  } else {
+    await db.shareReaction.create({
+      data: { shareId: share.id, reviewerId: reviewer.id, targetType, targetId, kind },
+    });
+    await notifyRoutineOwner(share.routine.userId, {
+      kind: 'share_reaction',
+      title: `${reviewer.displayName} liked an exercise`,
+      url: `/routine/shares/${share.id}`,
+      sourceType: 'share_reaction',
+      sourceId: targetId,
+    });
+  }
+
+  revalidatePath(`/share/${token}`);
 });
