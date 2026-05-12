@@ -75,6 +75,11 @@ import {
 import { ExercisePicker } from '@/components/workout/exercise-picker';
 import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { useConfirm } from '@/components/ui/use-confirm';
+import { usePrefs } from '@/components/ui/prefs-context';
+import {
+  estimatePlannedExerciseSeconds,
+  formatEstimateCompact,
+} from '@/lib/time-estimate';
 
 // ============ TYPES ============
 
@@ -322,11 +327,26 @@ function DraftEditor({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const { prefs } = usePrefs();
 
   const [scheduleStyle, setScheduleStyle] = useState<ScheduleStyle>('sequence');
   const [days, setDays] = useState<DraftDay[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [pickerForDayClientId, setPickerForDayClientId] = useState<string | null>(null);
+
+  // Effective rest per exercise (override → global default), built once per
+  // render. Surfaced to DayCard so per-day and per-module time estimates use
+  // the same rest value the active session will. Single-user app — there's
+  // no real risk of the map churning between renders.
+  const restByExerciseId = useMemo(
+    () =>
+      new Map(
+        availableExercises.map(
+          (e) => [e.id, e.restTimerSecondsOverride ?? prefs.restTimerSeconds] as const,
+        ),
+      ),
+    [availableExercises, prefs.restTimerSeconds],
+  );
 
   // Preset picker state. The user lands on the Strength preview by default;
   // they pick filters and either click "Use this preset" (which copies the
@@ -755,6 +775,7 @@ function DraftEditor({
               atCap={days.length >= MAX_ROUTINE_DAYS}
               isPending={isPending}
               seedTemplates={seedTemplates}
+              restByExerciseId={restByExerciseId}
               onAddDay={addDay}
               onRenameDay={(id, name) =>
                 updateDay(id, (d) => ({ ...d, name }))
@@ -928,6 +949,7 @@ function PresetTabs({
     { value: 'strength', label: STARTER_FOCUS_INFO.strength.label },
     { value: 'build', label: STARTER_FOCUS_INFO.build.label },
     { value: 'mobility', label: STARTER_FOCUS_INFO.mobility.label },
+    { value: 'longevity', label: STARTER_FOCUS_INFO.longevity.label },
     { value: 'custom', label: 'Custom' },
   ];
   return (
@@ -1258,11 +1280,24 @@ function LiveEditor({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const { confirm, Dialog: ConfirmDialog } = useConfirm();
+  const { prefs } = usePrefs();
 
   const [pickerForDayId, setPickerForDayId] = useState<string | null>(null);
   const [swapForDay, setSwapForDay] = useState<
     { dayId: string; outExerciseId: string } | null
   >(null);
+
+  // Effective rest per exercise (override → global default). DayCard uses
+  // this to render day-total and per-module subtotal time estimates.
+  const restByExerciseId = useMemo(
+    () =>
+      new Map(
+        availableExercises.map(
+          (e) => [e.id, e.restTimerSecondsOverride ?? prefs.restTimerSeconds] as const,
+        ),
+      ),
+    [availableExercises, prefs.restTimerSeconds],
+  );
 
   const editorDays: EditorDay[] = useMemo(
     () =>
@@ -1318,6 +1353,7 @@ function LiveEditor({
         atCap={routine.days.length >= MAX_ROUTINE_DAYS}
         isPending={isPending}
         seedTemplates={seedTemplates}
+        restByExerciseId={restByExerciseId}
         onAddDay={(weekday) => {
           startTransition(async () => {
             try {
@@ -1749,6 +1785,9 @@ type DaysSectionProps = {
   onUpdateExercisePlanned: (id: string, exerciseId: string, patch: PlannedPatch) => void;
   // Null disables the swap button (e.g. in draft mode).
   onSwapExercise: ((id: string, exerciseId: string) => void) | null;
+  // Per-exercise effective rest seconds (override → global default). Lets
+  // DayCard estimate per-exercise time without re-resolving the user's prefs.
+  restByExerciseId: Map<string, number>;
 };
 
 function DaysSection(props: DaysSectionProps) {
@@ -1909,6 +1948,7 @@ function dispatchProps(p: DaysSectionProps) {
     onReorderExercise: p.onReorderExercise,
     onUpdateExercisePlanned: p.onUpdateExercisePlanned,
     onSwapExercise: p.onSwapExercise,
+    restByExerciseId: p.restByExerciseId,
   };
 }
 
@@ -1937,6 +1977,7 @@ type DayCardProps = {
   onReorderExercise: (id: string, exerciseId: string, direction: 'up' | 'down') => void;
   onUpdateExercisePlanned: (id: string, exerciseId: string, patch: PlannedPatch) => void;
   onSwapExercise: ((id: string, exerciseId: string) => void) | null;
+  restByExerciseId: Map<string, number>;
 };
 
 function DayCard({
@@ -1961,6 +2002,7 @@ function DayCard({
   onReorderExercise,
   onUpdateExercisePlanned,
   onSwapExercise,
+  restByExerciseId,
 }: DayCardProps) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(day.name);
@@ -1999,6 +2041,33 @@ function DayCard({
     () => isCanonicalModuleOrder(day.exercises),
     [day.exercises],
   );
+
+  // Time estimates summed at three levels: per exercise (used implicitly for
+  // group/day totals), per module group, and per day. Per-exercise rest comes
+  // from the user's override or the global default (resolved by the parent
+  // and passed in via restByExerciseId). Exercises without planned sets fall
+  // back to the seeder's defaults — same behavior as the coverage panel, so
+  // the time and volume readouts agree on what an "estimated" set looks like.
+  const { dayEstimateSec, groupEstimateSec } = useMemo(() => {
+    const perGroup = new Map<string, number>();
+    let dayTotal = 0;
+    for (const group of moduleGroups) {
+      let groupTotal = 0;
+      for (const ex of group.exercises) {
+        const seconds = estimatePlannedExerciseSeconds({
+          metric: ex.metric,
+          plannedSets: ex.plannedSets,
+          plannedReps: ex.plannedReps,
+          plannedSeconds: ex.plannedSeconds,
+          restSeconds: restByExerciseId.get(ex.exerciseId) ?? 90,
+        });
+        groupTotal += seconds;
+      }
+      perGroup.set(group.module, groupTotal);
+      dayTotal += groupTotal;
+    }
+    return { dayEstimateSec: dayTotal, groupEstimateSec: perGroup };
+  }, [moduleGroups, restByExerciseId]);
 
   const takenWeekdays = new Set(
     allDays
@@ -2063,6 +2132,14 @@ function DayCard({
             >
               {day.name}
             </button>
+          )}
+          {dayEstimateSec > 0 && (
+            <span
+              className="text-[11px] text-ink-500 font-mono shrink-0"
+              title="Estimated time at typical pace — sum of planned sets × rest, not a deadline."
+            >
+              ~{formatEstimateCompact(dayEstimateSec)}
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0 ml-2">
@@ -2157,13 +2234,22 @@ function DayCard({
 
         {day.exercises.length > 0 ? (
           <div className="space-y-2.5">
-            {moduleGroups.map((group) => (
+            {moduleGroups.map((group) => {
+              const subtotalSec = groupEstimateSec.get(group.module) ?? 0;
+              return (
               <div key={group.module} className="space-y-1">
-                <div
-                  className="text-[10px] tracking-[0.2em] uppercase text-ink-500 px-0.5 cursor-help"
-                  title={moduleDescription(group.module) || group.module}
-                >
-                  {group.module}
+                <div className="flex items-baseline gap-2 px-0.5">
+                  <div
+                    className="text-[10px] tracking-[0.2em] uppercase text-ink-500 cursor-help"
+                    title={moduleDescription(group.module) || group.module}
+                  >
+                    {group.module}
+                  </div>
+                  {subtotalSec > 0 && (
+                    <div className="text-[10px] text-ink-600 font-mono">
+                      ~{formatEstimateCompact(subtotalSec)}
+                    </div>
+                  )}
                 </div>
                 {group.exercises.map((ex) => {
                   // Position-order index lookup so move-up/down logic stays in
@@ -2202,7 +2288,8 @@ function DayCard({
                   );
                 })}
               </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p className="text-[11px] text-ink-500 italic font-display py-1">

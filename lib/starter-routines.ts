@@ -11,7 +11,7 @@
 // MUST hit 5×5"); descriptions stay neutral and templates are exercise lists,
 // not coaching cues.
 //
-// Three focuses:
+// Four focuses:
 //   - 'strength'  — barbell-first, low-rep main lifts, longer rest.
 //                   Defaults toward back squat / conventional deadlift /
 //                   bench press. Skips niche kit (no trap bar, no specialty
@@ -24,6 +24,13 @@
 //   - 'mobility'  — bodyweight / bands / mobility / SMR-heavy. Lower
 //                   intensity. The "I want to feel better, not stronger"
 //                   variant. Works well at 1-day-a-week cadences.
+//   - 'longevity' — hybrid: one barbell main lift (trap-bar / RDL / front
+//                   squat first), one posterior-chain accessory, one
+//                   posture/scapular block, a balance finisher, and a
+//                   short SMR section. The "I want to be moving well in
+//                   ten years" variant. Descriptive only — not a coaching
+//                   recommendation; the seed picks well-known patterns
+//                   that the user is free to keep, swap, or discard.
 //
 // The duration knob (15 / 30 / 45 / 60 min) trims by priority — see the
 // PRIORITY_CUTOFF table below. Lower duration drops accessories and SMR
@@ -40,7 +47,7 @@ import type { ExerciseModule } from './exercises-data';
 
 // ============ TYPES ============
 
-export const STARTER_FOCUSES = ['strength', 'build', 'mobility'] as const;
+export const STARTER_FOCUSES = ['strength', 'build', 'mobility', 'longevity'] as const;
 export type StarterFocus = (typeof STARTER_FOCUSES)[number];
 
 export const STARTER_FOCUS_INFO: Record<
@@ -59,6 +66,11 @@ export const STARTER_FOCUS_INFO: Record<
   mobility: {
     label: 'Mobility',
     description: 'Bodyweight, bands, and mobility-forward — lower intensity.',
+  },
+  longevity: {
+    label: 'Longevity',
+    description:
+      'Mixed barbell + posterior chain + posture + balance + SMR. A hybrid sketch you can edit.',
   },
 };
 
@@ -866,6 +878,137 @@ function mobilityDay(name: string, includeStrength = true): DayBase {
   };
 }
 
+// ============ LONGEVITY-FOCUS SLOTS ============
+//
+// Longevity days are assembled around five pieces: one barbell main lift
+// (squat or hinge), one posterior-chain accessory, one posture/scapular
+// block, a balance finisher, and a short SMR section. The slot helpers
+// below define each piece. Variants cascade from full-gym → home-rack →
+// dumbbells-only → bands → bodyweight, same pattern as the other focuses.
+
+function longevityHingeMainSlot(): Slot {
+  return {
+    pattern: 'longevity-hinge',
+    module: 'Strength Barbell',
+    priority: 1,
+    estMinutes: 7,
+    variants: [
+      // Trap bar is the lead per the longevity archetype — spine-friendly hip
+      // hinge — but the next-best plates fall through cleanly for users
+      // without one.
+      { exerciseName: 'Trap bar deadlift', plannedSets: 4, plannedReps: 6, equipment: ['barbell'] },
+      { exerciseName: 'Romanian deadlift', plannedSets: 4, plannedReps: 8, equipment: ['barbell'] },
+      { exerciseName: 'Dumbbell RDL', plannedSets: 4, plannedReps: 8, equipment: ['dumbbells'] },
+      { exerciseName: 'Banded RDL', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      { exerciseName: 'Single-leg RDL', plannedSets: 3, plannedReps: 8, equipment: [] },
+    ],
+  };
+}
+
+function longevitySquatMainSlot(): Slot {
+  return {
+    pattern: 'longevity-squat',
+    module: 'Strength Barbell',
+    priority: 1,
+    estMinutes: 7,
+    variants: [
+      // Front squat first — upright torso, less spinal-shear than back squat,
+      // matches the longevity archetype's bias toward joint-friendlier lifts.
+      { exerciseName: 'Front squat', plannedSets: 4, plannedReps: 5, equipment: ['barbell', 'rack'] },
+      { exerciseName: 'Back squat', plannedSets: 4, plannedReps: 6, equipment: ['barbell', 'rack'] },
+      { exerciseName: 'Goblet squat', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells'] },
+      { exerciseName: 'Banded squat', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      { exerciseName: 'Bodyweight squat', plannedSets: 3, plannedReps: 15, equipment: [] },
+    ],
+  };
+}
+
+function posteriorChainSlot(): Slot {
+  return {
+    pattern: 'posterior-chain',
+    module: 'Strength Accessory',
+    priority: 1,
+    estMinutes: 6,
+    variants: [
+      { exerciseName: 'Physio ball hamstring bridges', plannedSets: 3, plannedReps: 10, equipment: ['physio ball', 'mat'] },
+      { exerciseName: 'Posterior chain leg lifts (ball)', plannedSets: 3, plannedReps: 10, equipment: ['physio ball', 'bands'] },
+      { exerciseName: 'Banded hip thrust', plannedSets: 3, plannedReps: 12, equipment: ['bands', 'bench', 'mat'] },
+      { exerciseName: 'Dumbbell hip thrust', plannedSets: 3, plannedReps: 10, equipment: ['dumbbells', 'bench', 'mat'] },
+      { exerciseName: 'Bodyweight hip thrust', plannedSets: 3, plannedReps: 15, equipment: ['bench', 'mat'] },
+      { exerciseName: 'Bodyweight glute bridge', plannedSets: 3, plannedReps: 15, equipment: ['mat'] },
+    ],
+  };
+}
+
+function postureSlot(): Slot {
+  return {
+    pattern: 'posture-scapular',
+    module: 'Strength Thoracic',
+    priority: 2,
+    estMinutes: 4,
+    variants: [
+      { exerciseName: 'Scapular postural band work', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      { exerciseName: 'Banded face pulls', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      { exerciseName: 'Banded pull-aparts', plannedSets: 3, plannedReps: 15, equipment: ['bands'] },
+      { exerciseName: 'Reverse fly', plannedSets: 3, plannedReps: 12, equipment: ['dumbbells'] },
+      { exerciseName: 'Prone Y raises', plannedSets: 2, plannedReps: 10, equipment: ['mat'] },
+    ],
+  };
+}
+
+function balanceFinisherSlot(): Slot {
+  return {
+    pattern: 'balance-finisher',
+    module: 'Balance',
+    priority: 3,
+    estMinutes: 5,
+    variants: [
+      { exerciseName: 'BOSU dome single-leg holds', plannedSets: 3, plannedSeconds: 60, equipment: ['bosu'] },
+      { exerciseName: 'Airex pad single-leg holds', plannedSets: 3, plannedSeconds: 60, equipment: ['airex pad'] },
+      { exerciseName: 'BOSU flat single-leg holds', plannedSets: 3, plannedSeconds: 60, equipment: ['bosu'] },
+      { exerciseName: 'Single-leg balance hold', plannedSets: 3, plannedSeconds: 30, equipment: [] },
+    ],
+  };
+}
+
+// Longevity-flavored upper day — keeps a posture/scapular focus paired with
+// horizontal push/pull plus the same balance + SMR closers as the lower
+// days, so the routine still feels like one cohesive thing across the cycle.
+// Variants cascade through standard equipment tiers from the existing
+// push/pull slot helpers, parameterized with 'build' (mid rep ranges) since
+// longevity sits closer to build than to strength on the upper side.
+function longevityLowerDay(name: string, hingeLed: boolean): DayBase {
+  const main = hingeLed ? longevityHingeMainSlot() : longevitySquatMainSlot();
+  return {
+    name,
+    slots: [
+      activationSlot(),
+      main,
+      posteriorChainSlot(),
+      postureSlot(),
+      balanceFinisherSlot(),
+      mobilitySlot(),
+      smrSlot(),
+    ],
+  };
+}
+
+function longevityUpperDay(name: string): DayBase {
+  return {
+    name,
+    slots: [
+      activationSlot(),
+      pushSlot('build', 1),
+      pullSlot('build', 1),
+      postureSlot(),
+      coreSlot(2),
+      balanceFinisherSlot(),
+      mobilitySlot(),
+      smrSlot(),
+    ],
+  };
+}
+
 // Each focus has 7 day-counts. Built from helpers above.
 const STARTER_ROUTINES: Record<StarterFocus, Record<number, RoutineBase>> = {
   strength: {
@@ -1033,6 +1176,69 @@ const STARTER_ROUTINES: Record<StarterFocus, Record<number, RoutineBase>> = {
         mobilityDay('Day 5'),
         mobilityDay('Day 6'),
         mobilityDay('Day 7 (stretch)', false),
+      ],
+    },
+  },
+  longevity: {
+    1: {
+      description: 'One hinge-led longevity session: main lift, posterior chain, posture, balance, SMR.',
+      days: [longevityLowerDay('Full body (hinge)', true)],
+    },
+    2: {
+      description: 'Hinge-led day + squat-led day.',
+      days: [
+        longevityLowerDay('Lower (hinge)', true),
+        longevityLowerDay('Lower (squat)', false),
+      ],
+    },
+    3: {
+      description: 'Hinge day + squat day + an upper/posture-led day.',
+      days: [
+        longevityLowerDay('Lower (hinge)', true),
+        longevityLowerDay('Lower (squat)', false),
+        longevityUpperDay('Upper (posture)'),
+      ],
+    },
+    4: {
+      description: 'Hinge / squat / hinge / upper-posture rotation.',
+      days: [
+        longevityLowerDay('Lower (hinge)', true),
+        longevityLowerDay('Lower (squat)', false),
+        longevityLowerDay('Lower (hinge B)', true),
+        longevityUpperDay('Upper (posture)'),
+      ],
+    },
+    5: {
+      description: 'Hinge / squat / posture / hinge / squat — same five-piece structure across the cycle.',
+      days: [
+        longevityLowerDay('Day 1 (hinge)', true),
+        longevityLowerDay('Day 2 (squat)', false),
+        longevityUpperDay('Day 3 (posture)'),
+        longevityLowerDay('Day 4 (hinge)', true),
+        longevityLowerDay('Day 5 (squat)', false),
+      ],
+    },
+    6: {
+      description: 'Hinge / squat / posture, twice over.',
+      days: [
+        longevityLowerDay('Day 1 (hinge)', true),
+        longevityLowerDay('Day 2 (squat)', false),
+        longevityUpperDay('Day 3 (posture)'),
+        longevityLowerDay('Day 4 (hinge)', true),
+        longevityLowerDay('Day 5 (squat)', false),
+        longevityUpperDay('Day 6 (posture)'),
+      ],
+    },
+    7: {
+      description: 'Hinge / squat / posture twice over, plus a mobility-only closer.',
+      days: [
+        longevityLowerDay('Day 1 (hinge)', true),
+        longevityLowerDay('Day 2 (squat)', false),
+        longevityUpperDay('Day 3 (posture)'),
+        longevityLowerDay('Day 4 (hinge)', true),
+        longevityLowerDay('Day 5 (squat)', false),
+        longevityUpperDay('Day 6 (posture)'),
+        mobilityDay('Day 7 (mobility)', false),
       ],
     },
   },

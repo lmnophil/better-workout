@@ -1151,6 +1151,224 @@ export const SEED_EXERCISES: SeedExercise[] = [
     metric: 'time',
     equipment: ['dumbbells'],
   },
+
+  // ============ ADDITIONS — longevity / hybrid library expansion ============
+  // These extend each existing module rather than introducing new ones. Most
+  // are named SMR releases that previously lived only in user-custom workflows;
+  // a few are landmine / banded variants common in PT-style hybrid plans.
+  // PT- or person-specific cues stay in the per-day note field (see decisions),
+  // so prescriptions here describe the canonical pattern, not anyone's plan.
+
+  // SMR — Lower additions
+  {
+    name: 'Plantar fascia ball roll',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '30–60s per foot, slow passes',
+    equipment: ['lacrosse ball'],
+  },
+  {
+    name: 'Foam roll peroneals',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per leg, outer shin',
+    equipment: ['foam roller', 'mat'],
+  },
+  {
+    name: 'TFL ball release',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, hip-pocket corner',
+    equipment: ['lacrosse ball'],
+  },
+  {
+    name: 'Glute med/min ball release',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, side-lying on ball',
+    equipment: ['lacrosse ball', 'mat'],
+  },
+  {
+    name: 'Foam roll adductors',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per leg, prone on roller',
+    equipment: ['foam roller', 'mat'],
+  },
+  {
+    name: 'Psoas ball release',
+    module: 'SMR Lower',
+    primaryMuscles: ['soft tissue'],
+    prescription: '30–60s per side, breathe into pressure',
+    equipment: ['lacrosse ball', 'mat'],
+  },
+
+  // SMR — Upper additions
+  {
+    name: 'Subscapularis ball release',
+    module: 'SMR Upper',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, supine, arm overhead',
+    equipment: ['lacrosse ball', 'mat'],
+  },
+  {
+    name: 'Foam roll posterior delts',
+    module: 'SMR Upper',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, back of shoulder',
+    equipment: ['foam roller', 'mat'],
+  },
+  {
+    name: 'Foam roll traps',
+    module: 'SMR Upper',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min, supine, slow passes',
+    equipment: ['foam roller', 'mat'],
+  },
+  {
+    name: 'Suboccipital ball release',
+    module: 'SMR Upper',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1–2 min supine, ball at skull base',
+    equipment: ['lacrosse ball', 'mat'],
+  },
+
+  // SMR — Trunk additions
+  {
+    name: 'QL ball release',
+    module: 'SMR Trunk',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min per side, just above the iliac crest',
+    equipment: ['lacrosse ball', 'mat'],
+  },
+  {
+    name: 'Diaphragm release under ribs',
+    module: 'SMR Trunk',
+    primaryMuscles: ['soft tissue'],
+    prescription: '30s per side, slow breaths into the pressure',
+    equipment: ['lacrosse ball'],
+  },
+  {
+    name: 'Foam roll paraspinals',
+    module: 'SMR Trunk',
+    primaryMuscles: ['soft tissue'],
+    prescription: '1 min, slow passes along the spine',
+    equipment: ['foam roller', 'mat'],
+  },
+
+  // Mobility — Upper additions
+  {
+    name: 'Banded shoulder dislocates',
+    module: 'Mobility Upper',
+    primaryMuscles: ['shoulder mobility'],
+    prescription: '2×8–10, light tension, smooth arc',
+    equipment: ['bands'],
+  },
+  {
+    name: 'Prayer stretch',
+    module: 'Mobility Upper',
+    primaryMuscles: ['shoulder mobility'],
+    secondaryMuscles: ['t-spine mobility'],
+    prescription: '30–45s, forearms together, melt chest down',
+    equipment: ['mat'],
+  },
+
+  // Mobility — Trunk additions
+  {
+    name: 'Book opener (side-lying T-spine rotation)',
+    module: 'Mobility Trunk',
+    primaryMuscles: ['t-spine mobility'],
+    prescription: '8 per side, breathe out as you open',
+    equipment: ['mat'],
+  },
+  {
+    name: 'Side-lying rib expansion breathing',
+    module: 'Mobility Trunk',
+    primaryMuscles: ['t-spine mobility'],
+    prescription: '5–6 breaths per side, expand the up-side ribs',
+    equipment: ['mat'],
+  },
+
+  // Activation — Upper additions
+  {
+    name: 'Banded anti-shrug',
+    module: 'Activation Upper',
+    primaryMuscles: ['lower traps'],
+    secondaryMuscles: ['scapular'],
+    prescription: '2×10, depress shoulder blades against tension',
+    equipment: ['bands'],
+  },
+  {
+    name: 'Serratus push-up plus',
+    module: 'Activation Upper',
+    primaryMuscles: ['scapular'],
+    secondaryMuscles: ['chest'],
+    prescription: '2×10, push through scaps at the top',
+    equipment: ['mat'],
+  },
+
+  // Activation — Trunk additions
+  {
+    name: 'Deep core breathing with rib control',
+    module: 'Activation Trunk',
+    primaryMuscles: ['core'],
+    prescription: '5 slow breaths, ribs down, 360° expansion',
+    equipment: ['mat'],
+  },
+
+  // Strength — Thoracic additions (landmine variants are the bread and butter
+  // of hybrid plans — pair well with the existing Activation Upper / SMR Upper
+  // entries to form an upper-emphasis day)
+  {
+    name: 'Landmine row',
+    module: 'Strength Thoracic',
+    primaryMuscles: ['back'],
+    secondaryMuscles: ['rear delts', 'biceps', 'scapular'],
+    prescription: '3–4×8–10, drive elbow back, neutral spine',
+    equipment: ['barbell'],
+  },
+  {
+    name: 'Landmine press with rotation',
+    module: 'Strength Thoracic',
+    primaryMuscles: ['shoulders', 'core'],
+    secondaryMuscles: ['chest', 'scapular'],
+    prescription: '3×6–8 per side, rotate through the press',
+    equipment: ['barbell'],
+  },
+  {
+    name: 'Landmine core rotation to press',
+    module: 'Strength Thoracic',
+    primaryMuscles: ['core', 'shoulders'],
+    secondaryMuscles: ['scapular'],
+    prescription: '3×8 per side, drive from the hips',
+    equipment: ['barbell'],
+  },
+
+  // Strength — Accessory addition
+  {
+    name: 'Banded box squat',
+    module: 'Strength Accessory',
+    primaryMuscles: ['glutes', 'quads'],
+    secondaryMuscles: ['hamstrings'],
+    prescription: '3×8–10, pause on the box, drive the band apart',
+    equipment: ['bands', 'bench'],
+  },
+
+  // Rev Up additions
+  {
+    name: 'Jump lunges',
+    module: 'Rev Up',
+    primaryMuscles: ['cardio', 'quads'],
+    secondaryMuscles: ['glutes'],
+    prescription: '4–6 rounds of 10, soft landings',
+  },
+  {
+    name: 'Leaning wall jog',
+    module: 'Rev Up',
+    primaryMuscles: ['cardio'],
+    prescription: '30–45s rounds, hands on wall, quick turnover',
+    metric: 'time',
+  },
 ];
 
 // ================================================================

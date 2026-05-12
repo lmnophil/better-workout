@@ -99,7 +99,7 @@ Broken down roughly: SMR (~9), Mobility (~15), Activation (~18), Strength Barbel
 `npm run db:seed` upserts built-ins by `(ownerId=null, name)` and clears `deletedAt` on previously soft-deleted built-ins. Customs untouched. Safe to re-run any time.
 
 ### Starter routines
-Live in `lib/starter-routines.ts` — PPL, Upper/Lower, Full Body, Mobility. User picks one at signup. Each is a routine draft built from seeded exercises; created via `createRoutineFromDraft` action.
+Live in `lib/starter-routines.ts`. Four focuses — Strength, Build, Mobility, Longevity — each × 1–7 days/cycle × 15/30/45/60 min/day × equipment tier. Each focus assembles day templates from seven slot helpers (squat / hinge / push / pull / vPush / vPull / lunge etc.) plus support slots (mobility / SMR / core / carry / conditioning / thoracic / balance). The user picks one as a starting draft; everything is editable after.
 
 ---
 
@@ -287,7 +287,7 @@ Read these when working in the matching directory.
 - **`lib/prefs.ts`** — `UserPrefs` type and `PREFS_DEFAULTS` (single source of truth, referenced by schema/queries/actions/context).
 - **`lib/routine.ts`**, **`lib/routine-coverage.ts`** — `pickTodaysRoutineDay`, `pickUpcomingRoutineDays`, `isScheduleStyle`; coverage helpers for routine view.
 - **`lib/prescription.ts`** — parses "3×12" out of an exercise's prescription string to extract default set count.
-- **`lib/starter-routines.ts`** — PPL / Upper-Lower / Full Body / Mobility presets used at signup.
+- **`lib/starter-routines.ts`** — Strength / Build / Mobility / Longevity preset families used in the routine empty state.
 - **`lib/area-filter.ts`** — region (Upper/Lower/Full/Mobility) and muscle chip taxonomy + `balanceHint()`. Used by picker filters and empty-state suggestions.
 - **`lib/db.ts`** — Prisma client singleton with `@prisma/adapter-pg` (PrismaPg) adapter. Slow-query logging (>100ms hits stderr). Histogram observation per query.
 - **`lib/env.ts`** — boot-time env validation, called from `instrumentation.ts`.

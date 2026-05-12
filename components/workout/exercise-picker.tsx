@@ -455,16 +455,49 @@ function BrowseTab({
             orderedModules.map((module) => {
               const exercises = groupedByModule.get(module)!;
               const description = moduleDescription(module);
+              // Module-level multi-select: count what's already selected so
+              // the action label flips between "Add all" (some/none selected)
+              // and "Clear" (all selected). Skips swap mode entirely — that
+              // surface is single-select, the helper would be confusing.
+              const selectedInModule = exercises.filter((e) => selected.has(e.id)).length;
+              const allSelected = selectedInModule === exercises.length;
+              function toggleAllInModule() {
+                setSelected((prev) => {
+                  const next = new Set(prev);
+                  if (allSelected) {
+                    for (const ex of exercises) next.delete(ex.id);
+                  } else {
+                    for (const ex of exercises) next.add(ex.id);
+                  }
+                  return next;
+                });
+              }
               return (
                 <div key={module} className="mb-5">
-                  <div className="mb-2">
-                    <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
-                      {module}
-                    </div>
-                    {description && (
-                      <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
-                        {description}
+                  <div className="mb-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
+                        {module}
                       </div>
+                      {description && (
+                        <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
+                          {description}
+                        </div>
+                      )}
+                    </div>
+                    {!isSwap && exercises.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={toggleAllInModule}
+                        className="text-[10px] tracking-wider uppercase shrink-0 px-2 py-1 rounded-full border border-ink-800 hover:border-accent/50 text-ink-400 hover:text-ink-100 transition"
+                        title={
+                          allSelected
+                            ? `Clear all ${exercises.length} ${module} exercises from the selection`
+                            : `Add all ${exercises.length} ${module} exercises to the selection`
+                        }
+                      >
+                        {allSelected ? `Clear ${exercises.length}` : `Add all ${exercises.length}`}
+                      </button>
                     )}
                   </div>
                   <div className="space-y-1.5">
