@@ -6,7 +6,7 @@ For schema-editing operational guidance (migrations, seed compilation, things-th
 
 ## Entity overview
 
-Twenty-one models, in five groups:
+Five groups of models:
 
 | Group | Models | Notes |
 |---|---|---|

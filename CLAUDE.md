@@ -103,7 +103,7 @@ Not used (deliberately): no ORM besides Prisma; no state library; no CSS-in-JS; 
 
 Pull these in as the task earns them — don't pre-load.
 
-- [`docs/codebase-map.md`](docs/codebase-map.md) — point-in-time, code-grounded reference. Skim when you need to orient. Has a freshness header; if it's stale enough to mislead, regenerate it.
+- [`docs/codebase-map.md`](docs/codebase-map.md) — code-grounded reference. Skim when you need to orient. Maintained inline with code changes per the maintenance contract; if you find a claim that no longer matches, fix it as part of your change.
 - [`docs/api.md`](docs/api.md) — server-action, query, and HTTP-route conventions plus recipes for adding each.
 - [`docs/data-model.md`](docs/data-model.md) — entities, relationships, cross-cutting patterns. Read when touching schema.
 - [`docs/decisions.md`](docs/decisions.md) — substantive design decisions and why. Check before undoing or extending a non-obvious choice.
