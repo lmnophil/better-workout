@@ -8,12 +8,17 @@
 // or derived from the share payload.
 
 import { useMemo, useState, useTransition } from 'react';
-import { MessageCircle, ThumbsUp, Wand2, Plus, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronUp, ThumbsUp, Wand2, Plus, Pencil } from 'lucide-react';
 import { TargetThread } from './target-thread';
 import { SuggestionBuilder } from './suggestion-builder';
 import { type LibraryExercise } from './reviewer-picker';
 import { StickerStrip } from './sticker-strip';
-import { postShareSuggestion, registerShareReviewer, toggleShareReaction } from '@/lib/actions';
+import {
+  postShareComment,
+  postShareSuggestion,
+  registerShareReviewer,
+  toggleShareReaction,
+} from '@/lib/actions';
 import {
   TIME_ESTIMATE,
   estimatePlannedExerciseSeconds,
@@ -211,7 +216,7 @@ export function ShareView({ token, reviewer, routine, activity, library }: Props
   }, [activity]);
 
   return (
-    <main className="min-h-screen pb-16">
+    <main className="min-h-screen pb-20">
       {/* Header */}
       <header className="px-5 py-4 border-b border-ink-800">
         <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
@@ -395,56 +400,21 @@ export function ShareView({ token, reviewer, routine, activity, library }: Props
         );
       })}
 
-      {/* Routine-level catch-all. Sits *after* the days so it lands where the
-          reviewer ends up — they've now read the routine and can leave a
-          parting note or a broad-strokes suggestion that doesn't belong on
-          any single exercise. */}
-      <section className="px-5 py-5 border-b border-ink-800">
-        <h2 className="font-display text-lg">Notes on the whole routine</h2>
-        <p className="text-xs text-ink-400 mt-0.5 mb-3">
-          Big-picture feedback that doesn’t fit on a specific exercise — themes,
-          balance, things to add or drop overall.
-        </p>
-        <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          <SmallButton
-            icon={<Plus size={12} />}
-            label="suggest something to add"
-            onClick={() => setBuilder({ kind: 'holistic_add' })}
-          />
-          <SmallButton
-            icon={<Wand2 size={12} />}
-            label="suggest something to drop"
-            onClick={() => setBuilder({ kind: 'holistic_remove' })}
-          />
-          <SmallButton
-            icon={<Plus size={12} />}
-            label="suggest a new exercise"
-            onClick={() => setBuilder({ kind: 'custom', dayId: null })}
-          />
-        </div>
-        <TargetThread
-          token={token}
-          reviewer={reviewer}
-          targetType="routine"
-          targetId={routine.id}
-          comments={commentsByTarget.get(targetKey('routine', routine.id)) ?? []}
-          suggestions={suggestionsByTarget.get(targetKey('routine', routine.id)) ?? []}
-          libraryById={libraryById}
-          allowComment
-        />
-      </section>
-
-      {/* Sticky bottom "you reviewed" footer to keep the reviewer oriented. */}
-      <div className="fixed bottom-0 inset-x-0 bg-ink-950/90 backdrop-blur border-t border-ink-800 px-5 py-2 flex items-center justify-between text-xs text-ink-300">
-        <span>
-          you’re <span className="text-ink-100">{reviewer.displayName}</span>
-        </span>
-        <span>
-          <MessageCircle className="inline" size={12} /> {headerCounts.c} ·{' '}
-          <Wand2 className="inline" size={12} /> {headerCounts.s} ·{' '}
-          <ThumbsUp className="inline" size={12} /> {headerCounts.r}
-        </span>
-      </div>
+      {/* Floating notes pad — always-on scratchpad so the reviewer can jot
+          something while reading any part of the routine, without scrolling
+          back to a section. Collapsed by default to leave the routine the
+          star of the show; expand to see existing notes and to reach the
+          structured holistic-suggestion flows. */}
+      <FloatingNotes
+        token={token}
+        reviewer={reviewer}
+        routineId={routine.id}
+        comments={commentsByTarget.get(targetKey('routine', routine.id)) ?? []}
+        suggestions={suggestionsByTarget.get(targetKey('routine', routine.id)) ?? []}
+        libraryById={libraryById}
+        headerCounts={headerCounts}
+        onOpenBuilder={setBuilder}
+      />
 
       {/* Builder modals */}
       {builder.kind !== 'none' && (
@@ -558,6 +528,133 @@ function ReactionToggle({
     >
       <ThumbsUp size={12} /> {count > 0 ? count : 'good'}
     </button>
+  );
+}
+
+function FloatingNotes({
+  token,
+  reviewer,
+  routineId,
+  comments,
+  suggestions,
+  libraryById,
+  headerCounts,
+  onOpenBuilder,
+}: {
+  token: string;
+  reviewer: { id: string; displayName: string };
+  routineId: string;
+  comments: ShareActivity['comments'];
+  suggestions: ShareActivity['suggestions'];
+  libraryById: Map<string, LibraryExercise>;
+  headerCounts: { c: number; s: number; r: number };
+  onOpenBuilder: (state: BuilderState) => void;
+}) {
+  // The composer stays mounted at the page bottom so the reviewer can jot a
+  // thought from any scroll position. Existing notes and the structured
+  // suggestion flows live behind an expand chevron — the expanded panel
+  // overlays the routine, never reflows it, so reading position is preserved.
+  const [expanded, setExpanded] = useState(false);
+  const [body, setBody] = useState('');
+  const [pending, startTransition] = useTransition();
+  const noteCount = comments.length + suggestions.length;
+
+  const submit = () => {
+    if (!body.trim()) return;
+    const text = body.trim();
+    startTransition(async () => {
+      try {
+        await postShareComment({
+          token,
+          targetType: 'routine',
+          targetId: routineId,
+          body: text,
+        });
+        setBody('');
+      } catch {
+        /* silent — see ShareView's other action handlers */
+      }
+    });
+  };
+
+  return (
+    <div
+      id="floating-notes"
+      className="fixed bottom-0 inset-x-0 bg-ink-950/95 backdrop-blur border-t border-ink-800 z-20"
+    >
+      {expanded && (
+        <div className="px-5 pt-3 pb-2 max-h-[55vh] overflow-y-auto border-b border-ink-900">
+          <div className="flex items-baseline justify-between mb-2 gap-2">
+            <h2 className="font-display text-sm text-ink-100">Notes</h2>
+            <span className="text-[10px] text-ink-500 shrink-0">
+              you’re <span className="text-ink-300">{reviewer.displayName}</span> ·{' '}
+              {headerCounts.c} cmt · {headerCounts.s} sug · {headerCounts.r}{' '}
+              <ThumbsUp className="inline" size={10} />
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 mb-2">
+            <SmallButton
+              icon={<Plus size={12} />}
+              label="suggest something to add"
+              onClick={() => onOpenBuilder({ kind: 'holistic_add' })}
+            />
+            <SmallButton
+              icon={<Wand2 size={12} />}
+              label="suggest something to drop"
+              onClick={() => onOpenBuilder({ kind: 'holistic_remove' })}
+            />
+            <SmallButton
+              icon={<Plus size={12} />}
+              label="suggest a new exercise"
+              onClick={() => onOpenBuilder({ kind: 'custom', dayId: null })}
+            />
+          </div>
+          <TargetThread
+            token={token}
+            reviewer={reviewer}
+            targetType="routine"
+            targetId={routineId}
+            comments={comments}
+            suggestions={suggestions}
+            libraryById={libraryById}
+            allowComment={false}
+            compact
+          />
+        </div>
+      )}
+      <div className="px-5 py-2 flex items-center gap-2">
+        <input
+          type="text"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+          }}
+          placeholder="leave a note as you read…"
+          maxLength={2000}
+          className="flex-1 min-w-0 bg-ink-900 border border-ink-800 rounded-md px-2 py-1 text-xs text-ink-100 focus:outline-none focus:border-ink-600"
+        />
+        <button
+          type="button"
+          disabled={pending || !body.trim()}
+          onClick={submit}
+          className="px-2 py-1 text-xs bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md disabled:opacity-40"
+        >
+          send
+        </button>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          aria-controls="floating-notes"
+          aria-label={expanded ? 'Collapse notes panel' : 'Expand notes panel'}
+          className="text-ink-400 hover:text-ink-100 inline-flex items-center gap-1 text-[10px] px-1.5 py-1 rounded-md hover:bg-ink-900"
+        >
+          {noteCount > 0 && <span className="text-ink-500">{noteCount}</span>}
+          {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+        </button>
+      </div>
+    </div>
   );
 }
 
