@@ -465,7 +465,10 @@ export const SEED_EXERCISES: SeedExercise[] = [
     name: 'Front squat',
     module: 'Strength Barbell',
     primaryMuscles: ['quads', 'glutes'],
-    secondaryMuscles: ['core', 'scapular', 'adductors'],
+    // Front-rack hold loads the upper back significantly — credit it as a
+    // secondary back contribution, same logic as listing it on rows. The
+    // bracing demand also loads the spinal erectors meaningfully.
+    secondaryMuscles: ['core', 'scapular', 'adductors', 'back', 'lower back'],
     prescription: '3–4×5, upright torso, active T-spine',
     equipment: ['barbell', 'rack'],
   },
@@ -658,13 +661,6 @@ export const SEED_EXERCISES: SeedExercise[] = [
     module: 'Strength Accessory',
     primaryMuscles: ['back'],
     prescription: '3×10–12, straight up and down',
-    equipment: ['dumbbells'],
-  },
-  {
-    name: 'Dumbbell calf raise',
-    module: 'Strength Accessory',
-    primaryMuscles: ['hamstrings'],
-    prescription: '3×12–15, full stretch',
     equipment: ['dumbbells'],
   },
 

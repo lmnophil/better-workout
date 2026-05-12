@@ -301,6 +301,34 @@ function activationSlot(): Slot {
   };
 }
 
+// Activation for upper-focused days. Glute bridges before bench/row is wasted
+// prep — wake up the scapula and lower traps instead. Leads with anti-shrug
+// because face pulls already show up in the longevity posture slot, and
+// repeating the same exercise twice in one day is a poor signal even if the
+// math works out. Bodyweight wall slides as the no-equipment fallback.
+function activationUpperSlot(): Slot {
+  return {
+    pattern: 'activation-upper',
+    module: 'Activation Upper',
+    priority: 2,
+    estMinutes: 3,
+    variants: [
+      {
+        exerciseName: 'Banded anti-shrug',
+        plannedSets: 2,
+        plannedReps: 10,
+        equipment: ['bands'],
+      },
+      {
+        exerciseName: 'Scapular wall slides',
+        plannedSets: 2,
+        plannedReps: 8,
+        equipment: [],
+      },
+    ],
+  };
+}
+
 function squatSlot(focus: StarterFocus, priority: SlotPriority): Slot {
   if (focus === 'strength') {
     return {
@@ -1172,6 +1200,12 @@ function posteriorChainSlot(): Slot {
   };
 }
 
+// Postural / scapular block on every longevity day. Leads with face pulls
+// (rear delts primary, scapular/back/lower-traps secondary) rather than a
+// scapular-primary movement: when this slot fires on three or more days a
+// week, leading with a scapular-primary exercise pushes scapular volume well
+// past 1.5× target and starves the rear delts in comparison. Face pulls
+// distribute the same posture work across the whole shoulder-girdle complex.
 function postureSlot(): Slot {
   return {
     pattern: 'posture-scapular',
@@ -1179,15 +1213,15 @@ function postureSlot(): Slot {
     priority: 2,
     estMinutes: 4,
     variants: [
+      { exerciseName: 'Banded face pulls', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
+      { exerciseName: 'Banded pull-aparts', plannedSets: 3, plannedReps: 15, equipment: ['bands'] },
+      { exerciseName: 'Reverse fly', plannedSets: 3, plannedReps: 12, equipment: ['dumbbells'] },
       {
         exerciseName: 'Scapular postural band work',
         plannedSets: 3,
         plannedReps: 12,
         equipment: ['bands'],
       },
-      { exerciseName: 'Banded face pulls', plannedSets: 3, plannedReps: 12, equipment: ['bands'] },
-      { exerciseName: 'Banded pull-aparts', plannedSets: 3, plannedReps: 15, equipment: ['bands'] },
-      { exerciseName: 'Reverse fly', plannedSets: 3, plannedReps: 12, equipment: ['dumbbells'] },
       { exerciseName: 'Prone Y raises', plannedSets: 2, plannedReps: 10, equipment: ['mat'] },
     ],
   };
@@ -1228,12 +1262,11 @@ function balanceFinisherSlot(): Slot {
   };
 }
 
-// Longevity-flavored upper day — keeps a posture/scapular focus paired with
-// horizontal push/pull plus the same balance + SMR closers as the lower
-// days, so the routine still feels like one cohesive thing across the cycle.
-// Variants cascade through standard equipment tiers from the existing
-// push/pull slot helpers, parameterized with 'build' (mid rep ranges) since
-// longevity sits closer to build than to strength on the upper side.
+// Longevity-flavored lower day. Five-piece arc (activation → main → posterior
+// chain → posture → balance) plus a horizontal row at P3 — the row is what
+// keeps back coverage above the floor on routines where lower days outnumber
+// upper days. Trimmed first at 30-min sessions so the main lift and posture
+// block stay protected.
 function longevityLowerDay(name: string, hingeLed: boolean): DayBase {
   const main = hingeLed ? longevityHingeMainSlot() : longevitySquatMainSlot();
   return {
@@ -1243,6 +1276,7 @@ function longevityLowerDay(name: string, hingeLed: boolean): DayBase {
       main,
       posteriorChainSlot(),
       postureSlot(),
+      pullSlot('build', 3),
       balanceFinisherSlot(),
       mobilitySlot(),
       smrSlot(),
@@ -1250,11 +1284,77 @@ function longevityLowerDay(name: string, hingeLed: boolean): DayBase {
   };
 }
 
+// Second horizontal push for longevity upper days. The lone primary push
+// (DB bench, 3 sets) puts chest under its weekly minimum on the 3-day cycle
+// where upper only fires once. This finisher adds a complementary angle
+// (incline / push-ups / banded press) at P3 so 45+ min sessions land at
+// chest min, while shorter sessions still trim it out. Equipment cascade
+// covers every tier including bodyweight.
+function longevityChestAccessorySlot(): Slot {
+  return {
+    pattern: 'horizontal-push-finisher',
+    module: 'Strength Accessory',
+    priority: 3,
+    estMinutes: 4,
+    variants: [
+      {
+        exerciseName: 'Incline dumbbell press',
+        plannedSets: 3,
+        plannedReps: 10,
+        equipment: ['dumbbells', 'bench'],
+      },
+      {
+        exerciseName: 'Banded chest press',
+        plannedSets: 3,
+        plannedReps: 12,
+        equipment: ['bands'],
+      },
+      { exerciseName: 'Push-ups', plannedSets: 3, plannedReps: 12, equipment: [] },
+    ],
+  };
+}
+
+// Longevity upper day. The original sketch was just push + pull + posture, which
+// systematically left vertical work, biceps, triceps, and shoulders untouched —
+// fine on a 6-day routine where upper fires twice, but a 3-day longevity routine
+// has only one upper day and was missing half the upper body. The full pattern
+// here mirrors the strength/build upper day with the longevity-specific posture
+// + balance closer kept on top, plus a chest finisher to keep horizontal
+// pushing above its weekly floor. Accessories sit at P3 so 30-min sessions
+// still trim down to the essentials.
 function longevityUpperDay(name: string): DayBase {
   return {
     name,
     slots: [
+      activationUpperSlot(),
+      pushSlot('build', 1),
+      pullSlot('build', 1),
+      vPushSlot('build', 2),
+      vPullSlot('build', 2),
+      postureSlot(),
+      longevityChestAccessorySlot(),
+      bicepsSlot(3),
+      tricepsSlot(3),
+      shouldersSlot(3),
+      coreSlot(2),
+      balanceFinisherSlot(),
+      mobilitySlot(),
+      smrSlot(),
+    ],
+  };
+}
+
+// True full-body longevity day for the 1-day preset. The old 1-day was just a
+// hinge-led lower day — no chest, no pulling, no shoulders — which left every
+// upper-body muscle at zero. This version trades posterior-chain isolation for
+// horizontal push/pull so a once-a-week longevity user touches everything.
+function longevityFullBodyDay(name: string, hingeLed: boolean): DayBase {
+  const main = hingeLed ? longevityHingeMainSlot() : longevitySquatMainSlot();
+  return {
+    name,
+    slots: [
       activationSlot(),
+      main,
       pushSlot('build', 1),
       pullSlot('build', 1),
       postureSlot(),
@@ -1439,61 +1539,60 @@ const STARTER_ROUTINES: Record<StarterFocus, Record<number, RoutineBase>> = {
   longevity: {
     1: {
       description:
-        'One hinge-led longevity session: main lift, posterior chain, posture, balance, SMR.',
-      days: [longevityLowerDay('Full body (hinge)', true)],
+        'One full-body longevity session: hinge main lift, push, pull, posture, balance, mobility.',
+      days: [longevityFullBodyDay('Full body', true)],
     },
     2: {
-      description: 'Hinge-led day + squat-led day.',
-      days: [longevityLowerDay('Lower (hinge)', true), longevityLowerDay('Lower (squat)', false)],
+      description: 'Hinge-led lower day + a full upper day.',
+      days: [longevityLowerDay('Lower (hinge)', true), longevityUpperDay('Upper')],
     },
     3: {
-      description: 'Hinge day + squat day + an upper/posture-led day.',
+      description: 'Hinge day + upper day + squat day.',
       days: [
         longevityLowerDay('Lower (hinge)', true),
+        longevityUpperDay('Upper'),
         longevityLowerDay('Lower (squat)', false),
-        longevityUpperDay('Upper (posture)'),
       ],
     },
     4: {
-      description: 'Hinge / squat / hinge / upper-posture rotation.',
+      description: 'Lower / upper / lower / upper — even split.',
       days: [
         longevityLowerDay('Lower (hinge)', true),
+        longevityUpperDay('Upper A'),
         longevityLowerDay('Lower (squat)', false),
-        longevityLowerDay('Lower (hinge B)', true),
-        longevityUpperDay('Upper (posture)'),
+        longevityUpperDay('Upper B'),
       ],
     },
     5: {
-      description:
-        'Hinge / squat / posture / hinge / squat — same five-piece structure across the cycle.',
+      description: 'Hinge / upper / squat / upper / hinge B — three lower, two upper.',
       days: [
         longevityLowerDay('Day 1 (hinge)', true),
-        longevityLowerDay('Day 2 (squat)', false),
-        longevityUpperDay('Day 3 (posture)'),
-        longevityLowerDay('Day 4 (hinge)', true),
-        longevityLowerDay('Day 5 (squat)', false),
+        longevityUpperDay('Day 2 (upper A)'),
+        longevityLowerDay('Day 3 (squat)', false),
+        longevityUpperDay('Day 4 (upper B)'),
+        longevityLowerDay('Day 5 (hinge B)', true),
       ],
     },
     6: {
-      description: 'Hinge / squat / posture, twice over.',
+      description: 'Lower / upper alternating across the cycle.',
       days: [
         longevityLowerDay('Day 1 (hinge)', true),
-        longevityLowerDay('Day 2 (squat)', false),
-        longevityUpperDay('Day 3 (posture)'),
-        longevityLowerDay('Day 4 (hinge)', true),
-        longevityLowerDay('Day 5 (squat)', false),
-        longevityUpperDay('Day 6 (posture)'),
+        longevityUpperDay('Day 2 (upper A)'),
+        longevityLowerDay('Day 3 (squat)', false),
+        longevityUpperDay('Day 4 (upper B)'),
+        longevityLowerDay('Day 5 (hinge B)', true),
+        longevityUpperDay('Day 6 (upper C)'),
       ],
     },
     7: {
-      description: 'Hinge / squat / posture twice over, plus a mobility-only closer.',
+      description: 'Lower / upper alternating with a mobility-only closer.',
       days: [
         longevityLowerDay('Day 1 (hinge)', true),
-        longevityLowerDay('Day 2 (squat)', false),
-        longevityUpperDay('Day 3 (posture)'),
-        longevityLowerDay('Day 4 (hinge)', true),
-        longevityLowerDay('Day 5 (squat)', false),
-        longevityUpperDay('Day 6 (posture)'),
+        longevityUpperDay('Day 2 (upper A)'),
+        longevityLowerDay('Day 3 (squat)', false),
+        longevityUpperDay('Day 4 (upper B)'),
+        longevityLowerDay('Day 5 (hinge B)', true),
+        longevityUpperDay('Day 6 (upper C)'),
         mobilityDay('Day 7 (mobility)', false),
       ],
     },
