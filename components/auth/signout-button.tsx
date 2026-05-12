@@ -6,7 +6,11 @@ import { LogOut } from 'lucide-react';
 export function SignOutButton() {
   async function doSignOut() {
     'use server';
-    await signOut({ redirectTo: '/signin' });
+    // `?cleanup=1` is the sentinel the signin page reads to ask the service
+    // worker to drop user-scoped caches before the next session. Without it,
+    // a network blip could let the next user see the previous user's
+    // SW-cached HTML. See components/auth/sw-signout-cleanup.tsx.
+    await signOut({ redirectTo: '/signin?cleanup=1' });
   }
 
   return (

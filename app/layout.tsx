@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Fraunces, Bricolage_Grotesque, JetBrains_Mono } from 'next/font/google';
+import { SwUpdatePrompt } from '@/components/ui/sw-update-prompt';
 import './globals.css';
 
 // Self-host fonts via next/font — eliminates render-blocking CSS @import,
@@ -44,9 +45,10 @@ export const viewport: Viewport = {
   themeColor: '#16110d',
   width: 'device-width',
   initialScale: 1,
-  // Prevent zoom on input focus — handy on mobile when logging numbers
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch-zoom stays enabled — `maximumScale: 1` / `userScalable: false`
+  // would also disable it, which fails WCAG 1.4.4 (Resize Text). iOS's
+  // zoom-on-input-focus behavior is sidestepped instead by forcing form
+  // inputs to >=16px on touch devices; see globals.css.
 };
 
 export default function RootLayout({
@@ -59,7 +61,10 @@ export default function RootLayout({
       lang="en"
       className={`bg-ink-950 ${fraunces.variable} ${bricolage.variable} ${jetbrains.variable}`}
     >
-      <body>{children}</body>
+      <body>
+        {children}
+        <SwUpdatePrompt />
+      </body>
     </html>
   );
 }

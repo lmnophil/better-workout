@@ -23,6 +23,22 @@
   input[type='number'] {
     -moz-appearance: textfield;
   }
+
+  /* iOS Safari zooms when a focused form field has font-size < 16px. We used
+     to suppress that by locking maximumScale: 1 on the viewport, but that
+     also disables pinch-zoom (an accessibility regression). The proper fix is
+     to keep the inputs themselves at 16px on touch devices so iOS has no
+     reason to zoom — desktop spacing is unaffected via `pointer: coarse`.
+
+     The selector is built to beat Tailwind's `.text-sm` / `.text-xs` utility
+     specificity (0,0,1,0): `:is(input, …)` contributes (0,0,0,1) and each
+     `:not([type=…])` adds (0,0,1,0), landing at (0,0,2,1). Without that,
+     the utility classes win and inputs stay at 14px. */
+  @media (pointer: coarse) {
+    :is(input, textarea, select):not([type='checkbox']):not([type='radio']) {
+      font-size: 16px;
+    }
+  }
 }
 
 @layer utilities {

@@ -8,6 +8,7 @@ import { AuthError } from 'next-auth';
 import { redirect } from 'next/navigation';
 import { magicLinkPerIp, magicLinkPerEmail } from '@/lib/rate-limit';
 import { getClientIp } from '@/lib/request';
+import { SwSignoutCleanup } from '@/components/auth/sw-signout-cleanup';
 
 export const metadata = {
   title: 'Sign in — Workout Tracker',
@@ -16,7 +17,7 @@ export const metadata = {
 export default function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; error?: string; cleanup?: string }>;
 }) {
   return <SignInForm searchParamsPromise={searchParams} />;
 }
@@ -24,11 +25,15 @@ export default function SignInPage({
 async function SignInForm({
   searchParamsPromise,
 }: {
-  searchParamsPromise: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParamsPromise: Promise<{ callbackUrl?: string; error?: string; cleanup?: string }>;
 }) {
   const params = await searchParamsPromise;
   const callbackUrl = params.callbackUrl ?? '/';
   const error = params.error;
+  // Sentinel set by the signout server action and the stale-cookie recovery
+  // route. When present, the client-side cleaner posts a message to the SW
+  // to drop user-scoped caches before the next user signs in.
+  const cleanupAfterSignout = params.cleanup === '1';
 
   async function googleSignIn() {
     'use server';
@@ -76,6 +81,7 @@ async function SignInForm({
 
   return (
     <div>
+      <SwSignoutCleanup active={cleanupAfterSignout} />
       <div className="mb-8">
         <div className="text-[10px] tracking-[0.25em] uppercase text-ink-400 mb-2">
           Workout Tracker

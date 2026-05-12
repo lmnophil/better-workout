@@ -23,6 +23,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const url = new URL('/signin', request.url);
+  // Signal the signin page to ask the service worker to drop user-scoped
+  // caches (page HTML, RSC payloads, API JSON). Static assets stay so the
+  // next sign-in doesn't pay a cold cache. See
+  // components/auth/sw-signout-cleanup.tsx and the message handler in
+  // app/sw.ts.
+  url.searchParams.set('cleanup', '1');
   const response = NextResponse.redirect(url);
   // Delete every variant — both the dev cookie and the secure prod cookie name —
   // so this works the same whether the operator is on HTTP localhost or HTTPS.
