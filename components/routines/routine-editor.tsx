@@ -98,6 +98,7 @@ import { usePrefs } from '@/components/ui/prefs-context';
 import { estimatePlannedExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
+import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
 
 // ============ TYPES ============
 
@@ -114,6 +115,9 @@ type DayExercise = {
   note: string | null;
   videoUrl: string | null;
   equipment: string[];
+  // First primary muscle drives the region-color accent on the row. Cheaper
+  // than threading a Map<id, ExerciseInfo> down to ExerciseRow.
+  primaryMuscles: string[];
 };
 
 type EditorDay = {
@@ -525,6 +529,7 @@ function DraftEditor({
                 note: dx.note,
                 videoUrl: e.videoUrl,
                 equipment: e.equipment,
+                primaryMuscles: e.primaryMuscles,
               };
             })
             .filter((x): x is DayExercise => x !== null),
@@ -707,6 +712,7 @@ function DraftEditor({
             note: null,
             videoUrl: e.videoUrl,
             equipment: e.equipment,
+            primaryMuscles: e.primaryMuscles,
           };
         })
         .filter((x): x is DayExercise => x !== null),
@@ -1357,6 +1363,7 @@ function LiveEditor({
                 note: e.note,
                 videoUrl: av?.videoUrl ?? null,
                 equipment: av?.equipment ?? [],
+                primaryMuscles: av?.primaryMuscles ?? [],
               };
             }),
         })),
@@ -2325,18 +2332,23 @@ function DayCard({
         )}
 
         {day.exercises.length > 0 ? (
-          <div className="space-y-2.5">
-            {moduleGroups.map((group) => {
+          <div className="space-y-3">
+            {moduleGroups.map((group, groupIdx) => {
               const subtotalSec = groupEstimateSec.get(group.module) ?? 0;
               return (
-                <div key={group.module} className="space-y-1">
+                <div
+                  key={group.module}
+                  className={`space-y-1 ${
+                    groupIdx > 0 ? 'pt-2 border-t border-ink-800/60' : ''
+                  }`}
+                >
                   <div className="flex items-baseline gap-2 px-0.5">
-                    <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500 inline-flex items-center gap-1">
+                    <div className="text-[11px] tracking-[0.22em] uppercase text-ink-200 font-medium inline-flex items-center gap-1">
                       <span>{group.module}</span>
                       <ModuleInfoTooltip module={group.module} />
                     </div>
                     {subtotalSec > 0 && (
-                      <div className="text-[10px] text-ink-600 font-mono">
+                      <div className="text-[10px] text-ink-500 font-mono">
                         ~{formatEstimateCompact(subtotalSec)}
                       </div>
                     )}
@@ -2596,8 +2608,13 @@ function ExerciseRow({
     if (next !== exercise.note) onUpdatePlanned({ note: next });
   }
 
+  const region = regionForExercise(exercise);
+  const regionStyles = REGION_STYLES[region];
+
   return (
-    <div className="bg-ink-900/40 border border-ink-900 rounded px-2.5 py-2">
+    <div
+      className={`bg-ink-900/40 border border-ink-900 ${regionStyles.leftBorderThick} rounded px-2.5 py-2`}
+    >
       <div className="flex items-center gap-2">
         <div className="flex flex-col gap-0.5 shrink-0">
           <button

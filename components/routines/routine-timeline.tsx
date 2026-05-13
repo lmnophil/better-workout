@@ -21,6 +21,7 @@ import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { moduleDescription } from '@/lib/exercises-data';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { estimatePlannedTotalSeconds, formatEstimate } from '@/lib/time-estimate';
+import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
 
 export type RoutineDayExerciseClient = {
   exerciseId: string;
@@ -428,6 +429,7 @@ function DayCard({
         <div className="px-4 pb-4 -mt-1 space-y-3">
           <ExerciseList
             exercises={day.exercises}
+            availableExercises={availableExercises}
             disabled={isPending}
             onSwap={openSwap}
             onClearOneTime={clearOneTime}
@@ -481,11 +483,15 @@ function DayCard({
 
 function ExerciseList({
   exercises,
+  availableExercises,
   disabled,
   onSwap,
   onClearOneTime,
 }: {
   exercises: RoutineDayExerciseClient[];
+  // Needed to derive each exercise's body region (RoutineDayExerciseClient
+  // doesn't carry primaryMuscles — we look it up via id).
+  availableExercises: ExerciseInfo[];
   disabled: boolean;
   onSwap: (id: string, name: string) => void;
   onClearOneTime: (outExerciseId: string) => void;
@@ -495,6 +501,7 @@ function ExerciseList({
       <p className="text-[11px] text-ink-500 italic font-display">No exercises in this template.</p>
     );
   }
+  const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
   // Group by module like the active session does — reads as the same
   // chunked workout the user will see when they start it.
   const elements: React.ReactNode[] = [];
@@ -503,20 +510,36 @@ function ExerciseList({
     if (ex.module !== lastModule) {
       const description = moduleDescription(ex.module);
       elements.push(
-        <div key={`hdr-${idx}`} className="pt-2 first:pt-0">
-          <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">{ex.module}</div>
-          {description && (
-            <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
-              {description}
+        <div
+          key={`hdr-${idx}`}
+          className="pt-3 first:pt-0 border-t border-ink-800/60 first:border-t-0"
+        >
+          <div className="pt-2 first:pt-0 pb-0.5">
+            <div className="text-[11px] tracking-[0.22em] uppercase text-ink-200 font-medium">
+              {ex.module}
             </div>
-          )}
+            {description && (
+              <div className="text-[10px] text-ink-500 italic font-display leading-snug mt-0.5">
+                {description}
+              </div>
+            )}
+          </div>
         </div>,
       );
       lastModule = ex.module;
     }
     const swapped = !!ex.pendingSwapInExerciseId;
+    // Region picked from the *effective* exercise — if a swap is staged, the
+    // incoming one drives the color (the user will actually do that lift).
+    const effectiveId = ex.pendingSwapInExerciseId ?? ex.exerciseId;
+    const effectiveExercise = exerciseById.get(effectiveId);
+    const region = effectiveExercise ? regionForExercise(effectiveExercise) : 'other';
+    const regionStyles = REGION_STYLES[region];
     elements.push(
-      <div key={`${ex.exerciseId}-${idx}`} className="flex items-center justify-between gap-2 py-1">
+      <div
+        key={`${ex.exerciseId}-${idx}`}
+        className={`flex items-center justify-between gap-2 py-1 pl-2 ${regionStyles.leftBorderThick} -ml-2`}
+      >
         <div className="text-sm text-ink-100 min-w-0 flex items-center gap-2 flex-wrap">
           {swapped ? (
             <>

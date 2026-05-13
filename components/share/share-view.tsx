@@ -32,6 +32,7 @@ import {
 } from './share-coverage';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
+import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
 
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -391,10 +392,12 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                 const exKey = targetKey('template_exercise', ex.templateExerciseId);
                 const myReacted = reactionsByTarget.byReviewer.get(exKey) ?? false;
                 const reactionCount = reactionsByTarget.totals.get(exKey) ?? 0;
+                const region = regionForExercise(ex);
+                const regionStyles = REGION_STYLES[region];
                 return (
                   <li
                     key={ex.templateExerciseId}
-                    className="bg-ink-900/60 border border-ink-800 rounded-lg p-3"
+                    className={`bg-ink-900/60 border border-ink-800 ${regionStyles.leftBorderThick} rounded-lg p-3`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
