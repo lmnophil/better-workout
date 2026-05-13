@@ -2,6 +2,24 @@ import type { Config } from 'tailwindcss';
 
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
+  // Region color classes live as literal strings inside lib/region-color.ts
+  // (the REGION_STYLES table), then get composed into component className
+  // via `${styles.dot}` style template literals. Tailwind's content scanner
+  // doesn't reliably pick up literals out of lib/, so we list the classes
+  // explicitly here. Keep in sync with REGION_STYLES — there are five
+  // regions × the variant suffix set below.
+  safelist: [
+    // Solid color rules
+    { pattern: /^(text|bg|border)-region-(upper|lower|core|mobility|other)$/ },
+    // Left border variants
+    { pattern: /^border-l-region-(upper|lower|core|mobility|other)$/ },
+    // Opacity-modified variants used for tints
+    {
+      pattern:
+        /^(bg|border)-region-(upper|lower|core|mobility|other)\/(10|20|30|60|70)$/,
+      variants: ['hover'],
+    },
+  ],
   theme: {
     extend: {
       colors: {
