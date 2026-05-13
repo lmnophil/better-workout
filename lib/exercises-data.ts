@@ -1182,6 +1182,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '1min per side, 3 rounds',
     metric: 'time',
     equipment: ['bosu'],
+    videoUrl: 'https://www.youtube.com/watch?v=yeFwZpKvJYo',
   },
   {
     name: 'BOSU flat single-leg holds',
@@ -1190,6 +1191,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '1min per side, 3 rounds',
     metric: 'time',
     equipment: ['bosu'],
+    videoUrl: 'https://www.youtube.com/shorts/0R0oDCHFHUE',
   },
   {
     name: 'Single-leg balance hold',
@@ -1197,6 +1199,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['balance'],
     prescription: '3×30s per side, eyes open then closed',
     metric: 'time',
+    videoUrl: 'https://www.youtube.com/shorts/vj5G3TX0xJI',
   },
 
   // ============ REV UP ============
@@ -1209,6 +1212,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '1–2 min, light bounce',
     metric: 'time',
     equipment: ['jump rope'],
+    videoUrl: 'https://www.youtube.com/shorts/Gt9hlRMXDXc',
   },
   {
     name: 'Jumping jacks',
@@ -1216,6 +1220,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['cardio'],
     prescription: '30–45s',
     metric: 'time',
+    videoUrl: 'https://www.youtube.com/watch?v=iSSAk4XCsRA',
   },
   {
     name: 'Mountain climbers',
@@ -1225,6 +1230,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '30–45s, controlled',
     metric: 'time',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/shorts/9yyKVy8OWnA',
   },
   {
     name: 'High knees',
@@ -1232,6 +1238,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['cardio'],
     prescription: '30–45s, drive knees up',
     metric: 'time',
+    videoUrl: 'https://www.youtube.com/shorts/0X0Q8wKLEfo',
   },
   {
     name: 'Burpees',
@@ -1239,6 +1246,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['cardio'],
     secondaryMuscles: ['chest', 'core', 'quads'],
     prescription: '3×8–10, full chest-to-floor, jump up',
+    videoUrl: 'https://www.youtube.com/shorts/oUOeCtL0lg4',
   },
   {
     name: 'Farmer carry',
@@ -1248,6 +1256,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '3×30–45s, ribs stacked, walk with intent',
     metric: 'time',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/1uOs1hP3u4A',
   },
   {
     name: 'Suitcase carry',
@@ -1257,6 +1266,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '3×30–45s per side, anti-lateral-flexion',
     metric: 'time',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/watch?v=3RKKnZhhelE',
   },
 
   // ============ ADDITIONS — longevity / hybrid library expansion ============
@@ -1273,6 +1283,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '30–60s per foot, slow passes',
     equipment: ['lacrosse ball'],
+    videoUrl: 'https://www.youtube.com/shorts/1gAVanUJVtQ',
   },
   {
     name: 'Foam roll peroneals',
@@ -1280,6 +1291,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per leg, outer shin',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=m9LkqOPxZVg',
   },
   {
     name: 'TFL ball release',
@@ -1287,6 +1299,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, hip-pocket corner',
     equipment: ['lacrosse ball'],
+    videoUrl: 'https://www.youtube.com/watch?v=2rQIjF30KAc',
   },
   {
     name: 'Glute med/min ball release',
@@ -1294,6 +1307,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, side-lying on ball',
     equipment: ['lacrosse ball', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=fI71tZuOw8Q',
   },
   {
     name: 'Foam roll adductors',
@@ -1301,6 +1315,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per leg, prone on roller',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=n5g0rjsTT1k',
   },
   {
     name: 'Psoas ball release',
@@ -1308,6 +1323,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '30–60s per side, breathe into pressure',
     equipment: ['lacrosse ball', 'mat'],
+    videoUrl: 'https://www.youtube.com/shorts/rIGg7UEhfUg',
   },
 
   // SMR — Upper additions
@@ -1317,6 +1333,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, supine, arm overhead',
     equipment: ['lacrosse ball', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=RZLXot9hhLY',
   },
   {
     name: 'Foam roll posterior delts',
@@ -1324,6 +1341,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, back of shoulder',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=AZ8NryHp9tA',
   },
   {
     name: 'Foam roll traps',
@@ -1331,6 +1349,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min, supine, slow passes',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/shorts/6iNIrrvlqIU',
   },
   {
     name: 'Suboccipital ball release',
@@ -1338,6 +1357,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1–2 min supine, ball at skull base',
     equipment: ['lacrosse ball', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=OwgxfJK3Ngg',
   },
 
   // SMR — Trunk additions
@@ -1347,6 +1367,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, just above the iliac crest',
     equipment: ['lacrosse ball', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=O_0yB5DWFmk',
   },
   {
     name: 'Diaphragm release under ribs',
@@ -1354,6 +1375,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '30s per side, slow breaths into the pressure',
     equipment: ['lacrosse ball'],
+    videoUrl: 'https://www.youtube.com/shorts/bU_Gydashy8',
   },
   {
     name: 'Foam roll paraspinals',
@@ -1361,6 +1383,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min, slow passes along the spine',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/shorts/gqniSZjAo3I',
   },
 
   // Mobility — Upper additions
@@ -1370,6 +1393,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['shoulder mobility'],
     prescription: '2×8–10, light tension, smooth arc',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=a9rqTzZaI7s',
   },
   {
     name: 'Prayer stretch',
@@ -1378,6 +1402,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['t-spine mobility'],
     prescription: '30–45s, forearms together, melt chest down',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=yIby7iIVL4k',
   },
 
   // Mobility — Trunk additions
@@ -1387,6 +1412,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['t-spine mobility'],
     prescription: '8 per side, breathe out as you open',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/shorts/SKapoHxQxuk',
   },
   {
     name: 'Side-lying rib expansion breathing',
@@ -1394,6 +1420,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['t-spine mobility'],
     prescription: '5–6 breaths per side, expand the up-side ribs',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=yWRzq0KMBPs',
   },
 
   // Activation — Upper additions
@@ -1404,6 +1431,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['scapular'],
     prescription: '2×10, depress shoulder blades against tension',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=WLvnDO_0wkw',
   },
   {
     name: 'Serratus push-up plus',
@@ -1412,6 +1440,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['chest'],
     prescription: '2×10, push through scaps at the top',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/shorts/5469WE4AVjY',
   },
 
   // Activation — Trunk additions
@@ -1421,6 +1450,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['core'],
     prescription: '5 slow breaths, ribs down, 360° expansion',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=ycx3Pm4yR-8',
   },
 
   // Strength — Thoracic additions (landmine variants are the bread and butter
@@ -1433,6 +1463,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['rear delts', 'biceps', 'scapular'],
     prescription: '3–4×8–10, drive elbow back, neutral spine',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/shorts/Sr2q7i-i8X0',
   },
   {
     name: 'Landmine press with rotation',
@@ -1441,6 +1472,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['chest', 'scapular'],
     prescription: '3×6–8 per side, rotate through the press',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/watch?v=ONDeomDVlbE',
   },
   {
     name: 'Landmine core rotation to press',
@@ -1449,6 +1481,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['scapular'],
     prescription: '3×8 per side, drive from the hips',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/watch?v=AEhQK1bqlME',
   },
 
   // Strength — Accessory addition
@@ -1459,6 +1492,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['hamstrings'],
     prescription: '3×8–10, pause on the box, drive the band apart',
     equipment: ['bands', 'bench'],
+    videoUrl: 'https://www.youtube.com/watch?v=83pgQSO6Gfo',
   },
 
   // Rev Up additions
@@ -1468,6 +1502,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['cardio', 'quads'],
     secondaryMuscles: ['glutes'],
     prescription: '4–6 rounds of 10, soft landings',
+    videoUrl: 'https://www.youtube.com/watch?v=iJMsF7fzrOM',
   },
   {
     name: 'Leaning wall jog',
@@ -1475,6 +1510,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['cardio'],
     prescription: '30–45s rounds, hands on wall, quick turnover',
     metric: 'time',
+    videoUrl: 'https://www.youtube.com/shorts/xVLSDkNJhBE',
   },
 ];
 
