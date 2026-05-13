@@ -25,9 +25,10 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 
 ### Exercise model
 
-- **Exercise** — id, name, module (one of `EXERCISE_MODULES`), prescription, `metric` (`'reps'|'time'`, default `'reps'`), `equipment` (string[]), `primaryMuscles[]`, `secondaryMuscles[]`, `videoUrl`, `isCustom`.
+- **Exercise** — id, name, module (one of `EXERCISE_MODULES`), prescription, `metric` (`'reps'|'time'`, default `'reps'`), `loadType` (`'weight'|'band'|'none'`, default `'weight'`), `equipment` (string[]), `primaryMuscles[]`, `secondaryMuscles[]`, `videoUrl`, `isCustom`.
   - `ownerId` (nullable FK→User Cascade) + `isCustom`: built-ins are `ownerId=null, isCustom=false`; user customs are `ownerId=userId, isCustom=true`.
   - **Soft-delete** via `deletedAt` (nullable). Used for user customs so existing SetLog history isn't orphaned.
+  - `loadType` decides what the set row renders for load: `'weight'` shows the numeric stepper (default), `'band'` swaps to a chip picker of the user's Bands, `'none'` drops the load column entirely. Drives SMR / mobility / banded activation work logging the right thing.
   - Indices: (ownerId), (module). Unique (ownerId, name) — Postgres NULL semantics let two `null` owners coexist with same name.
 - **ExerciseUserSettings** — per-user per-exercise overrides for `restTimerSeconds` and `weightIncrement`. Unique (userId, exerciseId), both Cascade.
 
@@ -35,12 +36,14 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 
 - **WorkoutSession** — `userId` Cascade, `date`, `completedAt` (nullable). Optional `startedFromRoutineDayId` (FK→RoutineDay, **SetNull** so deleting the day doesn't lose history). Indices on (userId, date), (userId, completedAt), (startedFromRoutineDayId).
   - **Invariant: at most one active (`completedAt = null`) session per user.** Enforced by app, not DB.
-- **SetLog** — `sessionId` Cascade, `exerciseId` **Restrict** (deliberate — protects history when an exercise soft-deletes), `setNumber` (contiguous per exercise within session), `position` (orders exercises within session), `reps`, `weight`, `seconds`, `notes`.
+- **SetLog** — `sessionId` Cascade, `exerciseId` **Restrict** (deliberate — protects history when an exercise soft-deletes), `setNumber` (contiguous per exercise within session), `position` (orders exercises within session), `reps`, `weight`, `seconds`, `bandId` (nullable FK→Band, SetNull), `notes`.
+  - `weight` and `bandId` are mutually exclusive in normal use, gated by the source exercise's `loadType`. `updateSet` clears `weight` when a `bandId` is set so the two never both populate.
 
 ### Volume and prefs
 
 - **UserVolumeTarget** — per-user per-muscle override. `muscleId` is a string matching `MUSCLE_GROUPS[].id`, **no FK** (muscle list is in code, not DB). Unique (userId, muscleId).
 - **UserPreferences** — one per user, lazily created. `restTimerEnabled`, `restTimerSeconds` (default 90), `restTimerSound`, `restTimerVibrate`, `defaultSetsPerExercise` (default 3), `defaultWeightIncrement` (default 5).
+- **Band** — per-user resistance-band list (id, userId, name, position). Drives the chip picker for exercises with `loadType='band'`. Lazily seeded with Light/Medium/Heavy on first read by `getUserBands`. Unique (userId, name) and (userId, position). `SetLog.bandId` is SetNull so history survives a band delete.
 
 ### Templates and routines
 
@@ -94,7 +97,7 @@ All mutations go through here. Every action is wrapped with `withLogging('action
 
 Actions return nothing — the UI reads fresh data via queries on the page revalidation.
 
-The action surface is organized by `// =====` section headers in the file: session lifecycle, set logging, custom exercises, volume targets, user preferences, per-exercise settings, set notes, workout templates, routines (the largest section), and routine startup. To enumerate them, `grep -n '^export ' lib/actions.ts` — the code is the canonical list. See [api.md](api.md) for the conventions, the recipe for adding one, and what `withLogging` instruments for free.
+The action surface is organized by `// =====` section headers in the file: session lifecycle, set logging, custom exercises, volume targets, user preferences, bands, per-exercise settings, set notes, workout templates, routines (the largest section), and routine startup. To enumerate them, `grep -n '^export ' lib/actions.ts` — the code is the canonical list. See [api.md](api.md) for the conventions, the recipe for adding one, and what `withLogging` instruments for free.
 
 ---
 
@@ -195,7 +198,7 @@ Renders a color-graded grid of muscle groups, sectioned by category (Lower / Upp
 
 ## 8. Settings (`components/settings/`)
 
-Editors for: rest timer (enabled, seconds, sound, vibrate); set seeding (`defaultSetsPerExercise`); weight stepper (`defaultWeightIncrement`); per-muscle volume targets; unhide hidden built-in templates; routine create/edit/delete.
+Editors for: rest timer (enabled, seconds, sound, vibrate); set seeding (`defaultSetsPerExercise`); weight stepper (`defaultWeightIncrement`); per-muscle volume targets; resistance bands (add/rename/reorder/delete the chip-picker entries that show on `loadType='band'` exercises); unhide hidden built-in templates; routine create/edit/delete.
 
 All writes go through `updateUserPreferences` / `setVolumeTarget` / `resetVolumeTarget`. Reads go through `getUserPreferences` (cached).
 

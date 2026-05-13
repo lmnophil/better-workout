@@ -19,7 +19,8 @@
 // pre-filter carries through; otherwise it starts unfiltered.
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Search, Trash2, PlayCircle, Check } from 'lucide-react';
+import { X, Search, Trash2, Check } from 'lucide-react';
+import { VideoLink } from '@/components/ui/video-link';
 import {
   EXERCISE_MODULES,
   MUSCLE_GROUPS,
@@ -32,6 +33,7 @@ import {
   matchesArea,
   summariseTargets,
   balanceHint,
+  chipMuscleHint,
 } from '@/lib/area-filter';
 import type { ExerciseInfo } from './workout-view';
 import { usePrefs } from '@/components/ui/prefs-context';
@@ -402,6 +404,11 @@ function BrowseTab({
                 key={r.id}
                 active={regionIds.includes(r.id)}
                 onClick={() => toggleRegion(r.id)}
+                title={
+                  r.id === 'full'
+                    ? 'No filter — show every exercise.'
+                    : `Show ${r.label.toLowerCase()}-region exercises.`
+                }
               >
                 {r.label}
               </ChipButton>
@@ -414,6 +421,7 @@ function BrowseTab({
                 active={muscleChipIds.includes(m.id)}
                 onClick={() => toggleMuscle(m.id)}
                 variant="muscle"
+                title={chipMuscleHint(m.muscles)}
               >
                 {m.label}
               </ChipButton>
@@ -542,13 +550,6 @@ function BrowseTab({
                             <span className="flex-1 min-w-0">
                               <span className="text-sm text-ink-100 flex items-center gap-1.5">
                                 <span className="truncate">{ex.name}</span>
-                                {ex.videoUrl && (
-                                  <PlayCircle
-                                    size={11}
-                                    className="text-ink-500 shrink-0"
-                                    aria-label="Has demo video"
-                                  />
-                                )}
                               </span>
                               <span className="flex items-center gap-2 mt-0.5 flex-wrap">
                                 {ex.prescription && (
@@ -581,6 +582,15 @@ function BrowseTab({
                               </span>
                             </span>
                           </button>
+                          {ex.videoUrl && (
+                            <div className="flex items-center px-2">
+                              <VideoLink
+                                url={ex.videoUrl}
+                                exerciseName={ex.name}
+                                size={14}
+                              />
+                            </div>
+                          )}
                           {ex.isCustom && (
                             <button
                               onClick={() => onDeleteCustom(ex.id)}
@@ -689,11 +699,17 @@ function ChipButton({
   onClick,
   children,
   variant = 'region',
+  title,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
   variant?: 'region' | 'muscle';
+  // Hover/long-press hint surfacing the chip's underlying muscle scope.
+  // Browser-native, so there's a hover delay on desktop — but it's the
+  // only no-Radix-Tooltip option that doesn't crowd the chip row with ⓘ
+  // icons. The chip itself remains a single-tap toggle.
+  title?: string;
 }) {
   const activeClass =
     variant === 'region'
@@ -703,6 +719,7 @@ function ChipButton({
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={`text-xs px-3 py-1.5 rounded-full border transition ${
         active ? activeClass : 'border-ink-800 text-ink-300 hover:border-ink-600'
       }`}

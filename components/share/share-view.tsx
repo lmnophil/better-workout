@@ -30,6 +30,8 @@ import {
   computeSuggestionDiff,
   type ShareMuscleGroup,
 } from './share-coverage';
+import { VideoLink } from '@/components/ui/video-link';
+import { EquipmentChips } from '@/components/ui/equipment-chips';
 
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -45,6 +47,8 @@ export type RoutineExercise = {
   plannedReps: number | null;
   plannedSeconds: number | null;
   plannedWeight: number | null;
+  videoUrl: string | null;
+  equipment: string[];
 };
 
 export type RoutineForShare = {
@@ -397,12 +401,18 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                         <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500">
                           {ex.module}
                         </div>
-                        <div className="text-ink-100 font-medium leading-snug">
-                          {idx + 1}. {ex.name}
+                        <div className="text-ink-100 font-medium leading-snug flex items-center gap-1.5 flex-wrap">
+                          <span>
+                            {idx + 1}. {ex.name}
+                          </span>
+                          <VideoLink url={ex.videoUrl} exerciseName={ex.name} size={13} />
                         </div>
-                        <div className="text-xs text-ink-400 mt-0.5">
-                          {ex.primaryMuscles.join(', ')}
-                          {plannedSummary(ex)}
+                        <div className="text-xs text-ink-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span>
+                            {ex.primaryMuscles.join(', ')}
+                            {plannedSummary(ex)}
+                          </span>
+                          <EquipmentChips equipment={ex.equipment} />
                         </div>
                       </div>
                       <ReactionToggle

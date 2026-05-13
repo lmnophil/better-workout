@@ -334,13 +334,16 @@ const UpdateSetSchema = z.object({
   reps: z.number().int().min(0).max(1000).nullable().optional(),
   weight: z.number().min(0).max(10000).nullable().optional(),
   seconds: z.number().int().min(0).max(3600).nullable().optional(),
+  // Only meaningful for exercises with loadType='band'. Setting bandId clears
+  // weight (and vice versa) at the row level so the two never both populate.
+  bandId: z.string().min(1).nullable().optional(),
 });
 
 export const updateSet = withLogging(
   'updateSet',
   async (input: z.infer<typeof UpdateSetSchema>) => {
     const userId = await requireUser();
-    const { setLogId, reps, weight, seconds } = UpdateSetSchema.parse(input);
+    const { setLogId, reps, weight, seconds, bandId } = UpdateSetSchema.parse(input);
 
     // Verify the set belongs to a session owned by this user
     const setLog = await db.setLog.findUnique({
@@ -354,12 +357,27 @@ export const updateSet = withLogging(
       throw new Error('Cannot edit a completed session');
     }
 
+    // If the caller is setting a band, verify it belongs to the user and clear
+    // weight implicitly (mutually exclusive in the UI).
+    if (bandId !== undefined && bandId !== null) {
+      const band = await db.band.findFirst({
+        where: { id: bandId, userId },
+        select: { id: true },
+      });
+      if (!band) throw new Error('Band not found');
+    }
+
     await db.setLog.update({
       where: { id: setLogId },
       data: {
         ...(reps !== undefined ? { reps } : {}),
         ...(weight !== undefined ? { weight } : {}),
         ...(seconds !== undefined ? { seconds } : {}),
+        ...(bandId !== undefined
+          ? bandId === null
+            ? { bandId: null }
+            : { bandId, weight: null }
+          : {}),
       },
     });
 
@@ -841,6 +859,125 @@ export const updateUserPreferences = withLogging(
     revalidatePath('/settings');
     revalidatePath('/coverage');
     revalidatePath('/routine');
+  },
+);
+
+// ============================================================
+// BANDS
+// ============================================================
+//
+// User-owned list of resistance bands surfaced as a chip-picker on the set
+// row for exercises with loadType='band'. CRUD is intentionally lean —
+// the user manages bands once in settings, then taps a chip per set.
+
+const CreateBandSchema = z.object({ name: z.string().min(1).max(40).trim() });
+export const createBand = withLogging(
+  'createBand',
+  async (input: z.infer<typeof CreateBandSchema>) => {
+    const userId = await requireUser();
+    const { name } = CreateBandSchema.parse(input);
+    const existing = await db.band.findUnique({
+      where: { userId_name: { userId, name } },
+      select: { id: true },
+    });
+    if (existing) throw new Error('Band name already in use');
+    const last = await db.band.findFirst({
+      where: { userId },
+      orderBy: { position: 'desc' },
+      select: { position: true },
+    });
+    const nextPosition = (last?.position ?? -1) + 1;
+    await db.band.create({ data: { userId, name, position: nextPosition } });
+    revalidatePath('/');
+    revalidatePath('/settings');
+  },
+);
+
+const RenameBandSchema = z.object({
+  bandId: z.string().min(1),
+  name: z.string().min(1).max(40).trim(),
+});
+export const renameBand = withLogging(
+  'renameBand',
+  async (input: z.infer<typeof RenameBandSchema>) => {
+    const userId = await requireUser();
+    const { bandId, name } = RenameBandSchema.parse(input);
+    const band = await db.band.findFirst({
+      where: { id: bandId, userId },
+      select: { id: true },
+    });
+    if (!band) throw new Error('Band not found');
+    const conflict = await db.band.findUnique({
+      where: { userId_name: { userId, name } },
+      select: { id: true },
+    });
+    if (conflict && conflict.id !== bandId) throw new Error('Band name already in use');
+    await db.band.update({ where: { id: bandId }, data: { name } });
+    revalidatePath('/');
+    revalidatePath('/settings');
+  },
+);
+
+const DeleteBandSchema = z.object({ bandId: z.string().min(1) });
+export const deleteBand = withLogging(
+  'deleteBand',
+  async (input: z.infer<typeof DeleteBandSchema>) => {
+    const userId = await requireUser();
+    const { bandId } = DeleteBandSchema.parse(input);
+    const band = await db.band.findFirst({
+      where: { id: bandId, userId },
+      select: { id: true, position: true },
+    });
+    if (!band) throw new Error('Band not found');
+    // SetLog.bandId is SetNull on delete, so historical sets become "(deleted
+    // band)" rather than disappearing — same trade-off as deleted custom
+    // exercises.
+    await db.band.delete({ where: { id: bandId } });
+    // Compact positions so the picker doesn't have gaps. Cheap — the cap is
+    // tiny (a user's band drawer is on the order of single-digit entries).
+    const remaining = await db.band.findMany({
+      where: { userId },
+      orderBy: { position: 'asc' },
+      select: { id: true, position: true },
+    });
+    await db.$transaction(
+      remaining
+        .map((b, i) => (b.position === i ? null : db.band.update({ where: { id: b.id }, data: { position: i } })))
+        .filter((x): x is ReturnType<typeof db.band.update> => x !== null),
+    );
+    revalidatePath('/');
+    revalidatePath('/settings');
+  },
+);
+
+const ReorderBandSchema = z.object({
+  bandId: z.string().min(1),
+  direction: z.enum(['up', 'down']),
+});
+export const reorderBand = withLogging(
+  'reorderBand',
+  async (input: z.infer<typeof ReorderBandSchema>) => {
+    const userId = await requireUser();
+    const { bandId, direction } = ReorderBandSchema.parse(input);
+    const bands = await db.band.findMany({
+      where: { userId },
+      orderBy: { position: 'asc' },
+      select: { id: true, position: true },
+    });
+    const i = bands.findIndex((b) => b.id === bandId);
+    if (i < 0) throw new Error('Band not found');
+    const target = direction === 'up' ? i - 1 : i + 1;
+    if (target < 0 || target >= bands.length) return;
+    const me = bands[i];
+    const neighbor = bands[target];
+    const sentinel = -1;
+    await db.$transaction([
+      db.band.update({ where: { id: me.id }, data: { position: sentinel } }),
+      db.band.update({ where: { id: neighbor.id }, data: { position: me.position } }),
+      db.band.update({ where: { id: me.id }, data: { position: neighbor.position } }),
+    ]);
+    revalidatePath('/');
+    revalidatePath('/settings');
   },
 );
 
@@ -2131,6 +2268,50 @@ export const reorderRoutineDay = withLogging(
   },
 );
 
+const SwapRoutineDayPositionsSchema = z.object({
+  routineDayId: z.string().min(1),
+  targetRoutineDayId: z.string().min(1),
+});
+
+/**
+ * Swap the positions of two routine days. Used by the cycle-mode "Day N" grid
+ * — tap any day-number chip to exchange positions with that day in one click.
+ * Same sentinel-position dance as reorderRoutineDay so the unique
+ * (routineId, position) constraint never sees a duplicate.
+ */
+export const swapRoutineDayPositions = withLogging(
+  'swapRoutineDayPositions',
+  async (input: z.infer<typeof SwapRoutineDayPositionsSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, targetRoutineDayId } = SwapRoutineDayPositionsSchema.parse(input);
+    if (routineDayId === targetRoutineDayId) return;
+
+    const [me, target] = await Promise.all([
+      db.routineDay.findFirst({
+        where: { id: routineDayId, routine: { userId } },
+        select: { id: true, position: true, routineId: true },
+      }),
+      db.routineDay.findFirst({
+        where: { id: targetRoutineDayId, routine: { userId } },
+        select: { id: true, position: true, routineId: true },
+      }),
+    ]);
+    if (!me || !target) throw new Error('Routine day not found');
+    if (me.routineId !== target.routineId) throw new Error('Routine day not found');
+
+    const sentinel = -1;
+    await db.$transaction([
+      db.routineDay.update({ where: { id: me.id }, data: { position: sentinel } }),
+      db.routineDay.update({ where: { id: target.id }, data: { position: me.position } }),
+      db.routineDay.update({ where: { id: me.id }, data: { position: target.position } }),
+    ]);
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+    revalidatePath('/settings');
+  },
+);
+
 const DuplicateRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
 });
@@ -2746,6 +2927,12 @@ export const mintRoutineShare = withLogging(
 
     revalidatePath('/routine');
     revalidatePath('/routine/shares');
+
+    // Returning the token is the exception to "actions return nothing": the
+    // caller writes the URL to the clipboard within the same user-gesture
+    // tick, which requires the value synchronously after the await. Avoids a
+    // second round trip just to look up what we already minted.
+    return { token };
   },
 );
 

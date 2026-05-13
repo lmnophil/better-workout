@@ -229,6 +229,34 @@ export const ExplainWeightIncrement: ReactNode = (
 // ROUTINE STRUCTURE — the SMR → Mobility → … → Rev Up sequence
 // ============================================================
 
+export const ExplainScheduleStyle: ReactNode = (
+  <>
+    <p>
+      <strong>Cycle</strong> rotates your days in order, at your own pace. Finish Day 1, then Day 2
+      is next regardless of which weekday it is. Good for self-paced training, recovery-driven
+      schedules, and people whose week doesn&apos;t repeat cleanly.
+    </p>
+    <p>
+      <strong>Calendar</strong> pins each day to a specific weekday. Tuesday is always lower body,
+      Thursday is always upper, etc. Good if your life is structured around a fixed weekly grid.
+    </p>
+    <p>Switching modes keeps your days but clears any weekday pins — your day order is preserved.</p>
+  </>
+);
+
+export const ExplainDayDescription: ReactNode = (
+  <>
+    <p>
+      A short note framing what this day is <em>for</em> — emphasis, intent, intended duration,
+      cues you want top-of-mind. Visible while you&apos;re lifting; not a prescription.
+    </p>
+    <p>
+      Example: <em>&quot;Lower emphasis (glute drive). Stack ~60 min: SMR → Mobility → Activation →
+      Strength → Rev Up. Push the hinge today.&quot;</em>
+    </p>
+  </>
+);
+
 export const ExplainModuleSequence: ReactNode = (
   <>
     <p>Each day can stack any subset of these in order:</p>

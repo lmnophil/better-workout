@@ -3,13 +3,14 @@
 
 import { auth } from '@/auth';
 import { redirect } from 'next/navigation';
-import { getUserVolumeTargets, getHiddenBuiltinTemplates } from '@/lib/queries';
+import { getUserVolumeTargets, getHiddenBuiltinTemplates, getUserBands } from '@/lib/queries';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { VolumeTargetsEditor } from '@/components/settings/volume-targets-editor';
 import { VolumeTierEditor } from '@/components/settings/volume-tier-editor';
 import { RestTimerEditor } from '@/components/settings/rest-timer-editor';
 import { WorkoutDefaultsEditor } from '@/components/settings/workout-defaults-editor';
 import { HiddenTemplatesEditor } from '@/components/settings/hidden-templates-editor';
+import { BandsEditor } from '@/components/settings/bands-editor';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import {
   ExplainMinTarget,
@@ -25,9 +26,10 @@ export default async function SettingsPage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const [overrides, hiddenTemplates] = await Promise.all([
+  const [overrides, hiddenTemplates, bands] = await Promise.all([
     getUserVolumeTargets(userId),
     getHiddenBuiltinTemplates(userId),
+    getUserBands(userId),
   ]);
 
   const hiddenForClient = hiddenTemplates.map((row) => ({
@@ -117,6 +119,17 @@ export default async function SettingsPage() {
           </p>
         </div>
         <VolumeTargetsEditor muscles={trackable} />
+      </section>
+
+      <section className="mb-8">
+        <div className="mb-3">
+          <h2 className="font-display text-xl">Resistance bands</h2>
+          <p className="text-xs text-ink-400 italic font-display mt-1 leading-relaxed">
+            Exercises that use bands (banded glute bridges, lateral band walks) log band strength
+            instead of a weight. Rename or reorder these to match the bands you actually own.
+          </p>
+        </div>
+        <BandsEditor bands={bands} />
       </section>
 
       <section>

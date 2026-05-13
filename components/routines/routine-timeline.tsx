@@ -7,6 +7,8 @@
 
 import { useState, useTransition } from 'react';
 import { ChevronDown, ChevronRight, RotateCcw, Replace, Play } from 'lucide-react';
+import { VideoLink } from '@/components/ui/video-link';
+import { EquipmentChips } from '@/components/ui/equipment-chips';
 import {
   startFromRoutineDay,
   setPendingSwap,
@@ -32,6 +34,8 @@ export type RoutineDayExerciseClient = {
   plannedSets: number | null;
   plannedReps: number | null;
   plannedSeconds: number | null;
+  videoUrl: string | null;
+  equipment: string[];
   // If a one-time swap is staged, the *original* exercise stays here and
   // pendingSwap.inExerciseId/Name describes the substitution.
   pendingSwapInExerciseId?: string;
@@ -169,6 +173,7 @@ function TodaySection({
           isToday={true}
           defaultExpanded={true}
           availableExercises={availableExercises}
+          scheduleStyle={scheduleStyle}
         />
       ) : (
         <div className="px-4 py-6 border border-ink-800 rounded-lg text-center">
@@ -208,6 +213,7 @@ function UpcomingSection({
             isToday={false}
             defaultExpanded={false}
             availableExercises={availableExercises}
+            scheduleStyle={scheduleStyle}
             // Sequence mode: mark the last upcoming entry as the loop indicator.
             isLoopBack={scheduleStyle === 'sequence' && idx === days.length - 1}
           />
@@ -224,12 +230,14 @@ function DayCard({
   isToday,
   defaultExpanded,
   availableExercises,
+  scheduleStyle,
   isLoopBack,
 }: {
   day: RoutineDayClient;
   isToday: boolean;
   defaultExpanded: boolean;
   availableExercises: ExerciseInfo[];
+  scheduleStyle: ScheduleStyle;
   isLoopBack?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -378,6 +386,18 @@ function DayCard({
           )}
           <div className="min-w-0">
             <div className="text-sm text-ink-100 flex items-center gap-2 flex-wrap">
+              <span
+                className="text-[10px] tracking-[0.2em] uppercase font-mono accent-text bg-accent/10 border border-accent/30 rounded-full px-2 py-0.5"
+                aria-label={
+                  scheduleStyle === 'weekday' && weekdayLabel
+                    ? weekdayLabel
+                    : `Day ${day.position}`
+                }
+              >
+                {scheduleStyle === 'weekday' && weekdayLabel
+                  ? weekdayLabel
+                  : `Day ${day.position}`}
+              </span>
               <span>{day.templateName}</span>
               {hasPendingSwaps && (
                 <span className="text-[9px] tracking-[0.2em] uppercase accent-text">
@@ -506,7 +526,11 @@ function ExerciseList({
               <span className="text-[9px] tracking-[0.2em] uppercase accent-text">one-time</span>
             </>
           ) : (
-            <span>{ex.name}</span>
+            <>
+              <span>{ex.name}</span>
+              <VideoLink url={ex.videoUrl} exerciseName={ex.name} size={12} />
+              {ex.equipment.length > 0 && <EquipmentChips equipment={ex.equipment} />}
+            </>
           )}
         </div>
         <div className="shrink-0 flex items-center gap-1">

@@ -57,6 +57,10 @@ export type ExerciseInfo = {
   isCustom: boolean;
   // 'reps' (the default) or 'time'. Determines which input the set row renders.
   metric: string;
+  // 'weight' (the default), 'band', or 'none'. Determines whether the set row
+  // shows a numeric weight stepper, a band-strength chip selector, or hides
+  // the load column entirely. See Exercise.loadType in schema.prisma.
+  loadType: string;
   // Equipment tokens. Used by the routine preset picker; the active session UI
   // doesn't filter on it.
   equipment: string[];
@@ -75,6 +79,11 @@ export type SetLogClient = {
   // Populated when the source Exercise.metric is 'time'. Mutually exclusive
   // with reps in normal use, but the schema doesn't enforce that.
   seconds: number | null;
+  // Populated when the source Exercise.loadType is 'band'. The band name is
+  // resolved against the user's BandsEditor list and surfaced in last-time
+  // refs ("Last today: 12×medium"). Mutually exclusive with weight in normal
+  // use; the writing actions clear one when setting the other.
+  bandId: string | null;
   notes: string | null;
 };
 
@@ -92,6 +101,7 @@ export type LastSetsForExercise = {
     reps: number | null;
     weight: number | null;
     seconds: number | null;
+    bandId: string | null;
     notes: string | null;
   }[];
 };
@@ -121,6 +131,9 @@ type Props = {
   activeSession: ActiveSessionClient | null;
   availableExercises: ExerciseInfo[];
   lastSets: LastSetsForExercise[];
+  // The user's bands list. Drives the band chip-picker for exercises with
+  // loadType='band'. Server-loaded so it's stable across re-renders.
+  bands: { id: string; name: string; position: number }[];
   // Per-exercise notes lifted from the routine-day the active session was
   // started from (if any). Read-only at the session level; the user edits
   // them on the routine editor page. Empty array when there's no active
@@ -138,6 +151,7 @@ export function WorkoutView({
   activeSession,
   availableExercises,
   lastSets,
+  bands,
   routineExerciseNotes,
   templates,
   routine,
@@ -286,6 +300,7 @@ export function WorkoutView({
       reps?: number | null;
       weight?: number | null;
       seconds?: number | null;
+      bandId?: string | null;
     },
   ) => {
     startTransition(() => {
@@ -559,6 +574,7 @@ export function WorkoutView({
                   key={exerciseId}
                   exercise={exercise}
                   sets={sets}
+                  bands={bands}
                   routineNote={routineNoteByExercise.get(exerciseId) ?? null}
                   lastTime={
                     last

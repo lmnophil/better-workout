@@ -110,6 +110,8 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
           plannedWeight: te.plannedWeight,
+          videoUrl: te.exercise.videoUrl,
+          equipment: te.exercise.equipment,
         })),
     })),
   };

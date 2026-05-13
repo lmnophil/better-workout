@@ -36,6 +36,7 @@ model User {
   hiddenTemplates  UserHiddenTemplate[]
   routine          Routine?
   notifications    Notification[]
+  bands            Band[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -96,6 +97,24 @@ model Exercise {
   // reps/weight inputs otherwise. A handful of built-ins (planks, holds,
   // carries, wall sits) ship as 'time'; everything else stays 'reps'.
   metric String @default("reps")
+
+  // How an exercise's external load is logged:
+  //   - 'weight' (default): numeric weight in the user's stored unit. The
+  //     set row shows the +/- weight stepper.
+  //   - 'band': band-tension selector (the user's own Band list — Light /
+  //     Medium / Heavy by default). The set row swaps the weight stepper
+  //     for a chip-row of the user's bands and stores the chosen Band's
+  //     id on SetLog.bandId. Weight stays null. Used for banded glute
+  //     bridges, lateral band walks, etc., where "20 lb" doesn't describe
+  //     the resistance — only band thickness does.
+  //   - 'none': no external load is tracked at all. The set row drops the
+  //     load column entirely. Used for mobility, SMR, mat-only and pure
+  //     bodyweight movements (90/90 hip switches, foam roll, deep squat
+  //     reaches), where weight makes no sense.
+  // String column (rather than an enum) for the same reason metric is —
+  // keeps schema changes cheap and unknowns degrade to 'weight' at render
+  // time.
+  loadType String @default("weight")
 
   // Equipment tokens this exercise needs. Populated for built-ins; user-created
   // customs can leave it empty. Used by the starter-routine preset picker to
@@ -373,12 +392,44 @@ model SetLog {
   seconds    Int?
   notes      String?
 
+  // For exercises with Exercise.loadType='band': which Band the user used
+  // for this set. SetNull on Band delete so the historical SetLog stays
+  // intact; the UI surfaces the missing band as "(deleted band)". Mutually
+  // exclusive with weight in normal use — actions clear weight when bandId
+  // is being set.
+  bandId String?
+  band   Band?   @relation(fields: [bandId], references: [id], onDelete: SetNull)
+
   session  WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   exercise Exercise       @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
 
   @@index([sessionId])
   @@index([sessionId, position])
   @@index([exerciseId])
+  @@index([bandId])
+}
+
+// Per-user list of resistance bands the user owns. Stores the labels the
+// user picks (Light/Medium/Heavy by default, but anything goes — "orange",
+// "red", "thin black"). Position drives the order chips render in inside
+// the set row. Lazily seeded on first need so a new user immediately sees
+// the three defaults when they pick their first banded exercise.
+model Band {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name     String
+  position Int
+
+  setLogs SetLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@unique([userId, position])
+  @@index([userId])
 }
 
 // ================================================================

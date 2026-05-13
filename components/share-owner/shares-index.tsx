@@ -23,12 +23,28 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
   const [label, setLabel] = useState('');
   const [pending, startTransition] = useTransition();
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [justMintedCopied, setJustMintedCopied] = useState(false);
 
   const mint = () => {
     startTransition(async () => {
       try {
-        await mintRoutineShare({ label: label.trim() || undefined });
+        const result = await mintRoutineShare({ label: label.trim() || undefined });
         setLabel('');
+        // Optimistically copy the new URL so the user doesn't have to hunt
+        // for the row that just appeared and tap the per-row copy button.
+        // Clipboard writes after an await can fail silently in some browsers
+        // when they decide the user gesture has ended; the explicit per-row
+        // button remains as the manual fallback.
+        if (result?.token) {
+          const url = `${baseUrl}/share/${result.token}`;
+          try {
+            await navigator.clipboard.writeText(url);
+            setJustMintedCopied(true);
+            setTimeout(() => setJustMintedCopied(false), 2000);
+          } catch {
+            /* silent — user can use the per-row copy button */
+          }
+        }
       } catch {
         /* silent */
       }
@@ -84,6 +100,11 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
         <p className="text-xs text-ink-400 mt-2">
           Anyone with the URL can view your routine and comment. Revoke any time.
         </p>
+        {justMintedCopied && (
+          <p className="text-xs accent-text mt-1 inline-flex items-center gap-1">
+            <Check size={12} /> link copied to clipboard
+          </p>
+        )}
       </div>
 
       {active.length > 0 && (

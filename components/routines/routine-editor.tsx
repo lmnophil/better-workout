@@ -45,6 +45,7 @@ import {
   removeExerciseFromRoutineDay,
   removeRoutineDay,
   reorderRoutineDay,
+  swapRoutineDayPositions,
   reorderRoutineDayExercise,
   setRoutineDayExerciseOrder,
   swapInRoutineTemplate,
@@ -58,9 +59,14 @@ import {
   WEEKDAY_LABELS,
   type ScheduleStyle,
 } from '@/lib/routine';
-import { EXERCISE_MODULES, moduleDescription } from '@/lib/exercises-data';
+import { EXERCISE_MODULES } from '@/lib/exercises-data';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
-import { ExplainModuleSequence } from '@/lib/explanations';
+import { ModuleInfoTooltip } from '@/components/ui/module-info-tooltip';
+import {
+  ExplainModuleSequence,
+  ExplainScheduleStyle,
+  ExplainDayDescription,
+} from '@/lib/explanations';
 import {
   ESTIMATED_SETS_FALLBACK,
   TIER_VISUALS,
@@ -90,6 +96,8 @@ import type { ExerciseInfo } from '@/components/workout/workout-view';
 import { useConfirm } from '@/components/ui/use-confirm';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { estimatePlannedExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
+import { VideoLink } from '@/components/ui/video-link';
+import { EquipmentChips } from '@/components/ui/equipment-chips';
 
 // ============ TYPES ============
 
@@ -104,6 +112,8 @@ type DayExercise = {
   plannedReps: number | null;
   plannedSeconds: number | null;
   note: string | null;
+  videoUrl: string | null;
+  equipment: string[];
 };
 
 type EditorDay = {
@@ -513,6 +523,8 @@ function DraftEditor({
                 plannedReps: dx.plannedReps,
                 plannedSeconds: dx.plannedSeconds,
                 note: dx.note,
+                videoUrl: e.videoUrl,
+                equipment: e.equipment,
               };
             })
             .filter((x): x is DayExercise => x !== null),
@@ -556,6 +568,18 @@ function DraftEditor({
       if (target < 0 || target >= prev.length) return prev;
       const next = [...prev];
       [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  }
+
+  function swapDayPositions(clientId: string, targetClientId: string) {
+    if (clientId === targetClientId) return;
+    setDays((prev) => {
+      const i = prev.findIndex((d) => d.clientId === clientId);
+      const j = prev.findIndex((d) => d.clientId === targetClientId);
+      if (i < 0 || j < 0) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
   }
@@ -681,6 +705,8 @@ function DraftEditor({
             plannedReps: ex.plannedReps,
             plannedSeconds: ex.plannedSeconds,
             note: null,
+            videoUrl: e.videoUrl,
+            equipment: e.equipment,
           };
         })
         .filter((x): x is DayExercise => x !== null),
@@ -811,6 +837,7 @@ function DraftEditor({
               }}
               onRemoveDay={removeDay}
               onMoveDay={moveDay}
+              onSwapDayPositions={swapDayPositions}
               onOpenExercisePicker={setPickerForDayClientId}
               onSeedFromTemplate={seedFromTemplate}
               onRemoveExercise={(id, exerciseId) =>
@@ -1296,6 +1323,14 @@ function LiveEditor({
     [availableExercises, prefs.restTimerSeconds],
   );
 
+  // Same totals derivation as DraftEditor — see the comment there. Live mode
+  // is server-authoritative so the dependencies are routine.days +
+  // availableExercises.
+  const exerciseById = useMemo(
+    () => new Map(availableExercises.map((e) => [e.id, e])),
+    [availableExercises],
+  );
+
   const editorDays: EditorDay[] = useMemo(
     () =>
       [...routine.days]
@@ -1309,26 +1344,23 @@ function LiveEditor({
           exercises: d.exercises
             .slice()
             .sort((a, b) => a.position - b.position)
-            .map((e) => ({
-              exerciseId: e.exerciseId,
-              name: e.name,
-              module: e.module,
-              metric: e.metric,
-              plannedSets: e.plannedSets,
-              plannedReps: e.plannedReps,
-              plannedSeconds: e.plannedSeconds,
-              note: e.note,
-            })),
+            .map((e) => {
+              const av = exerciseById.get(e.exerciseId);
+              return {
+                exerciseId: e.exerciseId,
+                name: e.name,
+                module: e.module,
+                metric: e.metric,
+                plannedSets: e.plannedSets,
+                plannedReps: e.plannedReps,
+                plannedSeconds: e.plannedSeconds,
+                note: e.note,
+                videoUrl: av?.videoUrl ?? null,
+                equipment: av?.equipment ?? [],
+              };
+            }),
         })),
-    [routine.days],
-  );
-
-  // Same totals derivation as DraftEditor — see the comment there. Live mode
-  // is server-authoritative so the dependencies are routine.days +
-  // availableExercises.
-  const exerciseById = useMemo(
-    () => new Map(availableExercises.map((e) => [e.id, e])),
-    [availableExercises],
+    [routine.days, exerciseById],
   );
   const { totals, anyEstimated } = useMemo(
     () => computeMuscleTotals(editorDays, exerciseById),
@@ -1407,6 +1439,11 @@ function LiveEditor({
         onMoveDay={(id, direction) => {
           startTransition(() => {
             reorderRoutineDay({ routineDayId: id, direction });
+          });
+        }}
+        onSwapDayPositions={(id, targetId) => {
+          startTransition(() => {
+            swapRoutineDayPositions({ routineDayId: id, targetRoutineDayId: targetId });
           });
         }}
         onOpenExercisePicker={setPickerForDayId}
@@ -1694,7 +1731,12 @@ function ScheduleToggle({
   return (
     <div>
       <div className="flex items-baseline justify-between mb-1.5 gap-2">
-        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-400">Schedule style</div>
+        <div className="text-[10px] tracking-[0.25em] uppercase text-ink-400 inline-flex items-center gap-1">
+          Schedule style
+          <InfoTooltip label="Cycle vs Calendar" size={11} align="start">
+            {ExplainScheduleStyle}
+          </InfoTooltip>
+        </div>
         <div className="text-[10px] text-ink-600 italic font-display text-right">
           Switching modes keeps your days but clears any weekday pins.
         </div>
@@ -1782,6 +1824,8 @@ type DaysSectionProps = {
   onDuplicateDay: (id: string) => void;
   onRemoveDay: (id: string) => void;
   onMoveDay: (id: string, direction: 'up' | 'down') => void;
+  // Swap two days' positions in one click — used by the cycle-mode Day-N grid.
+  onSwapDayPositions: (id: string, targetId: string) => void;
   onOpenExercisePicker: (id: string) => void;
   onSeedFromTemplate: (id: string, templateId: string) => void;
   onRemoveExercise: (id: string, exerciseId: string) => void;
@@ -1949,6 +1993,7 @@ function dispatchProps(p: DaysSectionProps) {
     onRemove: p.onRemoveDay,
     atCap: p.atCap,
     onMove: p.onMoveDay,
+    onSwapPositions: p.onSwapDayPositions,
     onOpenExercisePicker: p.onOpenExercisePicker,
     onSeedFromTemplate: p.onSeedFromTemplate,
     onRemoveExercise: p.onRemoveExercise,
@@ -1981,6 +2026,7 @@ type DayCardProps = {
   atCap: boolean;
   onRemove: (id: string) => void;
   onMove: (id: string, direction: 'up' | 'down') => void;
+  onSwapPositions: (id: string, targetId: string) => void;
   onOpenExercisePicker: (id: string) => void;
   onSeedFromTemplate: (id: string, templateId: string) => void;
   onRemoveExercise: (id: string, exerciseId: string) => void;
@@ -2009,6 +2055,7 @@ function DayCard({
   atCap,
   onRemove,
   onMove,
+  onSwapPositions,
   onOpenExercisePicker,
   onSeedFromTemplate,
   onRemoveExercise,
@@ -2117,6 +2164,11 @@ function DayCard({
               </button>
             </div>
           )}
+          <DayPositionBadge
+            scheduleStyle={scheduleStyle}
+            position={allDays.findIndex((d) => d.id === day.id) + 1}
+            weekday={day.weekday}
+          />
           {renaming ? (
             <input
               type="text"
@@ -2203,6 +2255,14 @@ function DayCard({
             disabled={isPending}
           />
         )}
+        {scheduleStyle === 'sequence' && allDays.length > 1 && (
+          <SequencePositionPicker
+            currentId={day.id}
+            allDays={allDays}
+            onSwap={(targetId) => onSwapPositions(day.id, targetId)}
+            disabled={isPending}
+          />
+        )}
 
         {/* Day-level description. Collapsed by default; click "+ Add note for
             this day" to expand. When populated, shows the full text (italic,
@@ -2240,14 +2300,19 @@ function DayCard({
             {day.description}
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={() => setDescOpen(true)}
-            disabled={isPending}
-            className="text-[11px] text-ink-500 italic font-display hover:text-ink-300 transition disabled:opacity-50"
-          >
-            + Add a note for this day
-          </button>
+          <div className="inline-flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setDescOpen(true)}
+              disabled={isPending}
+              className="text-[11px] text-ink-500 italic font-display hover:text-ink-300 transition disabled:opacity-50"
+            >
+              + Add a note for this day
+            </button>
+            <InfoTooltip label="Day note" size={11} align="start">
+              {ExplainDayDescription}
+            </InfoTooltip>
+          </div>
         )}
 
         {day.exercises.length > 0 && (
@@ -2266,11 +2331,9 @@ function DayCard({
               return (
                 <div key={group.module} className="space-y-1">
                   <div className="flex items-baseline gap-2 px-0.5">
-                    <div
-                      className="text-[10px] tracking-[0.2em] uppercase text-ink-500 cursor-help"
-                      title={moduleDescription(group.module) || group.module}
-                    >
-                      {group.module}
+                    <div className="text-[10px] tracking-[0.2em] uppercase text-ink-500 inline-flex items-center gap-1">
+                      <span>{group.module}</span>
+                      <ModuleInfoTooltip module={group.module} />
                     </div>
                     {subtotalSec > 0 && (
                       <div className="text-[10px] text-ink-600 font-mono">
@@ -2368,6 +2431,83 @@ function SeedFromTemplateMenu({
         </option>
       ))}
     </select>
+  );
+}
+
+// Tiny pill that sits at the start of every day-card header. The user
+// originally couldn't tell where one day ended and the next began in cycle
+// mode — this badge plus the (kept) up/down controls and the new cycle
+// position grid below make day boundaries obvious. In weekday mode it
+// shows the weekday name; in cycle mode it shows "Day N".
+function DayPositionBadge({
+  scheduleStyle,
+  position,
+  weekday,
+}: {
+  scheduleStyle: ScheduleStyle;
+  position: number;
+  weekday: number | null;
+}) {
+  const label =
+    scheduleStyle === 'weekday'
+      ? weekday !== null
+        ? WEEKDAY_FULL_LABELS[weekday]
+        : 'Unpinned'
+      : `Day ${position}`;
+  return (
+    <span
+      className="text-[10px] tracking-[0.2em] uppercase font-mono accent-text bg-accent/10 border border-accent/30 rounded-full px-2 py-0.5 shrink-0"
+      aria-label={`Routine ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// Cycle-mode-only sibling of WeekdayPicker. Renders one button per existing
+// day in the routine. Tapping the current day's chip is a no-op (visual
+// "you are here"); tapping another chip swaps positions with that day in a
+// single click. The cap is MAX_ROUTINE_DAYS so this comfortably fits in a
+// single row.
+function SequencePositionPicker({
+  currentId,
+  allDays,
+  onSwap,
+  disabled,
+}: {
+  currentId: string;
+  allDays: { id: string }[];
+  onSwap: (targetId: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5">
+        Position — tap to swap
+      </div>
+      <div className="flex gap-1.5 flex-wrap">
+        {allDays.map((d, i) => {
+          const isMine = d.id === currentId;
+          return (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => (isMine ? undefined : onSwap(d.id))}
+              disabled={disabled || isMine}
+              aria-label={isMine ? `This day is Day ${i + 1}` : `Swap to Day ${i + 1}`}
+              aria-current={isMine}
+              className={`text-[10px] font-mono px-2 py-1 rounded border transition ${
+                isMine
+                  ? 'accent-bg text-ink-950 border-transparent cursor-default'
+                  : 'border-ink-800 text-ink-300 hover:border-ink-600'
+              }`}
+            >
+              Day {i + 1}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -2478,12 +2618,16 @@ function ExerciseRow({
           </button>
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] text-ink-100 truncate">{exercise.name}</div>
-          <div
-            className="text-[10px] text-ink-500 truncate cursor-help"
-            title={moduleDescription(exercise.module) || exercise.module}
-          >
-            {exercise.module}
+          <div className="text-[13px] text-ink-100 truncate flex items-center gap-1.5">
+            <span className="truncate">{exercise.name}</span>
+            <VideoLink url={exercise.videoUrl} exerciseName={exercise.name} size={12} />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-[10px] text-ink-500 truncate inline-flex items-center gap-1">
+              <span>{exercise.module}</span>
+              <ModuleInfoTooltip module={exercise.module} size={10} />
+            </div>
+            <EquipmentChips equipment={exercise.equipment} />
           </div>
         </div>
         <PlannedInputs

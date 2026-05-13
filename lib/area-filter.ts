@@ -21,6 +21,18 @@
 
 import { MUSCLE_GROUPS } from './exercises-data';
 
+// Compose a one-line hint for a chip listing the muscles it selects. Drawn
+// from MUSCLE_GROUPS so we don't duplicate copy. Used by the picker's
+// per-chip browser `title` and by any future tooltip surface that wants
+// to surface chip scope.
+export function chipMuscleHint(muscleIds: string[]): string {
+  if (muscleIds.length === 0) return '';
+  const labels = muscleIds
+    .map((id) => MUSCLE_GROUPS.find((m) => m.id === id)?.label ?? id)
+    .filter(Boolean);
+  return `Includes: ${labels.join(', ')}`;
+}
+
 export type RegionChip = {
   id: 'upper' | 'lower' | 'full' | 'mobility';
   label: string;

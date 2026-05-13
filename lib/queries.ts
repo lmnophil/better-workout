@@ -117,6 +117,7 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
           reps: true,
           weight: true,
           seconds: true,
+          bandId: true,
           notes: true,
         },
       },
@@ -133,6 +134,7 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
         reps: number | null;
         weight: number | null;
         seconds: number | null;
+        bandId: string | null;
         notes: string | null;
       }[];
     }
@@ -159,6 +161,7 @@ export async function getLastSetsByExercise(userId: string, excludeSessionId?: s
           reps: s.reps,
           weight: s.weight,
           seconds: s.seconds,
+          bandId: s.bandId,
           notes: s.notes,
         })),
       });
@@ -356,6 +359,39 @@ export async function getUserVolumeTargets(userId: string) {
  */
 // Wrapped with React.cache so multiple callers in a single request (e.g. the
 // app layout and the workout page) share one DB hit.
+/**
+ * Resistance bands the user owns, ordered by position. Used in the active
+ * session set row for exercises with loadType='band' and in the bands editor
+ * in settings.
+ *
+ * Lazily seeds the default Light/Medium/Heavy trio the first time the user
+ * is asked for bands. Reads stay cheap on every call (one findMany) without
+ * needing a separate "have I been initialized?" flag.
+ */
+export async function getUserBands(userId: string) {
+  const existing = await db.band.findMany({
+    where: { userId },
+    orderBy: { position: 'asc' },
+    select: { id: true, name: true, position: true },
+  });
+  if (existing.length > 0) return existing;
+  // First touch — seed the default set. createMany is safe against the
+  // unique(userId,name) and unique(userId,position) constraints because we
+  // know there are no existing rows.
+  await db.band.createMany({
+    data: [
+      { userId, name: 'Light', position: 0 },
+      { userId, name: 'Medium', position: 1 },
+      { userId, name: 'Heavy', position: 2 },
+    ],
+  });
+  return db.band.findMany({
+    where: { userId },
+    orderBy: { position: 'asc' },
+    select: { id: true, name: true, position: true },
+  });
+}
+
 export const getUserPreferences = cache(async function getUserPreferences(
   userId: string,
 ): Promise<UserPrefs> {
@@ -444,6 +480,8 @@ export async function getRoutineForUser(userId: string) {
                       deletedAt: true,
                       primaryMuscles: true,
                       secondaryMuscles: true,
+                      videoUrl: true,
+                      equipment: true,
                     },
                   },
                 },
@@ -559,6 +597,8 @@ export async function getShareByToken(token: string) {
                           primaryMuscles: true,
                           secondaryMuscles: true,
                           prescription: true,
+                          videoUrl: true,
+                          equipment: true,
                         },
                       },
                     },

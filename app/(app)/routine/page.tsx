@@ -127,6 +127,7 @@ export default async function RoutinePage() {
           videoUrl: e.videoUrl,
           isCustom: e.isCustom,
           metric: e.metric,
+          loadType: e.loadType,
           equipment: e.equipment,
           restTimerSecondsOverride: e.restTimerSecondsOverride,
           weightIncrementOverride: e.weightIncrementOverride,

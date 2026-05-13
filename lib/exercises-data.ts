@@ -113,6 +113,11 @@ export type SeedExercise = {
   // a stopwatch/seconds input. Planks, side planks, holds, wall sits, and
   // farmer carries are 'time'; everything else is 'reps'.
   metric?: 'reps' | 'time';
+  // How load is logged for this exercise. 'weight' (default) shows the
+  // numeric weight stepper; 'band' swaps it for the user's Band chip list;
+  // 'none' hides the load column entirely. See Exercise.loadType in
+  // schema.prisma for the full discussion.
+  loadType?: 'weight' | 'band' | 'none';
   // Equipment tokens needed by this exercise. Drives the routine preset
   // picker's equipment-tier filter. Canonical tokens — 'barbell', 'rack',
   // 'bench', 'dumbbells', 'cable', 'machine', 'bands', 'pull-up bar',

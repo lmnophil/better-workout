@@ -53,6 +53,7 @@ CREATE TABLE "Exercise" (
     "module" TEXT NOT NULL,
     "prescription" TEXT,
     "metric" TEXT NOT NULL DEFAULT 'reps',
+    "loadType" TEXT NOT NULL DEFAULT 'weight',
     "equipment" TEXT[] DEFAULT ARRAY[]::TEXT[],
     "primaryMuscles" TEXT[],
     "secondaryMuscles" TEXT[] DEFAULT ARRAY[]::TEXT[],
@@ -169,8 +170,21 @@ CREATE TABLE "SetLog" (
     "weight" DOUBLE PRECISION,
     "seconds" INTEGER,
     "notes" TEXT,
+    "bandId" TEXT,
 
     CONSTRAINT "SetLog_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Band" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "position" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Band_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -375,6 +389,18 @@ CREATE INDEX "SetLog_sessionId_position_idx" ON "SetLog"("sessionId", "position"
 CREATE INDEX "SetLog_exerciseId_idx" ON "SetLog"("exerciseId");
 
 -- CreateIndex
+CREATE INDEX "SetLog_bandId_idx" ON "SetLog"("bandId");
+
+-- CreateIndex
+CREATE INDEX "Band_userId_idx" ON "Band"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Band_userId_name_key" ON "Band"("userId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Band_userId_position_key" ON "Band"("userId", "position");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Routine_userId_key" ON "Routine"("userId");
 
 -- CreateIndex
@@ -468,10 +494,16 @@ ALTER TABLE "TemplateExercise" ADD CONSTRAINT "TemplateExercise_templateId_fkey"
 ALTER TABLE "TemplateExercise" ADD CONSTRAINT "TemplateExercise_exerciseId_fkey" FOREIGN KEY ("exerciseId") REFERENCES "Exercise"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "SetLog" ADD CONSTRAINT "SetLog_bandId_fkey" FOREIGN KEY ("bandId") REFERENCES "Band"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "SetLog" ADD CONSTRAINT "SetLog_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "WorkoutSession"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "SetLog" ADD CONSTRAINT "SetLog_exerciseId_fkey" FOREIGN KEY ("exerciseId") REFERENCES "Exercise"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Band" ADD CONSTRAINT "Band_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Routine" ADD CONSTRAINT "Routine_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

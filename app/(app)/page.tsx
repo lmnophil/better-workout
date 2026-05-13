@@ -15,6 +15,7 @@ import {
   getTemplates,
   getRoutineForUser,
   getRoutineRecentSessions,
+  getUserBands,
 } from '@/lib/queries';
 import { pickTodaysRoutineDay, pickUpcomingRoutineDays, isScheduleStyle } from '@/lib/routine';
 import { WorkoutView } from '@/components/workout/workout-view';
@@ -31,13 +32,14 @@ export default async function WorkoutPage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const [activeSession, availableExercises, templates, routine, recentRoutineSessions] =
+  const [activeSession, availableExercises, templates, routine, recentRoutineSessions, bands] =
     await Promise.all([
       getActiveSession(userId),
       getAvailableExercises(userId),
       getTemplates(userId),
       getRoutineForUser(userId),
       getRoutineRecentSessions(userId, 5),
+      getUserBands(userId),
     ]);
 
   // Only fetch "last time" data after we know the active session id (to exclude it)
@@ -69,6 +71,8 @@ export default async function WorkoutPage() {
           plannedSets: te.plannedSets,
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
+          videoUrl: te.exercise.videoUrl,
+          equipment: te.exercise.equipment,
           pendingSwapInExerciseId: swap?.id,
           pendingSwapInExerciseName: swap?.name,
         };
@@ -143,6 +147,7 @@ export default async function WorkoutPage() {
                 reps: s.reps,
                 weight: s.weight,
                 seconds: s.seconds,
+                bandId: s.bandId,
                 notes: s.notes,
               })),
             }
@@ -158,6 +163,7 @@ export default async function WorkoutPage() {
         videoUrl: e.videoUrl,
         isCustom: e.isCustom,
         metric: e.metric,
+        loadType: e.loadType,
         equipment: e.equipment,
         restTimerSecondsOverride: e.restTimerSecondsOverride,
         weightIncrementOverride: e.weightIncrementOverride,
@@ -186,6 +192,7 @@ export default async function WorkoutPage() {
         updatedAt: t.updatedAt.toISOString(),
       }))}
       routine={routineForView}
+      bands={bands}
     />
   );
 }

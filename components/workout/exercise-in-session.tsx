@@ -15,7 +15,6 @@ import {
   Check,
   ChevronUp,
   ChevronDown,
-  PlayCircle,
   Settings2,
   StickyNote,
   Replace,
@@ -24,6 +23,8 @@ import {
 import type { ExerciseInfo, SetLogClient } from './workout-view';
 import { estimateActiveExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
+import { VideoLink } from '@/components/ui/video-link';
+import { EquipmentChips } from '@/components/ui/equipment-chips';
 import {
   ExplainRestRanges,
   ExplainRIR,
@@ -31,9 +32,15 @@ import {
   ExplainWeightIncrement,
 } from '@/lib/explanations';
 
+type BandClient = { id: string; name: string; position: number };
+
 type Props = {
   exercise: ExerciseInfo;
   sets: SetLogClient[];
+  // The user's bands, used by set rows when exercise.loadType === 'band'.
+  // Empty array when the user has none seeded yet (the band selector renders
+  // a "set up bands in settings" affordance in that case).
+  bands: BandClient[];
   // Per-day, per-exercise free-text note the user wrote on the routine.
   // Read-only here — edits happen on the routine editor page. Null when
   // either the session wasn't started from a routine day or no note was set.
@@ -45,6 +52,7 @@ type Props = {
       reps: number | null;
       weight: number | null;
       seconds: number | null;
+      bandId: string | null;
       notes: string | null;
     }[];
   } | null;
@@ -56,13 +64,15 @@ type Props = {
   globalWeightIncrement: number;
   onAddSet: () => void;
   // Patch-shaped — caller sends only the fields it touched. reps/seconds are
-  // mutually exclusive in normal use, dictated by exercise.metric.
+  // mutually exclusive in normal use, dictated by exercise.metric. bandId is
+  // only sent for loadType='band' rows.
   onUpdateSet: (
     setLogId: string,
     patch: {
       reps?: number | null;
       weight?: number | null;
       seconds?: number | null;
+      bandId?: string | null;
     },
   ) => void;
   onUpdateNotes: (setLogId: string, notes: string) => void;
@@ -87,6 +97,7 @@ const INCREMENT_PRESETS = [1, 2.5, 5, 10];
 export function ExerciseInSession({
   exercise,
   sets,
+  bands,
   routineNote,
   lastTime,
   canMoveUp,
@@ -111,6 +122,14 @@ export function ExerciseInSession({
   const incrementOverridden = exercise.weightIncrementOverride !== null;
   const effectiveRest = exercise.restTimerSecondsOverride ?? globalRestSeconds;
   const effectiveIncrement = exercise.weightIncrementOverride ?? globalWeightIncrement;
+
+  // Load mode drives which input the set row renders for "load":
+  //   weight → numeric stepper (default)
+  //   band   → chip picker (Light / Medium / Heavy + user customizations)
+  //   none   → no load column at all
+  const loadMode: 'weight' | 'band' | 'none' =
+    exercise.loadType === 'band' ? 'band' : exercise.loadType === 'none' ? 'none' : 'weight';
+  const bandById = new Map(bands.map((b) => [b.id, b] as const));
 
   // The repeat-last chip shows whenever last-time exists. The user can tap it
   // mid-session if they want to revert any manual edits and snap to history.
@@ -140,18 +159,7 @@ export function ExerciseInSession({
                 Custom
               </span>
             )}
-            {exercise.videoUrl && (
-              <a
-                href={exercise.videoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-ink-500 hover:accent-text transition shrink-0"
-                aria-label={`Watch ${exercise.name} demonstration`}
-                title="Watch demo"
-              >
-                <PlayCircle size={14} />
-              </a>
-            )}
+            <VideoLink url={exercise.videoUrl} exerciseName={exercise.name} size={14} />
           </div>
 
           {/* Prescription + settings opener — same row, wraps on narrow screens */}
@@ -164,6 +172,7 @@ export function ExerciseInSession({
                 ~{formatEstimateCompact(exerciseEstimateSec)}
               </span>
             )}
+            <EquipmentChips equipment={exercise.equipment} />
             <button
               type="button"
               onClick={() => setSettingsOpen((e) => !e)}
@@ -321,11 +330,7 @@ export function ExerciseInSession({
               Last {lastTime.when}:{' '}
               <span className="accent-text">
                 {lastTime.sets
-                  .map((s) =>
-                    exercise.metric === 'time'
-                      ? `${s.seconds ?? '–'}s${s.weight ? `@${s.weight}` : ''}`
-                      : `${s.reps ?? '–'}×${s.weight ?? '–'}`,
-                  )
+                  .map((s) => formatLastSetSummary(s, exercise.metric, loadMode, bandById))
                   .join('  ')}
               </span>
             </div>
@@ -374,8 +379,9 @@ export function ExerciseInSession({
           <span className="flex-1 min-w-0 text-center">
             {exercise.metric === 'time' ? 'Sec' : 'Reps'}
           </span>
-          <span className="w-3 shrink-0" />
-          <span className="flex-1 min-w-0 text-center">Weight</span>
+          {loadMode !== 'none' && <span className="w-3 shrink-0" />}
+          {loadMode === 'weight' && <span className="flex-1 min-w-0 text-center">Weight</span>}
+          {loadMode === 'band' && <span className="flex-1 min-w-0 text-center">Band</span>}
           <span className="w-4 shrink-0" />
           <span className="w-7 shrink-0" />
           <span className="w-7 shrink-0" />
@@ -386,6 +392,8 @@ export function ExerciseInSession({
               key={set.id}
               set={set}
               metric={exercise.metric}
+              loadMode={loadMode}
+              bands={bands}
               increment={effectiveIncrement}
               onUpdate={(patch) => onUpdateSet(set.id, patch)}
               onUpdateNotes={(notes) => onUpdateNotes(set.id, notes)}
@@ -409,6 +417,8 @@ export function ExerciseInSession({
 function SetRow({
   set,
   metric,
+  loadMode,
+  bands,
   increment,
   onUpdate,
   onUpdateNotes,
@@ -416,11 +426,14 @@ function SetRow({
 }: {
   set: SetLogClient;
   metric: string;
+  loadMode: 'weight' | 'band' | 'none';
+  bands: BandClient[];
   increment: number;
   onUpdate: (patch: {
     reps?: number | null;
     weight?: number | null;
     seconds?: number | null;
+    bandId?: string | null;
   }) => void;
   onUpdateNotes: (notes: string) => void;
   onRemove: () => void;
@@ -536,41 +549,55 @@ function SetRow({
           aria-label={`Set ${set.setNumber} ${isTime ? 'seconds' : 'reps'}`}
           className="flex-1 min-w-0 bg-ink-950 border border-ink-800 rounded px-1 py-1.5 text-sm font-mono text-center focus:outline-none focus:border-accent/50"
         />
-        <span className="text-ink-700 text-[10px] shrink-0">{isTime ? 's' : '×'}</span>
-        {/* Stepper-flanked weight input. Buttons are tight so the trio reads as
-            one control rather than three loose elements. */}
-        <div className="flex-1 min-w-0 flex items-stretch border border-ink-800 rounded overflow-hidden bg-ink-950 focus-within:border-accent/50">
-          <button
-            type="button"
-            onClick={() => nudgeWeight(-1)}
-            className="w-7 shrink-0 text-ink-500 hover:text-ink-100 hover:bg-ink-900 transition flex items-center justify-center border-r border-ink-800"
-            aria-label={`Decrease weight by ${increment}`}
-            title={`-${increment}`}
-          >
-            <Minus size={12} />
-          </button>
-          <input
-            ref={weightRef}
-            type="number"
-            inputMode="decimal"
-            step={increment}
-            value={weight}
-            onChange={(e) => setWeight(e.target.value)}
-            onBlur={commit}
-            placeholder="–"
-            aria-label={`Set ${set.setNumber} weight`}
-            className="flex-1 min-w-0 bg-transparent px-0.5 py-1.5 text-sm font-mono text-center focus:outline-none"
+        {loadMode !== 'none' && (
+          <span className="text-ink-700 text-[10px] shrink-0">{isTime ? 's' : '×'}</span>
+        )}
+        {loadMode === 'weight' && (
+          /* Stepper-flanked weight input. Buttons are tight so the trio reads as
+              one control rather than three loose elements. */
+          <div className="flex-1 min-w-0 flex items-stretch border border-ink-800 rounded overflow-hidden bg-ink-950 focus-within:border-accent/50">
+            <button
+              type="button"
+              onClick={() => nudgeWeight(-1)}
+              className="w-7 shrink-0 text-ink-500 hover:text-ink-100 hover:bg-ink-900 transition flex items-center justify-center border-r border-ink-800"
+              aria-label={`Decrease weight by ${increment}`}
+              title={`-${increment}`}
+            >
+              <Minus size={12} />
+            </button>
+            <input
+              ref={weightRef}
+              type="number"
+              inputMode="decimal"
+              step={increment}
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              onBlur={commit}
+              placeholder="–"
+              aria-label={`Set ${set.setNumber} weight`}
+              className="flex-1 min-w-0 bg-transparent px-0.5 py-1.5 text-sm font-mono text-center focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => nudgeWeight(1)}
+              className="w-7 shrink-0 text-ink-500 hover:text-ink-100 hover:bg-ink-900 transition flex items-center justify-center border-l border-ink-800"
+              aria-label={`Increase weight by ${increment}`}
+              title={`+${increment}`}
+            >
+              <Plus size={12} />
+            </button>
+          </div>
+        )}
+        {loadMode === 'band' && (
+          <BandChipPicker
+            bands={bands}
+            selectedBandId={set.bandId}
+            onPick={(bandId) => {
+              onUpdate({ bandId });
+              flashSaved();
+            }}
           />
-          <button
-            type="button"
-            onClick={() => nudgeWeight(1)}
-            className="w-7 shrink-0 text-ink-500 hover:text-ink-100 hover:bg-ink-900 transition flex items-center justify-center border-l border-ink-800"
-            aria-label={`Increase weight by ${increment}`}
-            title={`+${increment}`}
-          >
-            <Plus size={12} />
-          </button>
-        </div>
+        )}
         {/* Saved indicator — shows a check briefly after commit. Fixed-width slot
             so adjacent buttons don't shift when it appears/disappears. */}
         <div className="w-4 shrink-0 flex items-center justify-center">
@@ -664,4 +691,78 @@ function formatWeight(weight: number | null): string {
 // repeated +/- presses don't accumulate float fuzz like 47.499999...
 function roundToIncrement(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+// Format one "last time" set into the compact "12×40" / "30s" / "12×medium"
+// string used by the last-time ref line. The load suffix flips on loadMode:
+//   weight → numeric (or '–' when unset)
+//   band   → the band's name (or '–' when the band has since been deleted)
+//   none   → no load suffix at all
+function formatLastSetSummary(
+  s: {
+    reps: number | null;
+    weight: number | null;
+    seconds: number | null;
+    bandId: string | null;
+  },
+  metric: string,
+  loadMode: 'weight' | 'band' | 'none',
+  bandById: Map<string, BandClient>,
+): string {
+  const primary = metric === 'time' ? `${s.seconds ?? '–'}s` : `${s.reps ?? '–'}`;
+  if (loadMode === 'none') return primary;
+  if (loadMode === 'band') {
+    const bandName = s.bandId ? (bandById.get(s.bandId)?.name ?? '(deleted)') : '–';
+    return metric === 'time' ? `${primary}@${bandName}` : `${primary}×${bandName}`;
+  }
+  // weight
+  const w = s.weight;
+  if (metric === 'time') return w ? `${primary}@${w}` : primary;
+  return `${primary}×${w ?? '–'}`;
+}
+
+// Inline band-strength chip selector for exercises with loadType='band'.
+// Compact horizontal list of the user's bands; tapping a chip commits
+// immediately (no blur dance, no local state to mirror) — this is a tap
+// target, not a typed input. Empty state nudges the user to the settings
+// page where the editor lives, rather than letting them create a band
+// inline (which would surprise people mid-set).
+function BandChipPicker({
+  bands,
+  selectedBandId,
+  onPick,
+}: {
+  bands: BandClient[];
+  selectedBandId: string | null;
+  onPick: (bandId: string) => void;
+}) {
+  if (bands.length === 0) {
+    return (
+      <div className="flex-1 min-w-0 text-[10px] italic font-display text-ink-500 text-center px-1">
+        Set up bands in <span className="accent-text">Settings → Bands</span>.
+      </div>
+    );
+  }
+  return (
+    <div className="flex-1 min-w-0 flex items-center gap-1 overflow-x-auto">
+      {bands.map((b) => {
+        const isMine = b.id === selectedBandId;
+        return (
+          <button
+            key={b.id}
+            type="button"
+            onClick={() => onPick(b.id)}
+            aria-pressed={isMine}
+            className={`text-[10px] font-mono px-2 py-1 rounded-full border transition shrink-0 ${
+              isMine
+                ? 'accent-bg text-ink-950 border-transparent'
+                : 'border-ink-800 text-ink-300 hover:border-ink-600'
+            }`}
+          >
+            {b.name}
+          </button>
+        );
+      })}
+    </div>
+  );
 }

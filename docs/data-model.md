@@ -12,7 +12,7 @@ Five groups of models:
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Auth.js adapter tables          | `User`, `Account`, `AuthSession`, `VerificationToken`                                                                      | Managed by the `@auth/prisma-adapter`. The app reads `User.id` to scope everything; the rest is opaque infrastructure.                                                       |
 | Core domain                     | `Exercise`, `WorkoutSession`, `SetLog`                                                                                     | The spine of the app. Every workout is a session containing setLogs that reference exercises.                                                                                |
-| User-customization layer        | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, saved workout lineups, and per-user hide markers for built-in templates.                                               |
+| User-customization layer        | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `Band`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, the user's resistance-band list, saved workout lineups, and per-user hide markers for built-in templates.              |
 | Routines                        | `Routine`, `RoutineDay`, `RoutineDayPendingSwap`                                                                           | The user's named cycle of templates and any one-time substitutions staged for upcoming days. Capped at 7 days per routine.                                                   |
 | Routine sharing + notifications | `RoutineShare`, `ShareReviewer`, `ShareComment`, `ShareSuggestion`, `ShareReaction`, `Notification`                        | Owner-minted share links, anonymous-by-cookie reviewer identities, and the in-app inbox the owner reviews. See [decisions.md](./decisions.md) for the philosophical framing. |
 
@@ -126,6 +126,7 @@ Key behaviors:
 - **Soft-delete via `deletedAt`.** When a user removes a custom, the row stays — historical SetLogs still reference it. All exercise-listing queries must filter `deletedAt: null`.
 - **Multi-muscle credit, weighted.** `primaryMuscles[]` count 1.0 per set toward volume; `secondaryMuscles[]` count 0.5. Coverage (recency) treats them equally — see [`docs/decisions.md`](./decisions.md).
 - **`module` is a tag, not a constraint.** Exercises group visually under `Activation Lower`, `Strength Barbell`, etc., but modules don't drive session structure.
+- **`loadType` decides the load input shape.** `'weight'` (default) shows the numeric stepper, `'band'` swaps to a chip picker of the user's `Band` rows, `'none'` hides the load column entirely (mobility / SMR / bodyweight balance work). Independent of `metric` — a `loadType='none'` exercise can still be reps or time.
 
 ### `WorkoutSession`
 
@@ -145,6 +146,7 @@ Key behaviors:
 
 - **Two ordering fields with different scopes.** `setNumber` is contiguous from 1 within `(sessionId, exerciseId)` — used for "set 1, set 2, set 3 of the deadlift." `position` is the order of the _exercise_ within the session, shared by every SetLog of that exercise. Don't mix them.
 - **`Restrict` on the Exercise relation, not Cascade.** A user can soft-delete a custom exercise even when historical SetLogs reference it; the soft-delete preserves history. A literal hard-delete would be blocked at the DB level.
+- **`weight` and `bandId` are mutually exclusive.** The exercise's `loadType` dictates which is meaningful: `'weight'` → numeric weight, `'band'` → bandId, `'none'` → both null. `updateSet` clears `weight` when `bandId` is set so the two never both populate. `SetLog.bandId` is `SetNull` on Band delete so history survives.
 - **`notes` is per-set freeform text.** Surfaced in the "last time" reference next session. Empty stored as null.
 
 ## The customization layer
@@ -187,6 +189,14 @@ Per-(user, muscle) override of the weekly volume target. Default targets live as
 One row per user, **lazily created on first write**. The query `getUserPreferences()` returns hard-coded defaults when no row exists, so reading is cheap on every page load and we only write when something actually changes.
 
 Fields cover rest-timer behaviour (`restTimerEnabled`, `restTimerSeconds`, `restTimerSound`, `restTimerVibrate`), workout defaults (`defaultSetsPerExercise`, `defaultWeightIncrement`), and the `volumeTier` preset that drives the coverage view's (min, target) bounds (`'maintenance' | 'balanced' | 'athlete'`, default `'balanced'`). The tier scales the canonical numbers on each `MUSCLE_GROUP`; `UserVolumeTarget` overrides still win on top of it. See `lib/coverage.ts` for the resolver.
+
+### `Band`
+
+Per-user resistance band list. Surfaces as the chip-picker on the set row whenever the source exercise has `loadType='band'` — the picker replaces the numeric weight stepper. `SetLog.bandId` is the FK back; `SetNull` so historical logs survive when a band is renamed-by-delete-and-recreate (the UI renders the missing band as "(deleted)").
+
+**Lazily seeded** on first read. `getUserBands` creates Light / Medium / Heavy when the user has none yet, so most users land in the band picker with three rows already populated and can rename to match what they actually own ("orange", "red", etc.). Settings exposes a full CRUD editor.
+
+Two unique constraints (`(userId, name)` and `(userId, position)`) keep the picker order stable and prevent duplicates; `deleteBand` compacts positions after a delete so there are no gaps in the chip row.
 
 ## Routines
 
