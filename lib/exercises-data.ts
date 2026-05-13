@@ -158,6 +158,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1–2 min per leg, slow passes',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=1XzS9y-vJD8',
   },
   {
     name: 'Foam roll IT band / outer thigh',
@@ -165,6 +166,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, ease into tender spots',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=Zt7GPR2GvTo',
   },
   {
     name: 'Foam roll glutes / piriformis',
@@ -172,6 +174,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, lacrosse ball OK for depth',
     equipment: ['foam roller', 'lacrosse ball', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=zSYOUFpDZlk',
   },
   {
     name: 'Foam roll calves',
@@ -179,6 +182,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per leg',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=nZZe9ai7Vvw',
   },
 
   // ============ SMR UPPER ============
@@ -188,6 +192,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue', 't-spine mobility'],
     prescription: '5–8 slow extensions per spinal segment',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=81kPLsMt6wY',
   },
   {
     name: 'Foam roll lats',
@@ -195,6 +200,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=gR0AQOFORuE',
   },
   {
     name: 'Lacrosse ball pec / anterior shoulder',
@@ -202,6 +208,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side, against a wall',
     equipment: ['lacrosse ball'],
+    videoUrl: 'https://www.youtube.com/watch?v=9UpkI8Z77Vs',
   },
 
   // ============ SMR TRUNK ============
@@ -211,6 +218,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min per side',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=Mgua1zOzD0U',
   },
   {
     name: 'Foam roll mid-back',
@@ -218,6 +226,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['soft tissue'],
     prescription: '1 min, slow passes',
     equipment: ['foam roller', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=81J-U89UaR0',
   },
 
   // ============ ACTIVATION LOWER ============
@@ -227,6 +236,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes'],
     prescription: '3×12, 5-sec hold at top, 3-sec abduction press',
     equipment: ['bands', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=iVptDu761SM',
   },
   {
     name: 'Lateral band walks',
@@ -234,6 +244,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes'],
     prescription: '2×10 each direction',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=MZ1HbVflLUI',
   },
   {
     name: 'Monster walks',
@@ -241,6 +252,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes'],
     prescription: '2×10 each direction',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=snbNxUIUQPc',
   },
   {
     name: 'Standing banded scissors',
@@ -248,6 +260,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes'],
     prescription: '2×10',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/QcbNrPmicDM',
   },
   {
     name: 'Reverse / walking lunges',
@@ -255,6 +268,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes', 'quads'],
     secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '2×8 per side',
+    videoUrl: 'https://www.youtube.com/watch?v=vrZc0QKu90Y',
   },
   {
     name: 'Banded clamshells',
@@ -262,6 +276,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes'],
     prescription: '2×12 per side',
     equipment: ['bands', 'mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=QjKyGqrAaP4',
   },
   {
     name: 'Bodyweight glute bridge',
@@ -270,6 +285,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['hamstrings'],
     prescription: '2×12, 2-sec hold at top',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=Cj5zDEgmumA',
   },
 
   // ============ MOBILITY LOWER ============
@@ -279,12 +295,14 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['hip mobility'],
     prescription: '6–8 per side, controlled',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=m51AZSXMvEA',
   },
   {
     name: 'Deep squat with reach',
     module: 'Mobility Lower',
     primaryMuscles: ['hip mobility', 'ankle mobility'],
     prescription: '5 reaches per side',
+    videoUrl: 'https://www.youtube.com/watch?v=Zv1wILGzeec',
   },
   {
     name: 'Half-kneeling hip flexor stretch',
@@ -292,12 +310,14 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['hip flexors'],
     prescription: '30s per side, with overhead reach',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=gqoPYLUgP48',
   },
   {
     name: 'Ankle rocks',
     module: 'Mobility Lower',
     primaryMuscles: ['ankle mobility'],
     prescription: '10 per side',
+    videoUrl: 'https://www.youtube.com/watch?v=WBD8DJ2du8I',
   },
   {
     name: 'Couch stretch',
@@ -306,6 +326,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['quads'],
     prescription: '30–45s per side',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=Fg-lwNBzVV8',
   },
   {
     name: 'Hamstring strap stretch',
@@ -313,6 +334,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['hamstrings'],
     prescription: '1min per leg, 3 sets, nasal breathing',
     equipment: ['mat', 'bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=Il1L75v6gq0',
   },
   {
     name: 'Adductor rocks',
@@ -320,6 +342,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['adductors'],
     prescription: '8–10 per side',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=FkxBaLFrlSE',
   },
 
   // ============ MOBILITY UPPER ============
@@ -329,6 +352,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['t-spine mobility', 'shoulder mobility'],
     prescription: '6–8 per side, controlled',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=MfUx9FCOb1E',
   },
   {
     name: 'Quadruped T-spine rotations',
@@ -336,12 +360,14 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['t-spine mobility'],
     prescription: '6–8 per side, hand behind head',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=AzCghjjWt5k',
   },
   {
     name: 'Doorway pec stretch',
     module: 'Mobility Upper',
     primaryMuscles: ['shoulder mobility'],
     prescription: '30s per side',
+    videoUrl: 'https://www.youtube.com/watch?v=B9uY01NoqBg',
   },
   {
     name: 'Sleeper stretch',
@@ -349,6 +375,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['shoulder mobility'],
     prescription: '30s per side, side-lying',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/shorts/8QDo3U55IYc',
   },
 
   // ============ MOBILITY TRUNK ============
@@ -357,6 +384,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     module: 'Mobility Trunk',
     primaryMuscles: ['hip mobility', 't-spine mobility'],
     prescription: '5 reaches per side',
+    videoUrl: 'https://www.youtube.com/watch?v=-CiWQ2IvY34',
   },
   {
     name: 'Cat-cow',
@@ -364,6 +392,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['t-spine mobility'],
     prescription: '8–10 reps, slow with breath',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=LIVJZZyZ2qM',
   },
   {
     name: 'Supine spinal twist',
@@ -371,6 +400,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['t-spine mobility'],
     prescription: '30s per side',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=mNdJti7ZwKI',
   },
   {
     name: "Child's pose with reach",
@@ -378,6 +408,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['shoulder mobility', 't-spine mobility'],
     prescription: '30s per side, reach hand under',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=kFl8A5vZKp0',
   },
 
   // ============ ACTIVATION TRUNK ============
@@ -387,6 +418,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['core'],
     prescription: '2×8 per side, slow with breath',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=o4GKiEoYClI',
   },
   {
     name: 'Bird dog',
@@ -395,6 +427,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['glutes', 'lower back'],
     prescription: '2×8 per side, hold the top',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=k2azbhhuKuM',
   },
   {
     name: 'Side plank',
@@ -403,6 +436,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '2×20–30s per side',
     metric: 'time',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=NXr4Fw8q60o',
   },
   {
     name: 'Hollow hold',
@@ -411,6 +445,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '2×20–30s, lower back pressed down',
     metric: 'time',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=EsnM8eBtazU',
   },
   {
     name: 'Bird dog hold',
@@ -420,6 +455,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '2×20s per side, ribs square',
     metric: 'time',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=1QSrCGRxEyM',
   },
   {
     name: 'Bear hold',
@@ -429,6 +465,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '2×20–30s, knees hovering 1 inch',
     metric: 'time',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=hePvEr_iYRE',
   },
 
   // ============ STRENGTH BARBELL ============
@@ -444,6 +481,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['back', 'quads', 'lower back'],
     prescription: '4×5–6, heels loaded, ribs stacked',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/watch?v=1jC_nqcSCp8',
   },
   {
     name: 'Romanian deadlift',
@@ -452,6 +490,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['back', 'lower back'],
     prescription: '3–4×6–8, soft knees, push hips back',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/watch?v=7j-2w4-P14I',
   },
   {
     name: 'Hang clean (above knee)',
@@ -460,6 +499,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['scapular', 'shoulders'],
     prescription: '4–5×3, aggressive triple extension',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/watch?v=n6lRtVV7LYY',
   },
   {
     name: 'Front squat',
@@ -471,6 +511,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['core', 'scapular', 'adductors', 'back', 'lower back'],
     prescription: '3–4×5, upright torso, active T-spine',
     equipment: ['barbell', 'rack'],
+    videoUrl: 'https://www.youtube.com/watch?v=uYumuL_G_V0',
   },
   {
     name: 'Back squat',
@@ -479,6 +520,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['core', 'lower back', 'adductors'],
     prescription: '3–5×5, brace, full depth',
     equipment: ['barbell', 'rack'],
+    videoUrl: 'https://www.youtube.com/watch?v=QmZAiBqPvZw',
   },
   {
     name: 'Conventional deadlift',
@@ -487,6 +529,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower back', 'core'],
     prescription: '3×3–5, hips and shoulders rise together',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/watch?v=AweC3UaM14o',
   },
   {
     name: 'Bench press',
@@ -495,6 +538,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['shoulders', 'triceps'],
     prescription: '3–5×5–8, scaps tucked, controlled descent',
     equipment: ['barbell', 'bench', 'rack'],
+    videoUrl: 'https://www.youtube.com/shorts/0cXAp6WhSj4',
   },
   {
     name: 'Overhead press',
@@ -503,6 +547,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['triceps', 'core'],
     prescription: '3–4×5–8, ribs down, glutes squeezed',
     equipment: ['barbell', 'rack'],
+    videoUrl: 'https://www.youtube.com/watch?v=cGnhixvC8uA',
   },
   {
     name: 'Barbell row',
@@ -511,6 +556,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3–4×6–10, torso ~45°, pull to lower ribs',
     equipment: ['barbell'],
+    videoUrl: 'https://www.youtube.com/shorts/HamNqVyElPc',
   },
 
   // ============ STRENGTH ACCESSORY ============
@@ -527,6 +573,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['adductors'],
     prescription: '3–4×8 per side',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/shorts/or1frhkjBDc',
   },
   {
     name: 'Lateral bench step-ups',
@@ -534,6 +581,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes', 'quads'],
     prescription: '3–4×8 per side',
     equipment: ['bench'],
+    videoUrl: 'https://www.youtube.com/watch?v=qOoGlEXfsS0',
   },
   {
     name: 'Eccentric slow step-downs',
@@ -542,6 +590,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['glutes'],
     prescription: '3–4×6 per side, 3-sec lower',
     equipment: ['bench'],
+    videoUrl: 'https://www.youtube.com/watch?v=SZXOPRVP1Oc',
   },
   {
     name: 'Bulgarian long-distance squat',
@@ -550,6 +599,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['quads', 'adductors'],
     prescription: '3–4×8 per side',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/shorts/uBSoEWZu07k',
   },
   {
     name: 'Physio ball hamstring bridges',
@@ -558,6 +608,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['glutes'],
     prescription: '3×8–10, flutter kicks between sets',
     equipment: ['physio ball', 'mat'],
+    videoUrl: 'https://www.youtube.com/shorts/s7fn90Jwn_4',
   },
   {
     name: 'Posterior chain leg lifts (ball)',
@@ -566,6 +617,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower back'],
     prescription: '3×10, 5-sec hold with band tension',
     equipment: ['physio ball', 'bands'],
+    videoUrl: 'https://www.youtube.com/shorts/VTYEKnUDTZ8',
   },
 
   // --- Dumbbell-tier accessories ---
@@ -576,6 +628,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['core', 'adductors'],
     prescription: '3–4×8–12, elbows tucked, upright torso',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/lRYBbchqxtI',
   },
   {
     name: 'Dumbbell RDL',
@@ -584,6 +637,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower back'],
     prescription: '3×8–10, soft knees, hinge from hips',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/CBOhr6H7BEY',
   },
   {
     name: 'Dumbbell deadlift',
@@ -592,6 +646,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower back'],
     prescription: '3×8–10, dumbbells outside knees',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/watch?v=JNpUNRPQkAk',
   },
   {
     name: 'Dumbbell bench press',
@@ -600,6 +655,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['shoulders', 'triceps'],
     prescription: '3–4×8–12, neutral grip joint-friendly',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/shorts/Cj96ZZlmJRU',
   },
   {
     name: 'Dumbbell shoulder press',
@@ -608,6 +664,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['triceps'],
     prescription: '3×8–12, neutral or pronated grip',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/k6tzKisR3NY',
   },
   {
     name: 'Seated dumbbell shoulder press',
@@ -616,6 +673,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['triceps'],
     prescription: '3×8–12, back supported',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/shorts/E9ShwbwZ1zw',
   },
   {
     name: 'Single-arm dumbbell row',
@@ -624,6 +682,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3–4×8–12 per side, brace on bench',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/shorts/yHqqGd0tXcw',
   },
   {
     name: 'Chest-supported dumbbell row',
@@ -632,6 +691,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×10–12, incline bench, low-back-friendly',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/watch?v=DIS839guYUk',
   },
   {
     name: 'Dumbbell walking lunges',
@@ -640,6 +700,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '3×8 per leg, knee tracks toes',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/mJilHWIBWO8',
   },
   {
     name: 'Dumbbell hip thrust',
@@ -648,6 +709,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['hamstrings'],
     prescription: '3×8–12, pause at top',
     equipment: ['dumbbells', 'bench', 'mat'],
+    videoUrl: 'https://www.youtube.com/shorts/wYT_Ru0yGD0',
   },
   {
     name: 'Dumbbell skullcrusher',
@@ -655,6 +717,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['triceps'],
     prescription: '3×10–12, neutral grip, elbows tracked',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/shorts/iuYB_fLp26Q',
   },
   {
     name: 'Dumbbell shrug',
@@ -662,6 +725,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['back'],
     prescription: '3×10–12, straight up and down',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/j2-RccWDhDo',
   },
 
   // --- Bands-only accessories ---
@@ -671,6 +735,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['quads', 'glutes'],
     prescription: '3×12–15, stand on band, full depth',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/uEH8EqCHnFA',
   },
   {
     name: 'Banded RDL',
@@ -678,6 +743,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['hamstrings', 'glutes'],
     prescription: '3×12–15, hinge with band tension',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/jaRAR9l1e2o',
   },
   {
     name: 'Banded deadlift',
@@ -686,6 +752,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower back'],
     prescription: '3×10–15, stand on band, drive through floor',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=obM6SBVa-MU',
   },
   {
     name: 'Banded chest press',
@@ -694,6 +761,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['shoulders', 'triceps'],
     prescription: '3×12–15, anchor behind, press forward',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/T0UJ0W-_yIE',
   },
   {
     name: 'Banded row',
@@ -702,6 +770,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×12–15, anchor in front, pull to ribs',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/hqFwwv6dFGY',
   },
   {
     name: 'Banded pulldown',
@@ -710,6 +779,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'lower traps'],
     prescription: '3×10–15, anchor overhead, pull to chest',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=X_E7iiSsklI',
   },
   {
     name: 'Banded shoulder press',
@@ -718,6 +788,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['triceps'],
     prescription: '3×10–15, stand on band, press overhead',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/1-VfJqjYquQ',
   },
   {
     name: 'Banded curl',
@@ -725,6 +796,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['biceps'],
     prescription: '3×12–15, stand on band, elbows pinned',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/20xtfGZ37nw',
   },
   {
     name: 'Banded tricep extension',
@@ -732,6 +804,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['triceps'],
     prescription: '3×12–15, anchor overhead, elbows fixed',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/xPgtezPGbOk',
   },
   {
     name: 'Banded hip thrust',
@@ -740,6 +813,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['hamstrings'],
     prescription: '3×10–15, band across hips, pause at top',
     equipment: ['bands', 'bench', 'mat'],
+    videoUrl: 'https://www.youtube.com/shorts/pSwLdoIwPik',
   },
   {
     name: 'Banded lateral raise',
@@ -747,6 +821,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['shoulders'],
     prescription: '3×12–15, light tension',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=yfNg5sFndbw',
   },
 
   // --- Bodyweight-only accessories ---
@@ -755,6 +830,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     module: 'Strength Accessory',
     primaryMuscles: ['quads', 'glutes'],
     prescription: '3×15–20, full depth',
+    videoUrl: 'https://www.youtube.com/watch?v=8uoaYwS6iFM',
   },
   {
     name: 'Pistol squat (assisted)',
@@ -763,6 +839,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['core'],
     prescription: '3×5–8 per side, sit to bench / hold support',
     equipment: ['bench'],
+    videoUrl: 'https://www.youtube.com/shorts/fUGQ7oMEIFI',
   },
   {
     name: 'Walking lunges',
@@ -770,6 +847,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['quads', 'glutes'],
     secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '3×8 per leg, controlled',
+    videoUrl: 'https://www.youtube.com/watch?v=L8fvypPrzzs',
   },
   {
     name: 'Reverse lunges',
@@ -777,6 +855,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['glutes', 'quads'],
     secondaryMuscles: ['hamstrings', 'adductors'],
     prescription: '3×10 per side, knee-friendly version of forward lunge',
+    videoUrl: 'https://www.youtube.com/shorts/b_2qgdXT_QQ',
   },
   {
     name: 'Box step-ups',
@@ -784,6 +863,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['quads', 'glutes'],
     prescription: '3×10 per side, full leg drive',
     equipment: ['bench'],
+    videoUrl: 'https://www.youtube.com/shorts/j8KN0jwWaRA',
   },
   {
     name: 'Single-leg RDL',
@@ -791,6 +871,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['hamstrings', 'glutes'],
     secondaryMuscles: ['lower back'],
     prescription: '3×8 per side, hinge with control',
+    videoUrl: 'https://www.youtube.com/shorts/wHktyQBgejo',
   },
   {
     name: 'Bodyweight hip thrust',
@@ -799,6 +880,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['hamstrings'],
     prescription: '3×12–15, shoulders on bench, drive through heels',
     equipment: ['bench', 'mat'],
+    videoUrl: 'https://www.youtube.com/shorts/tqGid2LoyEw',
   },
   {
     name: 'Knee push-ups',
@@ -807,6 +889,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['triceps', 'shoulders'],
     prescription: '3×AMRAP, body straight from knees',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/shorts/rrVwNeIpy-k',
   },
   {
     name: 'Decline push-ups',
@@ -815,6 +898,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['triceps', 'core'],
     prescription: '3×AMRAP, feet on bench',
     equipment: ['bench'],
+    videoUrl: 'https://www.youtube.com/shorts/dcV-ATSeryA',
   },
   {
     name: 'Diamond push-ups',
@@ -822,6 +906,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['triceps'],
     secondaryMuscles: ['chest', 'shoulders'],
     prescription: '3×AMRAP, hands close, elbows tracked',
+    videoUrl: 'https://www.youtube.com/shorts/PPTj-MW2tcs',
   },
   {
     name: 'Pike push-ups',
@@ -829,6 +914,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['shoulders'],
     secondaryMuscles: ['triceps', 'core'],
     prescription: '3×AMRAP, hips high, elbows in',
+    videoUrl: 'https://www.youtube.com/shorts/V6BtY3Lt0Ys',
   },
   {
     name: 'Inverted row',
@@ -837,6 +923,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×AMRAP, bar low in rack, body straight',
     equipment: ['rack', 'barbell'],
+    videoUrl: 'https://www.youtube.com/watch?v=9fItzuh9Iok',
   },
   {
     name: 'Ring rows',
@@ -845,6 +932,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3×AMRAP, adjust angle for difficulty',
     equipment: ['rings'],
+    videoUrl: 'https://www.youtube.com/watch?v=B90sF7dbP04',
   },
   {
     name: 'Chin-ups',
@@ -853,6 +941,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower traps'],
     prescription: '3×AMRAP or weighted 5–8, supinated grip',
     equipment: ['pull-up bar'],
+    videoUrl: 'https://www.youtube.com/shorts/Oi3bW9nQmGI',
   },
   {
     name: 'Bench dips',
@@ -861,6 +950,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['chest', 'shoulders'],
     prescription: '3×AMRAP, hands behind on bench',
     equipment: ['bench'],
+    videoUrl: 'https://www.youtube.com/shorts/4ua3MzaU0QU',
   },
   {
     name: 'Dips',
@@ -869,6 +959,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['shoulders'],
     prescription: '3×AMRAP or weighted 5–8',
     equipment: ['dip bar'],
+    videoUrl: 'https://www.youtube.com/shorts/_HxxBada6Jw',
   },
   {
     name: 'Wall sit',
@@ -877,6 +968,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['glutes'],
     prescription: '3×30–60s, thighs parallel to floor',
     metric: 'time',
+    videoUrl: 'https://www.youtube.com/shorts/mDdLC-yKudY',
   },
 
   // --- Machine / cable accessories (full-gym tier) ---
@@ -887,6 +979,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'lower traps'],
     prescription: '3–4×AMRAP or weighted 5–8',
     equipment: ['pull-up bar'],
+    videoUrl: 'https://www.youtube.com/shorts/WqCXcFrA1Iw',
   },
   {
     name: 'Lat pulldown',
@@ -895,6 +988,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'lower traps'],
     prescription: '3–4×8–12, full stretch at top',
     equipment: ['cable'],
+    videoUrl: 'https://www.youtube.com/shorts/bNmvKpJSWKM',
   },
   {
     name: 'Cable row',
@@ -903,6 +997,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['biceps', 'rear delts', 'lower traps'],
     prescription: '3–4×8–12, controlled tempo',
     equipment: ['cable'],
+    videoUrl: 'https://www.youtube.com/shorts/qD1WZ5pSuvk',
   },
   {
     name: 'Leg press',
@@ -910,6 +1005,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['quads', 'glutes'],
     prescription: '3–4×8–12, knees track toes',
     equipment: ['machine'],
+    videoUrl: 'https://www.youtube.com/shorts/EotSw18oR9w',
   },
   {
     name: 'Leg curl',
@@ -917,6 +1013,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['hamstrings'],
     prescription: '3×10–12',
     equipment: ['machine'],
+    videoUrl: 'https://www.youtube.com/shorts/xdbEG3xGLI8',
   },
   {
     name: 'Incline dumbbell press',
@@ -925,6 +1022,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['shoulders', 'triceps'],
     prescription: '3–4×8–12',
     equipment: ['dumbbells', 'bench'],
+    videoUrl: 'https://www.youtube.com/shorts/8fXfwG4ftaQ',
   },
   {
     name: 'Push-ups',
@@ -932,6 +1030,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['chest'],
     secondaryMuscles: ['triceps', 'shoulders', 'core'],
     prescription: '3×AMRAP, body straight',
+    videoUrl: 'https://www.youtube.com/shorts/pKZ-lkKKMws',
   },
   {
     name: 'Lateral raises',
@@ -939,6 +1038,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['shoulders'],
     prescription: '3–4×10–15, light, controlled',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/Kl3LEzQ5Zqs',
   },
   {
     name: 'Bicep curl',
@@ -946,6 +1046,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['biceps'],
     prescription: '3×8–12',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/MKWBV29S6c0',
   },
   {
     name: 'Hammer curl',
@@ -953,6 +1054,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['biceps'],
     prescription: '3×10–12, neutral grip',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/lmIo_gVE8T4',
   },
   {
     name: 'Tricep pushdown',
@@ -960,6 +1062,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['triceps'],
     prescription: '3×10–15',
     equipment: ['cable'],
+    videoUrl: 'https://www.youtube.com/shorts/1FjkhpZsaxc',
   },
   {
     name: 'Overhead tricep extension',
@@ -967,6 +1070,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['triceps'],
     prescription: '3×10–12, full stretch overhead',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/b_r_LW4HEcM',
   },
   {
     name: 'Plank',
@@ -975,6 +1079,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '3×30–60s, ribs down, glutes engaged',
     metric: 'time',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/shorts/xe2MXatLTUw',
   },
 
   // ============ STRENGTH THORACIC ============
@@ -988,6 +1093,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower traps'],
     prescription: '3×12–15, arms straight',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/SuvO4TBwSu4',
   },
   {
     name: 'Half-kneeling Pallof press',
@@ -996,6 +1102,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['scapular'],
     prescription: '3×8 per side, anti-rotation',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/watch?v=LpBNsIv2olo',
   },
   {
     name: 'Prone press-ups (cobra)',
@@ -1004,6 +1111,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['lower back'],
     prescription: '2×10, hips down, smooth extension',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/watch?v=Z1IM_NDRWn4',
   },
   {
     name: 'Reverse fly',
@@ -1012,6 +1120,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['scapular', 'lower traps'],
     prescription: '3×10–12, light DB or band',
     equipment: ['dumbbells'],
+    videoUrl: 'https://www.youtube.com/shorts/LsT-bR_zxLo',
   },
 
   // ============ ACTIVATION UPPER ============
@@ -1021,6 +1130,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['scapular'],
     prescription: '3×10, 5-sec hold, build to 12 then 15',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/PcwVgs0Ao5c',
   },
   {
     name: 'Leaning wall push',
@@ -1028,6 +1138,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['chest'],
     secondaryMuscles: ['scapular'],
     prescription: '2×10',
+    videoUrl: 'https://www.youtube.com/shorts/dJUYVtOtf14',
   },
   {
     name: 'Banded face pulls',
@@ -1036,6 +1147,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     secondaryMuscles: ['back', 'scapular', 'lower traps'],
     prescription: '2×12',
     equipment: ['bands'],
+    videoUrl: 'https://www.youtube.com/shorts/1s-0WtJMsu8',
   },
   {
     name: 'Prone Y raises',
@@ -1043,12 +1155,14 @@ export const SEED_EXERCISES: SeedExercise[] = [
     primaryMuscles: ['lower traps'],
     prescription: '2×8',
     equipment: ['mat'],
+    videoUrl: 'https://www.youtube.com/shorts/cYLucJwoiFI',
   },
   {
     name: 'Scapular wall slides',
     module: 'Activation Upper',
     primaryMuscles: ['scapular'],
     prescription: '2×8',
+    videoUrl: 'https://www.youtube.com/shorts/i_0zLUcE-zk',
   },
 
   // ============ BALANCE ============
@@ -1059,6 +1173,7 @@ export const SEED_EXERCISES: SeedExercise[] = [
     prescription: '1min per side, alternating, 3 rounds',
     metric: 'time',
     equipment: ['airex pad'],
+    videoUrl: 'https://www.youtube.com/watch?v=fYOOCUs33xQ',
   },
   {
     name: 'BOSU dome single-leg holds',
