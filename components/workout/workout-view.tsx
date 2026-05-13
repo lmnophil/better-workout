@@ -539,7 +539,7 @@ export function WorkoutView({
           availableExercises={availableExercises}
         />
       ) : (
-        <div className="px-5 space-y-3">
+        <div className="px-5 space-y-4">
           {(() => {
             // Walk exercises in position order; emit a section header each time
             // the module changes. Preserves the user's reorders (so a Mobility
@@ -556,15 +556,20 @@ export function WorkoutView({
               if (exercise.module !== lastModule) {
                 const description = moduleDescription(exercise.module);
                 elements.push(
-                  <div key={`module-${idx}`} className="pt-2 pb-1 first:pt-0">
-                    <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
-                      {exercise.module}
-                    </div>
-                    {description && (
-                      <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
-                        {description}
+                  <div
+                    key={`module-${idx}`}
+                    className="pt-4 first:pt-0 border-t border-ink-800/60 first:border-t-0"
+                  >
+                    <div className="pt-3 first:pt-0 pb-1">
+                      <div className="text-xs tracking-[0.22em] uppercase text-ink-200 font-medium">
+                        {exercise.module}
                       </div>
-                    )}
+                      {description && (
+                        <div className="text-[11px] text-ink-500 italic font-display leading-snug mt-1">
+                          {description}
+                        </div>
+                      )}
+                    </div>
                   </div>,
                 );
                 lastModule = exercise.module;

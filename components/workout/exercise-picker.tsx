@@ -36,6 +36,12 @@ import {
   balanceHint,
   chipMuscleHint,
 } from '@/lib/area-filter';
+import {
+  type Region,
+  REGION_STYLES,
+  regionForExercise,
+  regionFromMuscleId,
+} from '@/lib/region-color';
 import type { ExerciseInfo } from './workout-view';
 import { usePrefs } from '@/components/ui/prefs-context';
 import {
@@ -447,6 +453,8 @@ function BrowseTab({
                 key={r.id}
                 active={regionIds.includes(r.id)}
                 onClick={() => toggleRegion(r.id)}
+                // "Full body" is a no-filter pseudo-region — no region color.
+                region={r.id === 'full' ? null : (r.id as Region)}
                 title={
                   r.id === 'full'
                     ? 'No filter — show every exercise.'
@@ -464,6 +472,9 @@ function BrowseTab({
                 active={muscleChipIds.includes(m.id)}
                 onClick={() => toggleMuscle(m.id)}
                 variant="muscle"
+                // Inherit the region from the chip's first muscle — Chest →
+                // upper (teal), Quads → lower (violet), Core → core (rose).
+                region={regionFromMuscleId(m.muscles[0])}
                 title={chipMuscleHint(m.muscles)}
               >
                 {m.label}
@@ -542,14 +553,14 @@ function BrowseTab({
                 });
               }
               return (
-                <div key={module} className="mb-5">
-                  <div className="mb-2 flex items-start justify-between gap-2">
+                <div key={module} className="mb-6">
+                  <div className="mb-2.5 flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500">
+                      <div className="text-xs tracking-[0.22em] uppercase text-ink-200 font-medium">
                         {module}
                       </div>
                       {description && (
-                        <div className="text-[10px] text-ink-600 italic font-display leading-snug mt-0.5">
+                        <div className="text-[11px] text-ink-500 italic font-display leading-snug mt-1">
                           {description}
                         </div>
                       )}
@@ -574,18 +585,20 @@ function BrowseTab({
                       const isSelected = selected.has(ex.id);
                       const gapHits = gapHitsById.get(ex.id);
                       const fillsGap = !isSelected && gapHits !== undefined;
-                      // Highlight is intentionally quiet: a left-edge accent
-                      // stripe (like a bookmark) + the chip badge below. The
-                      // row's other three borders stay ink so unselected
-                      // gap-fillers don't shout next to the muscle chip row
-                      // above them. Selected wins visually with the full
-                      // accent border.
+                      const region = regionForExercise(ex);
+                      const regionStyles = REGION_STYLES[region];
+                      // Three states, in priority order:
+                      // 1) Selected → full accent border + tinted fill (wins).
+                      // 2) Fills a coverage gap → accent left-stripe (the gap
+                      //    signal trumps region color so the user notices it).
+                      // 3) Default → region-tinted left-stripe so the eye
+                      //    groups exercises by what they target at a glance.
                       const baseBorder = 'border border-ink-800';
                       const rowClass = isSelected
                         ? 'border accent-border bg-accent/5'
                         : fillsGap
                           ? `${baseBorder} border-l-2 border-l-accent/60 hover:border-accent/40`
-                          : `${baseBorder} hover:border-accent/40`;
+                          : `${baseBorder} ${regionStyles.leftBorderThick} hover:border-accent/40`;
                       return (
                         <div
                           key={ex.id}
@@ -762,29 +775,41 @@ function ChipButton({
   onClick,
   children,
   variant = 'region',
+  region,
   title,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
   variant?: 'region' | 'muscle';
+  // The body region the chip belongs to. Region chips obviously map 1:1;
+  // muscle chips inherit from their primary muscle group (Chest → upper,
+  // Quads → lower, etc.). When provided, the chip's idle state shows a
+  // subtle region tint on the border and its active state floods with the
+  // region color rather than the generic accent.
+  region?: Region | null;
   // Hover/long-press hint surfacing the chip's underlying muscle scope.
   // Browser-native, so there's a hover delay on desktop — but it's the
   // only no-Radix-Tooltip option that doesn't crowd the chip row with ⓘ
   // icons. The chip itself remains a single-tap toggle.
   title?: string;
 }) {
-  const activeClass =
-    variant === 'region'
+  const styles = region ? REGION_STYLES[region] : null;
+  const activeClass = styles
+    ? `${styles.dot} text-ink-950 border-transparent`
+    : variant === 'region'
       ? 'accent-bg text-ink-950 border-transparent'
       : 'bg-ink-200 text-ink-950 border-transparent';
+  const idleClass = styles
+    ? `${styles.borderTint} ${styles.borderTintHover} text-ink-300`
+    : 'border-ink-800 text-ink-300 hover:border-ink-600';
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
       className={`text-xs px-3 py-1.5 rounded-full border transition ${
-        active ? activeClass : 'border-ink-800 text-ink-300 hover:border-ink-600'
+        active ? activeClass : idleClass
       }`}
     >
       {children}

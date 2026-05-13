@@ -31,6 +31,7 @@ import {
   ExplainRPE,
   ExplainWeightIncrement,
 } from '@/lib/explanations';
+import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
 
 type BandClient = { id: string; name: string; position: number };
 
@@ -147,13 +148,24 @@ export function ExerciseInSession({
         })
       : 0;
 
+  const region = regionForExercise(exercise);
+  const regionStyles = REGION_STYLES[region];
+
   return (
-    <div className="border accent-border bg-ink-900 rounded-lg">
+    <div
+      className={`border border-ink-800 ${regionStyles.leftBorderThick} bg-ink-900 rounded-lg`}
+    >
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-medium text-ink-100 flex items-center gap-2">
             <span>{exercise.name}</span>
+            <span
+              className={`text-[9px] tracking-[0.2em] uppercase ${regionStyles.text} shrink-0`}
+              aria-label={`${regionStyles.label} body region`}
+            >
+              {regionStyles.label}
+            </span>
             {exercise.isCustom && (
               <span className="text-[9px] tracking-[0.2em] uppercase accent-text shrink-0">
                 Custom
