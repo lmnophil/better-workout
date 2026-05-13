@@ -21,6 +21,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { X, Search, Trash2, Check } from 'lucide-react';
 import { VideoLink } from '@/components/ui/video-link';
+import { EquipmentChips } from '@/components/ui/equipment-chips';
 import {
   EXERCISE_MODULES,
   MUSCLE_GROUPS,
@@ -236,6 +237,11 @@ function BrowseTab({
   const [query, setQuery] = useState('');
   const [regionIds, setRegionIds] = useState<string[]>(initialRegionIds);
   const [muscleChipIds, setMuscleChipIds] = useState<string[]>(initialMuscleChipIds);
+  // Equipment filter chips. Match-any semantics (same as region / muscle):
+  // an exercise passes if its equipment list intersects the selection. Empty
+  // selection = no filter. The "bodyweight" pseudo-chip matches exercises
+  // with no equipment at all — the only way to filter to gear-free movements.
+  const [equipmentIds, setEquipmentIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // "Show only gap-filling exercises" toggle. Only meaningful when the parent
   // surface actually has a gap signal — collapsed otherwise.
@@ -258,9 +264,15 @@ function BrowseTab({
     // Picking a muscle chip implicitly cancels Full body (which means "no filter")
     setRegionIds((prev) => prev.filter((r) => r !== 'full'));
   }
+  function toggleEquipment(id: string) {
+    setEquipmentIds((prev) =>
+      prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id],
+    );
+  }
   function clearChips() {
     setRegionIds([]);
     setMuscleChipIds([]);
+    setEquipmentIds([]);
   }
 
   // Per-exercise gap derivation. An exercise "fills a gap" when one of its
@@ -283,6 +295,18 @@ function BrowseTab({
       if (excludeIds.has(e.id)) return false;
       if (gapsOnly && hasGapSignal && !gapHitsById.has(e.id)) return false;
       if (!matchesArea(e, regionIds, muscleChipIds)) return false;
+      if (equipmentIds.length > 0) {
+        // 'bodyweight' is a pseudo-chip: matches exercises that need no gear.
+        // 'mat' is informational and intentionally not a filter chip — but
+        // a mat-only exercise still counts as bodyweight so the chip behaves
+        // the way users expect ("nothing to lug around").
+        const wantsBodyweight = equipmentIds.includes('bodyweight');
+        const otherIds = equipmentIds.filter((id) => id !== 'bodyweight');
+        const requiresGear = e.equipment.filter((g) => g !== 'mat');
+        const bodyweightHit = wantsBodyweight && requiresGear.length === 0;
+        const gearHit = otherIds.length > 0 && e.equipment.some((g) => otherIds.includes(g));
+        if (!bodyweightHit && !gearHit) return false;
+      }
       if (!query.trim()) return true;
       const q = query.toLowerCase();
       return (
@@ -319,11 +343,29 @@ function BrowseTab({
     excludeIds,
     regionIds,
     muscleChipIds,
+    equipmentIds,
     query,
     gapsOnly,
     hasGapSignal,
     gapHitsById,
   ]);
+
+  // Equipment chip set, sourced from the user's actual exercise list rather
+  // than KNOWN_EQUIPMENT — chips for tokens nobody can match are noise. Also
+  // exposes a synthetic 'bodyweight' chip when any exercise needs no gear.
+  // 'mat' stays out of the chips: it's informational, not gating.
+  const availableEquipment = useMemo(() => {
+    const seen = new Set<string>();
+    let hasBodyweight = false;
+    for (const e of availableExercises) {
+      const gear = e.equipment.filter((g) => g !== 'mat');
+      if (gear.length === 0) hasBodyweight = true;
+      for (const g of gear) seen.add(g);
+    }
+    const list = Array.from(seen).sort();
+    if (hasBodyweight) list.unshift('bodyweight');
+    return list;
+  }, [availableExercises]);
 
   // Order derives from EXERCISE_MODULES (the natural session flow) with 'Custom'
   // appended so user-created exercises sort last. Single source of truth — if
@@ -392,7 +434,8 @@ function BrowseTab({
     onPickMany(Array.from(selected));
   }
 
-  const anyChipsSelected = regionIds.length > 0 || muscleChipIds.length > 0;
+  const anyChipsSelected =
+    regionIds.length > 0 || muscleChipIds.length > 0 || equipmentIds.length > 0;
 
   return (
     <>
@@ -435,6 +478,25 @@ function BrowseTab({
               </button>
             )}
           </div>
+          {availableEquipment.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {availableEquipment.map((id) => (
+                <ChipButton
+                  key={id}
+                  active={equipmentIds.includes(id)}
+                  onClick={() => toggleEquipment(id)}
+                  variant="muscle"
+                  title={
+                    id === 'bodyweight'
+                      ? 'Show exercises that need no gear (mat-only counts).'
+                      : `Show exercises using ${id}.`
+                  }
+                >
+                  {id}
+                </ChipButton>
+              ))}
+            </div>
+          )}
           {hasGapSignal && gapMuscles && (
             <GapToggle
               active={gapsOnly}
@@ -578,6 +640,7 @@ function BrowseTab({
                                     {ex.primaryMuscles.length > 3 ? '…' : ''}
                                   </span>
                                 )}
+                                <EquipmentChips equipment={ex.equipment} />
                                 {fillsGap && gapHits && <GapBadge muscleIds={gapHits} />}
                               </span>
                             </span>
