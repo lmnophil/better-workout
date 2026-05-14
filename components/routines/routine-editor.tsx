@@ -98,6 +98,7 @@ import { usePrefs } from '@/components/ui/prefs-context';
 import { estimatePlannedExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
+import { MuscleChips } from '@/components/ui/muscle-chips';
 import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
 
 // ============ TYPES ============
@@ -116,8 +117,10 @@ type DayExercise = {
   videoUrl: string | null;
   equipment: string[];
   // First primary muscle drives the region-color accent on the row. Cheaper
-  // than threading a Map<id, ExerciseInfo> down to ExerciseRow.
+  // than threading a Map<id, ExerciseInfo> down to ExerciseRow. Secondary
+  // muscles ride along so the row can surface its full muscle pill list.
   primaryMuscles: string[];
+  secondaryMuscles: string[];
 };
 
 type EditorDay = {
@@ -530,6 +533,7 @@ function DraftEditor({
                 videoUrl: e.videoUrl,
                 equipment: e.equipment,
                 primaryMuscles: e.primaryMuscles,
+                secondaryMuscles: e.secondaryMuscles,
               };
             })
             .filter((x): x is DayExercise => x !== null),
@@ -713,6 +717,7 @@ function DraftEditor({
             videoUrl: e.videoUrl,
             equipment: e.equipment,
             primaryMuscles: e.primaryMuscles,
+            secondaryMuscles: e.secondaryMuscles,
           };
         })
         .filter((x): x is DayExercise => x !== null),
@@ -1364,6 +1369,7 @@ function LiveEditor({
                 videoUrl: av?.videoUrl ?? null,
                 equipment: av?.equipment ?? [],
                 primaryMuscles: av?.primaryMuscles ?? [],
+                secondaryMuscles: av?.secondaryMuscles ?? [],
               };
             }),
         })),
@@ -2644,6 +2650,10 @@ function ExerciseRow({
               <span>{exercise.module}</span>
               <ModuleInfoTooltip module={exercise.module} size={10} />
             </div>
+            <MuscleChips
+              primary={exercise.primaryMuscles}
+              secondary={exercise.secondaryMuscles}
+            />
             <EquipmentChips equipment={exercise.equipment} />
           </div>
         </div>

@@ -25,6 +25,7 @@ import { estimateActiveExerciseSeconds, formatEstimateCompact } from '@/lib/time
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
+import { MuscleChips } from '@/components/ui/muscle-chips';
 import {
   ExplainRestRanges,
   ExplainRIR,
@@ -160,18 +161,19 @@ export function ExerciseInSession({
         <div className="min-w-0">
           <div className="text-sm font-medium text-ink-100 flex items-center gap-2">
             <span>{exercise.name}</span>
-            <span
-              className={`text-[9px] tracking-[0.2em] uppercase ${regionStyles.text} shrink-0`}
-              aria-label={`${regionStyles.label} body region`}
-            >
-              {regionStyles.label}
-            </span>
             {exercise.isCustom && (
               <span className="text-[9px] tracking-[0.2em] uppercase accent-text shrink-0">
                 Custom
               </span>
             )}
             <VideoLink url={exercise.videoUrl} exerciseName={exercise.name} size={14} />
+          </div>
+
+          <div className="mt-1">
+            <MuscleChips
+              primary={exercise.primaryMuscles}
+              secondary={exercise.secondaryMuscles}
+            />
           </div>
 
           {/* Prescription + settings opener — same row, wraps on narrow screens */}

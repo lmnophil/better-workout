@@ -9,6 +9,7 @@ import { useState, useTransition } from 'react';
 import { ChevronDown, ChevronRight, RotateCcw, Replace, Play } from 'lucide-react';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
+import { MuscleChips } from '@/components/ui/muscle-chips';
 import {
   startFromRoutineDay,
   setPendingSwap,
@@ -552,6 +553,12 @@ function ExerciseList({
             <>
               <span>{ex.name}</span>
               <VideoLink url={ex.videoUrl} exerciseName={ex.name} size={12} />
+              {effectiveExercise && (
+                <MuscleChips
+                  primary={effectiveExercise.primaryMuscles}
+                  secondary={effectiveExercise.secondaryMuscles}
+                />
+              )}
               {ex.equipment.length > 0 && <EquipmentChips equipment={ex.equipment} />}
             </>
           )}

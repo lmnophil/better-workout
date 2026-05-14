@@ -1557,6 +1557,18 @@ export type MuscleGroup = {
 // numbers reflect that these muscles get a lot of secondary credit from main
 // lifts and rarely need dedicated isolation. Lower target ≠ less important —
 // it's just less *direct* work needed.
+// Look-up table for the human-readable label of a muscle id. Built lazily and
+// memoised the first time it's read so we don't allocate at module-eval time.
+// IDs are the storage form (e.g. 'rear delts', 't-spine mobility'); labels are
+// the capitalised display form (e.g. 'Rear delts', 'T-spine mobility').
+let MUSCLE_LABEL_MAP: Map<string, string> | null = null;
+export function muscleLabel(id: string): string {
+  if (!MUSCLE_LABEL_MAP) {
+    MUSCLE_LABEL_MAP = new Map(MUSCLE_GROUPS.map((m) => [m.id, m.label]));
+  }
+  return MUSCLE_LABEL_MAP.get(id) ?? id;
+}
+
 export const MUSCLE_GROUPS: MuscleGroup[] = [
   {
     id: 'glutes',

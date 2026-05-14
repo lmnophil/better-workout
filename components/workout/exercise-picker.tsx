@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, Search, Trash2, Check } from 'lucide-react';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
+import { MuscleChips } from '@/components/ui/muscle-chips';
 import {
   EXERCISE_MODULES,
   MUSCLE_GROUPS,
@@ -647,12 +648,10 @@ function BrowseTab({
                                     </span>
                                   );
                                 })()}
-                                {ex.primaryMuscles.length > 0 && (
-                                  <span className="text-[10px] text-ink-500">
-                                    · {ex.primaryMuscles.slice(0, 3).join(', ')}
-                                    {ex.primaryMuscles.length > 3 ? '…' : ''}
-                                  </span>
-                                )}
+                                <MuscleChips
+                                  primary={ex.primaryMuscles}
+                                  secondary={ex.secondaryMuscles}
+                                />
                                 <EquipmentChips equipment={ex.equipment} />
                                 {fillsGap && gapHits && <GapBadge muscleIds={gapHits} />}
                               </span>

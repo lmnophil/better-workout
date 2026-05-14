@@ -32,6 +32,7 @@ import {
 } from './share-coverage';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
+import { MuscleChips } from '@/components/ui/muscle-chips';
 import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
 
 const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -411,10 +412,13 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                           <VideoLink url={ex.videoUrl} exerciseName={ex.name} size={13} />
                         </div>
                         <div className="text-xs text-ink-400 mt-0.5 flex items-center gap-2 flex-wrap">
-                          <span>
-                            {ex.primaryMuscles.join(', ')}
-                            {plannedSummary(ex)}
-                          </span>
+                          <MuscleChips
+                            primary={ex.primaryMuscles}
+                            secondary={ex.secondaryMuscles}
+                          />
+                          {plannedSummary(ex) && (
+                            <span className="text-ink-500">{plannedSummary(ex)}</span>
+                          )}
                           <EquipmentChips equipment={ex.equipment} />
                         </div>
                       </div>
