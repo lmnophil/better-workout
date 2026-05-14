@@ -1470,6 +1470,14 @@ async function cloneTemplateForUser(
       },
     },
   });
+  // Re-create the source's pools on the clone. lineup preserves the source
+  // order, so a pool's surviving members stay contiguous without a reshuffle.
+  await copyTemplatePools(
+    tx,
+    sourceTemplateId,
+    created.id,
+    new Set(lineup.map((te) => te.exerciseId)),
+  );
   return created.id;
 }
 
@@ -1942,6 +1950,8 @@ const RoutineExerciseNoteSchema = z
 const AddExerciseToRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
   exerciseId: z.string().min(1),
+  // When set, the exercise joins this pool instead of becoming a fixed slot.
+  poolId: z.string().min(1).optional(),
   plannedSets: PlannedSetsSchema,
   plannedReps: PlannedRepsSchema,
   plannedSeconds: PlannedSecondsSchema,
@@ -1952,7 +1962,7 @@ export const addExerciseToRoutineDay = withLogging(
   'addExerciseToRoutineDay',
   async (input: z.infer<typeof AddExerciseToRoutineDaySchema>) => {
     const userId = await requireUser();
-    const { routineDayId, exerciseId, plannedSets, plannedReps, plannedSeconds, note } =
+    const { routineDayId, exerciseId, poolId, plannedSets, plannedReps, plannedSeconds, note } =
       AddExerciseToRoutineDaySchema.parse(input);
 
     const day = await db.routineDay.findFirst({
@@ -1969,6 +1979,14 @@ export const addExerciseToRoutineDay = withLogging(
     });
     if (collision) throw new Error('That exercise is already in this day.');
 
+    if (poolId) {
+      const pool = await db.templatePool.findFirst({
+        where: { id: poolId, templateId: day.templateId },
+        select: { id: true },
+      });
+      if (!pool) throw new Error('Pool not found');
+    }
+
     const last = await db.templateExercise.findFirst({
       where: { templateId: day.templateId },
       orderBy: { position: 'desc' },
@@ -1976,16 +1994,22 @@ export const addExerciseToRoutineDay = withLogging(
     });
     const nextPos = (last?.position ?? -1) + 1;
 
-    await db.templateExercise.create({
-      data: {
-        templateId: day.templateId,
-        exerciseId,
-        position: nextPos,
-        plannedSets: plannedSets ?? null,
-        plannedReps: plannedReps ?? null,
-        plannedSeconds: plannedSeconds ?? null,
-        note: note ?? null,
-      },
+    await db.$transaction(async (tx) => {
+      await tx.templateExercise.create({
+        data: {
+          templateId: day.templateId,
+          exerciseId,
+          poolId: poolId ?? null,
+          position: nextPos,
+          plannedSets: plannedSets ?? null,
+          plannedReps: plannedReps ?? null,
+          plannedSeconds: plannedSeconds ?? null,
+          note: note ?? null,
+        },
+      });
+      // A new fixed slot at the end needs no reshuffle; a new pool member must
+      // be pulled back into its pool's contiguous block.
+      if (poolId) await normalizeTemplatePositions(tx, day.templateId);
     });
 
     revalidatePath('/');
@@ -2061,26 +2085,42 @@ export const removeExerciseFromRoutineDay = withLogging(
     await db.$transaction(async (tx) => {
       const target = await tx.templateExercise.findFirst({
         where: { templateId: day.templateId, exerciseId },
-        select: { id: true, position: true },
+        select: { id: true, poolId: true },
       });
       if (!target) return;
 
       await tx.templateExercise.delete({ where: { id: target.id } });
 
-      // Renumber to keep positions contiguous.
-      const remaining = await tx.templateExercise.findMany({
-        where: { templateId: day.templateId },
-        orderBy: { position: 'asc' },
-        select: { id: true, position: true },
-      });
-      for (let i = 0; i < remaining.length; i++) {
-        if (remaining[i].position !== i) {
-          await tx.templateExercise.update({
-            where: { id: remaining[i].id },
-            data: { position: i },
+      // If the removed exercise was in a pool, keep the pool coherent: a pool
+      // with fewer than two members can't be a "pick X of N" anymore, so it's
+      // dissolved (the survivor, if any, falls back to a fixed slot). Otherwise
+      // pickCount is clamped down so it never exceeds the member count.
+      if (target.poolId) {
+        const remainingMembers = await tx.templateExercise.count({
+          where: { poolId: target.poolId },
+        });
+        if (remainingMembers < 2) {
+          await tx.templateExercise.updateMany({
+            where: { poolId: target.poolId },
+            data: { poolId: null },
           });
+          await tx.templatePool.delete({ where: { id: target.poolId } });
+        } else {
+          const pool = await tx.templatePool.findUnique({
+            where: { id: target.poolId },
+            select: { pickCount: true },
+          });
+          if (pool && pool.pickCount > remainingMembers) {
+            await tx.templatePool.update({
+              where: { id: target.poolId },
+              data: { pickCount: remainingMembers },
+            });
+          }
         }
       }
+
+      // Renumber to keep positions contiguous and pools blocked together.
+      await normalizeTemplatePositions(tx, day.templateId);
 
       // Drop any pending swap that referenced this exercise — it can't apply
       // anymore.
@@ -2112,31 +2152,61 @@ export const reorderRoutineDayExercise = withLogging(
     });
     if (!day) throw new Error('Routine day not found');
 
-    const entries = await db.templateExercise.findMany({
-      where: { templateId: day.templateId },
-      orderBy: { position: 'asc' },
-      select: { id: true, exerciseId: true, position: true },
+    await db.$transaction(async (tx) => {
+      const rows = await tx.templateExercise.findMany({
+        where: { templateId: day.templateId },
+        select: { id: true, exerciseId: true, position: true, poolId: true },
+      });
+      // Canonical display order: fixed slots and whole pools, each a "unit".
+      const ordered = gatherPoolMembers(rows);
+      const myIndex = ordered.findIndex((r) => r.exerciseId === exerciseId);
+      if (myIndex < 0) return;
+      const me = ordered[myIndex];
+
+      if (me.poolId !== null) {
+        // Pool member: swap with the adjacent member of the same pool. At a
+        // pool edge this is a no-op — the arrows don't eject members.
+        const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
+        if (neighborIndex < 0 || neighborIndex >= ordered.length) return;
+        const neighbor = ordered[neighborIndex];
+        if (neighbor.poolId !== me.poolId) return;
+        ordered[myIndex] = neighbor;
+        ordered[neighborIndex] = me;
+      } else if (direction === 'up') {
+        const neighborIndex = myIndex - 1;
+        if (neighborIndex < 0) return;
+        const neighbor = ordered[neighborIndex];
+        if (neighbor.poolId === null) {
+          ordered[myIndex] = neighbor;
+          ordered[neighborIndex] = me;
+        } else {
+          // Jump the fixed slot over the whole pool block above it.
+          let start = neighborIndex;
+          while (start > 0 && ordered[start - 1].poolId === neighbor.poolId) start--;
+          ordered.splice(myIndex, 1);
+          ordered.splice(start, 0, me);
+        }
+      } else {
+        const neighborIndex = myIndex + 1;
+        if (neighborIndex >= ordered.length) return;
+        const neighbor = ordered[neighborIndex];
+        if (neighbor.poolId === null) {
+          ordered[myIndex] = neighbor;
+          ordered[neighborIndex] = me;
+        } else {
+          // Jump the fixed slot past the whole pool block below it.
+          let end = neighborIndex;
+          while (end < ordered.length - 1 && ordered[end + 1].poolId === neighbor.poolId) end++;
+          ordered.splice(myIndex, 1);
+          ordered.splice(end, 0, me);
+        }
+      }
+
+      await writeTemplatePositions(
+        tx,
+        ordered.map((r) => r.id),
+      );
     });
-    const myIndex = entries.findIndex((e) => e.exerciseId === exerciseId);
-    if (myIndex < 0) return;
-    const neighborIndex = direction === 'up' ? myIndex - 1 : myIndex + 1;
-    if (neighborIndex < 0 || neighborIndex >= entries.length) return;
-
-    const me = entries[myIndex];
-    const neighbor = entries[neighborIndex];
-    const sentinel = -1;
-
-    await db.$transaction([
-      db.templateExercise.update({ where: { id: me.id }, data: { position: sentinel } }),
-      db.templateExercise.update({
-        where: { id: neighbor.id },
-        data: { position: me.position },
-      }),
-      db.templateExercise.update({
-        where: { id: me.id },
-        data: { position: neighbor.position },
-      }),
-    ]);
 
     revalidatePath('/');
     revalidatePath('/routine');
@@ -2189,23 +2259,265 @@ export const setRoutineDayExerciseOrder = withLogging(
       return { id, position };
     });
 
-    await db.$transaction([
+    await db.$transaction(async (tx) => {
       // Park everything at distinct negative positions to free up the target
       // range without violating the unique index.
-      ...entries.map((e, i) =>
-        db.templateExercise.update({
+      for (const [i, e] of entries.entries()) {
+        await tx.templateExercise.update({
           where: { id: e.id },
           data: { position: -(i + 1) },
-        }),
-      ),
+        });
+      }
       // Now place each entry at its new position based on exerciseIds order.
-      ...placements.map(({ id, position }) =>
-        db.templateExercise.update({
-          where: { id },
-          data: { position },
-        }),
-      ),
-    ]);
+      for (const { id, position } of placements) {
+        await tx.templateExercise.update({ where: { id }, data: { position } });
+      }
+      // The requested order may interleave a pool's members with other slots;
+      // re-gather each pool into a contiguous block so the invariant holds.
+      await normalizeTemplatePositions(tx, day.templateId);
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
+
+// ============================================================
+// Template pools — "pick X of N" exercise groups inside a routine day
+// ============================================================
+
+// A pool's members are kept as a contiguous run of `position` values within
+// the template so the pool reads as a single slot. These helpers restore that
+// invariant after any membership or ordering change.
+
+type PoolPositionRow = {
+  id: string;
+  exerciseId: string;
+  position: number;
+  poolId: string | null;
+};
+
+/**
+ * Reorder a template's exercise rows so every pool's members sit in a
+ * contiguous block, anchored at the pool's earliest member. Fixed slots keep
+ * their relative order; a pool's members keep their relative order within the
+ * block. Returns the rows in canonical display order.
+ */
+function gatherPoolMembers(rows: PoolPositionRow[]): PoolPositionRow[] {
+  const sorted = [...rows].sort((a, b) => a.position - b.position);
+  const membersByPool = new Map<string, PoolPositionRow[]>();
+  for (const r of sorted) {
+    if (r.poolId === null) continue;
+    const bucket = membersByPool.get(r.poolId);
+    if (bucket) bucket.push(r);
+    else membersByPool.set(r.poolId, [r]);
+  }
+  const emitted = new Set<string>();
+  const out: PoolPositionRow[] = [];
+  for (const r of sorted) {
+    if (r.poolId === null) {
+      out.push(r);
+      continue;
+    }
+    if (emitted.has(r.poolId)) continue;
+    emitted.add(r.poolId);
+    out.push(...(membersByPool.get(r.poolId) ?? []));
+  }
+  return out;
+}
+
+/**
+ * Write contiguous positions 0..n-1 onto the given rows, in array order. Two
+ * passes through negative sentinels so the (templateId, position) unique index
+ * never sees a collision mid-update. Caller supplies the transaction client.
+ */
+async function writeTemplatePositions(tx: Tx, orderedRowIds: string[]): Promise<void> {
+  for (let i = 0; i < orderedRowIds.length; i++) {
+    await tx.templateExercise.update({
+      where: { id: orderedRowIds[i] },
+      data: { position: -(i + 1) },
+    });
+  }
+  for (let i = 0; i < orderedRowIds.length; i++) {
+    await tx.templateExercise.update({
+      where: { id: orderedRowIds[i] },
+      data: { position: i },
+    });
+  }
+}
+
+/** Reload a template's rows and rewrite positions into canonical pool order. */
+async function normalizeTemplatePositions(tx: Tx, templateId: string): Promise<void> {
+  const rows = await tx.templateExercise.findMany({
+    where: { templateId },
+    select: { id: true, exerciseId: true, position: true, poolId: true },
+  });
+  await writeTemplatePositions(
+    tx,
+    gatherPoolMembers(rows).map((r) => r.id),
+  );
+}
+
+/**
+ * Copy a source template's pools onto a freshly-created template. Members are
+ * matched by exerciseId; only members that survived into the new template
+ * (passed in `survivingExerciseIds`) are re-linked. A pool that ends up with
+ * fewer than two surviving members is dropped — its exercises stay as fixed
+ * slots. Must run inside the same transaction that created the new template.
+ */
+async function copyTemplatePools(
+  tx: Tx,
+  sourceTemplateId: string,
+  newTemplateId: string,
+  survivingExerciseIds: Set<string>,
+): Promise<void> {
+  const pools = await tx.templatePool.findMany({
+    where: { templateId: sourceTemplateId },
+    include: { members: { select: { exerciseId: true } } },
+  });
+  for (const pool of pools) {
+    const memberIds = pool.members
+      .map((m) => m.exerciseId)
+      .filter((id) => survivingExerciseIds.has(id));
+    if (memberIds.length < 2) continue;
+    const newPool = await tx.templatePool.create({
+      data: {
+        templateId: newTemplateId,
+        pickCount: Math.min(pool.pickCount, memberIds.length),
+        label: pool.label,
+      },
+    });
+    await tx.templateExercise.updateMany({
+      where: { templateId: newTemplateId, exerciseId: { in: memberIds } },
+      data: { poolId: newPool.id },
+    });
+  }
+}
+
+// Optional short tag for a pool. Trim, collapse empty to null.
+const TemplatePoolLabelSchema = z
+  .string()
+  .max(120)
+  .transform((s) => {
+    const trimmed = s.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  })
+  .nullable()
+  .optional();
+
+const CreateTemplatePoolSchema = z.object({
+  routineDayId: z.string().min(1),
+  exerciseIds: z.array(z.string().min(1)).min(2).max(50),
+  pickCount: z.number().int().min(1).max(50),
+  label: TemplatePoolLabelSchema,
+});
+
+/**
+ * Group two or more of a routine day's existing fixed-slot exercises into a
+ * "pick X of N" pool. The members are gathered into a contiguous block where
+ * the earliest of them currently sits. pickCount is clamped to the member
+ * count. Exercises that are already in a pool can't be re-grouped.
+ */
+export const createTemplatePool = withLogging(
+  'createTemplatePool',
+  async (input: z.infer<typeof CreateTemplatePoolSchema>) => {
+    const userId = await requireUser();
+    const { routineDayId, exerciseIds, pickCount, label } = CreateTemplatePoolSchema.parse(input);
+
+    if (new Set(exerciseIds).size !== exerciseIds.length) {
+      throw new Error('Some of those exercises are listed twice.');
+    }
+
+    const day = await db.routineDay.findFirst({
+      where: { id: routineDayId, routine: { userId } },
+      select: { templateId: true },
+    });
+    if (!day) throw new Error('Routine day not found');
+
+    const rows = await db.templateExercise.findMany({
+      where: { templateId: day.templateId, exerciseId: { in: exerciseIds } },
+      select: { id: true, exerciseId: true, poolId: true },
+    });
+    // Every id must be a fixed slot in this day — not missing, not already pooled.
+    if (rows.length !== exerciseIds.length || rows.some((r) => r.poolId !== null)) {
+      throw new Error('Some of those exercises are no longer available to group.');
+    }
+
+    const effectivePickCount = Math.min(pickCount, exerciseIds.length);
+
+    await db.$transaction(async (tx) => {
+      const pool = await tx.templatePool.create({
+        data: { templateId: day.templateId, pickCount: effectivePickCount, label: label ?? null },
+      });
+      await tx.templateExercise.updateMany({
+        where: { id: { in: rows.map((r) => r.id) } },
+        data: { poolId: pool.id },
+      });
+      await normalizeTemplatePositions(tx, day.templateId);
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
+
+const UpdateTemplatePoolSchema = z.object({
+  poolId: z.string().min(1),
+  pickCount: z.number().int().min(1).max(50).optional(),
+  label: TemplatePoolLabelSchema,
+});
+
+/**
+ * Edit a pool's pickCount or label. pickCount is clamped to the pool's current
+ * member count. Pass label: null to clear it; omit to leave it untouched.
+ */
+export const updateTemplatePool = withLogging(
+  'updateTemplatePool',
+  async (input: z.infer<typeof UpdateTemplatePoolSchema>) => {
+    const userId = await requireUser();
+    const { poolId, pickCount, label } = UpdateTemplatePoolSchema.parse(input);
+
+    const pool = await db.templatePool.findFirst({
+      where: { id: poolId, template: { userId } },
+      select: { id: true, _count: { select: { members: true } } },
+    });
+    if (!pool) throw new Error('Pool not found');
+
+    await db.templatePool.update({
+      where: { id: pool.id },
+      data: {
+        ...(pickCount !== undefined
+          ? { pickCount: Math.min(Math.max(pickCount, 1), Math.max(pool._count.members, 1)) }
+          : {}),
+        ...(label !== undefined ? { label } : {}),
+      },
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
+
+const DeleteTemplatePoolSchema = z.object({ poolId: z.string().min(1) });
+
+/**
+ * Dissolve a pool. Its members fall back to fixed slots in the same positions
+ * (the DB SetNull on poolId does the ungrouping); the exercises themselves
+ * stay in the day.
+ */
+export const deleteTemplatePool = withLogging(
+  'deleteTemplatePool',
+  async (input: z.infer<typeof DeleteTemplatePoolSchema>) => {
+    const userId = await requireUser();
+    const { poolId } = DeleteTemplatePoolSchema.parse(input);
+
+    const pool = await db.templatePool.findFirst({
+      where: { id: poolId, template: { userId } },
+      select: { id: true },
+    });
+    if (!pool) throw new Error('Pool not found');
+
+    await db.templatePool.delete({ where: { id: pool.id } });
 
     revalidatePath('/');
     revalidatePath('/routine');
@@ -2370,6 +2682,14 @@ export const duplicateRoutineDay = withLogging(
           },
         },
       });
+      // Carry the source day's pools over to the clone. The duplicate copies
+      // every exercise (no filtering), so all pool members survive.
+      await copyTemplatePools(
+        tx,
+        source.template.id,
+        newTemplate.id,
+        new Set(source.template.exercises.map((te) => te.exerciseId)),
+      );
       await tx.routineDay.create({
         data: {
           routineId: source.routine.id,
@@ -2683,6 +3003,17 @@ export const createRoutineFromDraft = withLogging(
 
 const StartFromRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
+  // For each pool on the day, which of its members the user chose to do today.
+  // Days with no pools can omit this; days with pools must resolve every one.
+  poolPicks: z
+    .array(
+      z.object({
+        poolId: z.string().min(1),
+        exerciseIds: z.array(z.string().min(1)).min(1).max(50),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
 /**
@@ -2691,6 +3022,10 @@ const StartFromRoutineDaySchema = z.object({
  * session with startedFromRoutineDayId so completing it can advance the
  * routine cursor (sequence mode).
  *
+ * If the day has any pools, `poolPicks` must resolve each one — the user picks
+ * which members to do today (recency-assisted, in the UI). Unpicked pool
+ * members sit this session out.
+ *
  * Refuses if there's already an active session — mirrors startFromTemplate.
  * After population, all pending swaps for this day are cleared.
  */
@@ -2698,7 +3033,7 @@ export const startFromRoutineDay = withLogging(
   'startFromRoutineDay',
   async (input: z.infer<typeof StartFromRoutineDaySchema>) => {
     const userId = await requireUser();
-    const { routineDayId } = StartFromRoutineDaySchema.parse(input);
+    const { routineDayId, poolPicks } = StartFromRoutineDaySchema.parse(input);
 
     const existing = await findActiveSession(userId);
     if (existing) {
@@ -2718,6 +3053,7 @@ export const startFromRoutineDay = withLogging(
                 },
               },
             },
+            pools: { select: { id: true, pickCount: true } },
           },
         },
         pendingSwaps: {
@@ -2730,6 +3066,24 @@ export const startFromRoutineDay = withLogging(
       },
     });
     if (!day) throw new Error('Routine day not found');
+
+    // Resolve pools: every pool on the day must have a pick, each picked id
+    // must be one of that pool's members, and no more than pickCount.
+    const pickByPool = new Map((poolPicks ?? []).map((p) => [p.poolId, new Set(p.exerciseIds)]));
+    for (const pool of day.template.pools) {
+      const memberIds = new Set(
+        day.template.exercises.filter((te) => te.poolId === pool.id).map((te) => te.exerciseId),
+      );
+      const pick = pickByPool.get(pool.id);
+      const invalid =
+        !pick ||
+        pick.size < 1 ||
+        pick.size > pool.pickCount ||
+        [...pick].some((id) => !memberIds.has(id));
+      if (invalid) {
+        throw new Error('Pick your pool exercises before starting this workout.');
+      }
+    }
 
     const swapsByOutId = new Map(
       day.pendingSwaps
@@ -2752,6 +3106,10 @@ export const startFromRoutineDay = withLogging(
       plannedSeconds: number | null;
     }[] = [];
     for (const te of day.template.exercises) {
+      // Pool members the user didn't pick for today sit the session out.
+      if (te.poolId !== null && !pickByPool.get(te.poolId)?.has(te.exerciseId)) {
+        continue;
+      }
       const ex = te.exercise;
       const replacement = swapsByOutId.get(te.exerciseId);
       if (replacement !== undefined) {

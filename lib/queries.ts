@@ -300,6 +300,52 @@ export async function getCoverageData(userId: string) {
   return lastWorkedByMuscle;
 }
 
+export type ExerciseUsageStat = { lastDoneDate: Date; sessionCount: number };
+
+/**
+ * Per-exercise usage over the trailing 365 days: when it was last done and how
+ * many distinct completed sessions included it.
+ *
+ * Feeds the recency-assisted pool picker and the exercise-picker rows — the
+ * user rotates a pool by eye (pick what's gone stale) and prunes by count
+ * (drop what's rarely used). A year-wide window makes the count meaningful for
+ * pruning without loading the user's entire history. Wrapped with React.cache
+ * so the routine page's timeline and editor share one fetch.
+ */
+export const getExerciseUsageStats = cache(async function getExerciseUsageStats(
+  userId: string,
+): Promise<Map<string, ExerciseUsageStat>> {
+  const since = new Date();
+  since.setDate(since.getDate() - 365);
+
+  const sessions = await db.workoutSession.findMany({
+    where: { userId, completedAt: { not: null }, date: { gte: since } },
+    orderBy: { date: 'desc' },
+    select: {
+      date: true,
+      setLogs: { select: { exerciseId: true } },
+    },
+  });
+
+  const stats = new Map<string, ExerciseUsageStat>();
+  for (const session of sessions) {
+    // One credit per exercise per session, regardless of how many sets.
+    const seen = new Set<string>();
+    for (const setLog of session.setLogs) {
+      if (seen.has(setLog.exerciseId)) continue;
+      seen.add(setLog.exerciseId);
+      const existing = stats.get(setLog.exerciseId);
+      if (existing) {
+        existing.sessionCount += 1;
+      } else {
+        // Newest-first walk, so the first sighting is the most recent date.
+        stats.set(setLog.exerciseId, { lastDoneDate: session.date, sessionCount: 1 });
+      }
+    }
+  }
+  return stats;
+});
+
 /**
  * Total weighted sets per muscle in the trailing 7 days (completed sessions only).
  *
@@ -485,6 +531,9 @@ export async function getRoutineForUser(userId: string) {
                     },
                   },
                 },
+              },
+              pools: {
+                select: { id: true, pickCount: true, label: true },
               },
             },
           },

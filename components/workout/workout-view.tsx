@@ -70,6 +70,28 @@ export type ExerciseInfo = {
   weightIncrementOverride: number | null;
 };
 
+// Per-exercise usage stat in its serialized (server→client) form: the date is
+// an ISO string. buildUsageStatsMap rehydrates a list of these into the
+// Map<exerciseId, { lastDoneDate: Date, sessionCount }> the ExercisePicker
+// wants. Lives here because the picker, the routine editor, and the routine
+// timeline all consume it.
+export type ExerciseUsageStatClient = {
+  exerciseId: string;
+  lastDoneDate: string; // ISO
+  sessionCount: number;
+};
+
+export function buildUsageStatsMap(
+  stats: ExerciseUsageStatClient[],
+): Map<string, { lastDoneDate: Date; sessionCount: number }> {
+  return new Map(
+    stats.map((s) => [
+      s.exerciseId,
+      { lastDoneDate: new Date(s.lastDoneDate), sessionCount: s.sessionCount },
+    ]),
+  );
+}
+
 export type SetLogClient = {
   id: string;
   exerciseId: string;
@@ -738,6 +760,7 @@ function EmptyState({
           upcomingDays={routine.upcomingDays}
           recentSessions={routine.recentSessions}
           availableExercises={availableExercises}
+          usageStats={routine.usageStats}
         />
       )}
 

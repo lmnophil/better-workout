@@ -49,7 +49,8 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 
 - **WorkoutTemplate** — `userId` nullable + `isBuiltin` bool. Built-ins: `userId=null, isBuiltin=true`. User templates: `userId=set, isBuiltin=false`. Unique (userId, name) — same NULL trick as exercises.
 - **UserHiddenTemplate** — per-user marker that the user has hidden a built-in template. Unique (userId, templateId), both Cascade.
-- **TemplateExercise** — junction. `position`, `plannedSets`, `plannedReps` (used when exercise.metric='reps'), `plannedSeconds` (used when metric='time'), `plannedWeight`, free-text `note` (per-(day, exercise) cues — tempo, breathing, coach annotations). Unique (templateId, exerciseId).
+- **TemplateExercise** — junction. `position`, `poolId` (nullable — non-null = pool member), `plannedSets`, `plannedReps` (used when exercise.metric='reps'), `plannedSeconds` (used when metric='time'), `plannedWeight`, free-text `note` (per-(day, exercise) cues — tempo, breathing, coach annotations). Unique (templateId, exerciseId).
+- **TemplatePool** — "pick X of N" group on a template. `pickCount`, optional `label`; members are `TemplateExercise` rows pointing back via `poolId` (kept as a contiguous `position` run). `startFromRoutineDay` takes `poolPicks` to resolve them at session start.
 - **Routine** — one per user (`userId` is `@unique`). `scheduleStyle` `'sequence' | 'weekday'`. `lastCompletedPosition` cursor for sequence mode. App-enforced cap of `MAX_ROUTINE_DAYS = 7`.
 - **RoutineDay** — `position` (contiguous), `weekday` (nullable, unique within routine for weekday mode), `label` (short tag), `description` (free-text paragraph framing the day). Unique (routineId, position) and (routineId, weekday).
 - **RoutineDayPendingSwap** — staged one-time exercise substitution applied on session start. Unique (routineDayId, outExerciseId). All FKs Cascade.
@@ -168,7 +169,8 @@ Has its own [CLAUDE.md](../components/workout/CLAUDE.md). Key shape:
 
 - **`workout-view.tsx`** (top-level client) — owns active-session render, picker open state, save-template dialog, rest timer instance.
 - **`exercise-in-session.tsx`** — one card per exercise: header, prescription, last-time reference, set rows, inline rest-timer override.
-- **`exercise-picker.tsx`** — bottom-sheet on mobile / centered modal on desktop. Two tabs (Browse, Add custom) + a `swap` mode that single-selects and commits instantly.
+- **`exercise-picker.tsx`** — bottom-sheet on mobile / centered modal on desktop. Two tabs (Browse, Add custom) + a `swap` mode that single-selects and commits instantly. Browse has region/muscle/equipment chips plus a collapsible module filter; an optional `usageStats` prop adds per-row recency/count hints.
+- **`routines/pool-pick-dialog.tsx`** — shown when starting a routine day that has pools; the user picks `pickCount` members per pool, recency-assisted.
 - **`rest-timer.tsx`** — `useRestTimer()` hook + `RestTimerBar` UI. **Absolute-deadline pattern** (`endsAt: ms`) so backgrounded tabs don't drift. Singleton AudioContext for chime — don't create per call.
 
 Patterns to know:

@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { Share2 } from 'lucide-react';
 import {
   getAvailableExercises,
+  getExerciseUsageStats,
   getRoutineForUser,
   getTemplates,
   getUserPreferences,
@@ -25,13 +26,15 @@ export default async function RoutinePage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const [routine, templates, availableExercises, userTargets, prefs] = await Promise.all([
-    getRoutineForUser(userId),
-    getTemplates(userId),
-    getAvailableExercises(userId),
-    getUserVolumeTargets(userId),
-    getUserPreferences(userId),
-  ]);
+  const [routine, templates, availableExercises, userTargets, prefs, usageStats] =
+    await Promise.all([
+      getRoutineForUser(userId),
+      getTemplates(userId),
+      getAvailableExercises(userId),
+      getUserVolumeTargets(userId),
+      getUserPreferences(userId),
+      getExerciseUsageStats(userId),
+    ]);
 
   // Project muscle groups + per-user target overrides into a flat shape the
   // editor can use to build its structural coverage panel without re-fetching.
@@ -77,6 +80,7 @@ export default async function RoutinePage() {
               name: te.exercise.name,
               module: te.exercise.module,
               position: te.position,
+              poolId: te.poolId,
               plannedSets: te.plannedSets,
               plannedReps: te.plannedReps,
               plannedSeconds: te.plannedSeconds,
@@ -85,9 +89,22 @@ export default async function RoutinePage() {
               primaryMuscles: te.exercise.primaryMuscles,
               secondaryMuscles: te.exercise.secondaryMuscles,
             })),
+          pools: d.template.pools.map((p) => ({
+            id: p.id,
+            pickCount: p.pickCount,
+            label: p.label,
+          })),
         })),
       }
     : null;
+
+  // Trailing-year usage stats, serialized for the client boundary. Feeds the
+  // recency/count hints in the editor's exercise picker.
+  const usageStatsForClient = Array.from(usageStats.entries()).map(([exerciseId, stat]) => ({
+    exerciseId,
+    lastDoneDate: stat.lastDoneDate.toISOString(),
+    sessionCount: stat.sessionCount,
+  }));
 
   // Templates the user can seed a new day from. getTemplates already excludes
   // routine-owned templates, so picking one always means "clone someone
@@ -133,6 +150,7 @@ export default async function RoutinePage() {
           weightIncrementOverride: e.weightIncrementOverride,
         }))}
         muscleGroups={muscleGroups}
+        usageStats={usageStatsForClient}
       />
     </>
   );

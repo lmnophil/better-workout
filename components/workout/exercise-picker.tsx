@@ -19,8 +19,10 @@
 // pre-filter carries through; otherwise it starts unfiltered.
 
 import { useEffect, useMemo, useState } from 'react';
-import { X, Search, Trash2, Check } from 'lucide-react';
+import { X, Search, Trash2, Check, ChevronDown } from 'lucide-react';
 import { VideoLink } from '@/components/ui/video-link';
+import { relativeDay } from '@/lib/utils';
+import type { ExerciseUsageStat } from '@/lib/queries';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
 import { MuscleChips } from '@/components/ui/muscle-chips';
 import {
@@ -66,6 +68,11 @@ type Props = {
   // gap" hint. Empty/undefined = no gap signal (use everywhere this prop is
   // unset, e.g. mid-session adds).
   gapMuscles?: Set<string>;
+  // Optional per-exercise usage stats (last-done date + session count over the
+  // trailing year). When supplied, each row shows a recency/count hint so the
+  // user can rotate pools and prune rarely-used exercises by eye. Optional
+  // because not every surface that opens the picker has it loaded.
+  usageStats?: Map<string, ExerciseUsageStat>;
   onPickMany: (exerciseIds: string[]) => void;
   onClose: () => void;
   onCreateCustom: (
@@ -93,6 +100,7 @@ export function ExercisePicker({
   initialRegionIds = [],
   initialMuscleChipIds = [],
   gapMuscles,
+  usageStats,
   onPickMany,
   onClose,
   onCreateCustom,
@@ -162,6 +170,7 @@ export function ExercisePicker({
             initialRegionIds={initialRegionIds}
             initialMuscleChipIds={initialMuscleChipIds}
             gapMuscles={gapMuscles}
+            usageStats={usageStats}
             onPickMany={(ids) => {
               onPickMany(ids);
               // Picker closes on successful add — workout-view's onPickMany
@@ -225,6 +234,7 @@ function BrowseTab({
   initialRegionIds,
   initialMuscleChipIds,
   gapMuscles,
+  usageStats,
   onPickMany,
   onDeleteCustom,
   swapMode,
@@ -234,6 +244,7 @@ function BrowseTab({
   initialRegionIds: string[];
   initialMuscleChipIds: string[];
   gapMuscles?: Set<string>;
+  usageStats?: Map<string, ExerciseUsageStat>;
   onPickMany: (ids: string[]) => void;
   onDeleteCustom: (id: string) => void;
   // When set, tapping any row commits immediately and the parent closes the
@@ -249,6 +260,11 @@ function BrowseTab({
   // selection = no filter. The "bodyweight" pseudo-chip matches exercises
   // with no equipment at all — the only way to filter to gear-free movements.
   const [equipmentIds, setEquipmentIds] = useState<string[]>([]);
+  // Module filter — exact match on Exercise.module. The result list already
+  // groups by module, so this is collapsed behind a toggle: it earns its space
+  // only when the user wants to narrow to one or two modules.
+  const [moduleIds, setModuleIds] = useState<string[]>([]);
+  const [showModuleFilter, setShowModuleFilter] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // "Show only gap-filling exercises" toggle. Only meaningful when the parent
   // surface actually has a gap signal — collapsed otherwise.
@@ -276,10 +292,14 @@ function BrowseTab({
       prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id],
     );
   }
+  function toggleModule(id: string) {
+    setModuleIds((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
+  }
   function clearChips() {
     setRegionIds([]);
     setMuscleChipIds([]);
     setEquipmentIds([]);
+    setModuleIds([]);
   }
 
   // Per-exercise gap derivation. An exercise "fills a gap" when one of its
@@ -301,6 +321,7 @@ function BrowseTab({
     const filtered = availableExercises.filter((e) => {
       if (excludeIds.has(e.id)) return false;
       if (gapsOnly && hasGapSignal && !gapHitsById.has(e.id)) return false;
+      if (moduleIds.length > 0 && !moduleIds.includes(e.module)) return false;
       if (!matchesArea(e, regionIds, muscleChipIds)) return false;
       if (equipmentIds.length > 0) {
         // 'bodyweight' is a pseudo-chip: matches exercises that need no gear.
@@ -351,6 +372,7 @@ function BrowseTab({
     regionIds,
     muscleChipIds,
     equipmentIds,
+    moduleIds,
     query,
     gapsOnly,
     hasGapSignal,
@@ -442,7 +464,10 @@ function BrowseTab({
   }
 
   const anyChipsSelected =
-    regionIds.length > 0 || muscleChipIds.length > 0 || equipmentIds.length > 0;
+    regionIds.length > 0 ||
+    muscleChipIds.length > 0 ||
+    equipmentIds.length > 0 ||
+    moduleIds.length > 0;
 
   return (
     <>
@@ -509,6 +534,38 @@ function BrowseTab({
               ))}
             </div>
           )}
+          <div className="mb-2">
+            <button
+              type="button"
+              onClick={() => setShowModuleFilter((v) => !v)}
+              aria-expanded={showModuleFilter}
+              className="text-[11px] text-ink-500 hover:text-ink-200 transition inline-flex items-center gap-1"
+            >
+              <span>Filter by module</span>
+              {moduleIds.length > 0 && (
+                <span className="accent-text">· {moduleIds.length}</span>
+              )}
+              <ChevronDown
+                size={12}
+                className={`transition ${showModuleFilter ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {showModuleFilter && (
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {[...EXERCISE_MODULES, 'Custom'].map((m) => (
+                  <ChipButton
+                    key={m}
+                    active={moduleIds.includes(m)}
+                    onClick={() => toggleModule(m)}
+                    variant="muscle"
+                    title={`Show only ${m} exercises.`}
+                  >
+                    {m}
+                  </ChipButton>
+                ))}
+              </div>
+            )}
+          </div>
           {hasGapSignal && gapMuscles && (
             <GapToggle
               active={gapsOnly}
@@ -653,6 +710,7 @@ function BrowseTab({
                                   secondary={ex.secondaryMuscles}
                                 />
                                 <EquipmentChips equipment={ex.equipment} />
+                                {usageStats && <UsageHint stat={usageStats.get(ex.id)} />}
                                 {fillsGap && gapHits && <GapBadge muscleIds={gapHits} />}
                               </span>
                             </span>
@@ -699,6 +757,27 @@ function BrowseTab({
         />
       )}
     </>
+  );
+}
+
+// Recency + count hint for a picker row. "12d ago · 8×" reads as "last done
+// 12 days ago, 8 sessions in the trailing year." Surfaces the rotation signal
+// the user asked for — pick what's gone stale, prune what's rarely touched.
+// No stat at all means the exercise hasn't been logged in the last year.
+function UsageHint({ stat }: { stat: ExerciseUsageStat | undefined }) {
+  if (!stat) {
+    return <span className="text-[10px] text-ink-600 font-mono">not done yet</span>;
+  }
+  const last = relativeDay(stat.lastDoneDate);
+  return (
+    <span
+      className="text-[10px] text-ink-500 font-mono"
+      title={`Last done ${last} · ${stat.sessionCount} session${
+        stat.sessionCount === 1 ? '' : 's'
+      } in the last year`}
+    >
+      {last} · {stat.sessionCount}×
+    </span>
   );
 }
 

@@ -5,8 +5,8 @@
 // a recency + today + upcoming view, with tap-to-expand details for any day
 // and per-exercise swap controls.
 
-import { useState, useTransition } from 'react';
-import { ChevronDown, ChevronRight, RotateCcw, Replace, Play } from 'lucide-react';
+import { useMemo, useState, useTransition } from 'react';
+import { ChevronDown, ChevronRight, Layers, RotateCcw, Replace, Play } from 'lucide-react';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
 import { MuscleChips } from '@/components/ui/muscle-chips';
@@ -17,18 +17,33 @@ import {
   swapInRoutineTemplate,
 } from '@/lib/actions';
 import { ExercisePicker } from '@/components/workout/exercise-picker';
+import { PoolPickDialog, type PoolForPick } from '@/components/routines/pool-pick-dialog';
 import { WEEKDAY_FULL_LABELS, type ScheduleStyle } from '@/lib/routine';
-import type { ExerciseInfo } from '@/components/workout/workout-view';
+import {
+  buildUsageStatsMap,
+  type ExerciseInfo,
+  type ExerciseUsageStatClient,
+} from '@/components/workout/workout-view';
 import { moduleDescription } from '@/lib/exercises-data';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { estimatePlannedTotalSeconds, formatEstimate } from '@/lib/time-estimate';
 import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
+
+// A "pick X of N" pool on a routine day. Members are the day's exercises whose
+// poolId matches `id`.
+export type RoutinePoolClient = {
+  id: string;
+  pickCount: number;
+  label: string | null;
+};
 
 export type RoutineDayExerciseClient = {
   exerciseId: string;
   name: string;
   module: string;
   position: number;
+  // Pool membership — null for a fixed slot.
+  poolId: string | null;
   // Planned dimensions used by the time estimator. plannedSets is the set
   // count; plannedReps applies for reps-metric exercises and plannedSeconds
   // for time-metric (planks, carries). All nullable when the slot was created
@@ -55,6 +70,7 @@ export type RoutineDayClient = {
   // directly — permanent swap is disabled).
   templateIsBuiltin: boolean;
   exercises: RoutineDayExerciseClient[];
+  pools: RoutinePoolClient[];
 };
 
 export type RoutineRecentSessionClient = {
@@ -76,6 +92,9 @@ export type RoutineTimelineProps = {
   upcomingDays: RoutineDayClient[];
   recentSessions: RoutineRecentSessionClient[];
   availableExercises: ExerciseInfo[];
+  // Trailing-year per-exercise usage stats (serialized). Drives the recency
+  // hints in the pool-pick dialog and the exercise picker.
+  usageStats: ExerciseUsageStatClient[];
 };
 
 export function RoutineTimeline({
@@ -84,7 +103,9 @@ export function RoutineTimeline({
   upcomingDays,
   recentSessions,
   availableExercises,
+  usageStats,
 }: RoutineTimelineProps) {
+  const usageStatsMap = useMemo(() => buildUsageStatsMap(usageStats), [usageStats]);
   return (
     <div className="space-y-6">
       <div>
@@ -103,6 +124,7 @@ export function RoutineTimeline({
         scheduleStyle={routine.scheduleStyle}
         todaysDay={todaysDay}
         availableExercises={availableExercises}
+        usageStatsMap={usageStatsMap}
       />
 
       {upcomingDays.length > 0 && (
@@ -110,6 +132,7 @@ export function RoutineTimeline({
           scheduleStyle={routine.scheduleStyle}
           days={upcomingDays}
           availableExercises={availableExercises}
+          usageStatsMap={usageStatsMap}
         />
       )}
     </div>
@@ -161,10 +184,12 @@ function TodaySection({
   scheduleStyle,
   todaysDay,
   availableExercises,
+  usageStatsMap,
 }: {
   scheduleStyle: ScheduleStyle;
   todaysDay: RoutineDayClient | null;
   availableExercises: ExerciseInfo[];
+  usageStatsMap: Map<string, { lastDoneDate: Date; sessionCount: number }>;
 }) {
   return (
     <div>
@@ -176,6 +201,7 @@ function TodaySection({
           defaultExpanded={true}
           availableExercises={availableExercises}
           scheduleStyle={scheduleStyle}
+          usageStatsMap={usageStatsMap}
         />
       ) : (
         <div className="px-4 py-6 border border-ink-800 rounded-lg text-center">
@@ -199,10 +225,12 @@ function UpcomingSection({
   scheduleStyle,
   days,
   availableExercises,
+  usageStatsMap,
 }: {
   scheduleStyle: ScheduleStyle;
   days: RoutineDayClient[];
   availableExercises: ExerciseInfo[];
+  usageStatsMap: Map<string, { lastDoneDate: Date; sessionCount: number }>;
 }) {
   return (
     <div>
@@ -216,6 +244,7 @@ function UpcomingSection({
             defaultExpanded={false}
             availableExercises={availableExercises}
             scheduleStyle={scheduleStyle}
+            usageStatsMap={usageStatsMap}
             // Sequence mode: mark the last upcoming entry as the loop indicator.
             isLoopBack={scheduleStyle === 'sequence' && idx === days.length - 1}
           />
@@ -233,6 +262,7 @@ function DayCard({
   defaultExpanded,
   availableExercises,
   scheduleStyle,
+  usageStatsMap,
   isLoopBack,
 }: {
   day: RoutineDayClient;
@@ -240,11 +270,15 @@ function DayCard({
   defaultExpanded: boolean;
   availableExercises: ExerciseInfo[];
   scheduleStyle: ScheduleStyle;
+  usageStatsMap: Map<string, { lastDoneDate: Date; sessionCount: number }>;
   isLoopBack?: boolean;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // When the day has pools, "Start" opens this dialog instead of starting
+  // immediately — the user resolves each pool first.
+  const [resolvingPools, setResolvingPools] = useState(false);
   const { prefs } = usePrefs();
 
   // Estimated time for this day. Walks the day's exercise lineup, applying
@@ -288,6 +322,11 @@ function DayCard({
 
   function handleStart() {
     setError(null);
+    // Days with pools need the user to pick members first.
+    if (day.pools.length > 0) {
+      setResolvingPools(true);
+      return;
+    }
     startTransition(async () => {
       try {
         await startFromRoutineDay({ routineDayId: day.id });
@@ -296,6 +335,40 @@ function DayCard({
       }
     });
   }
+
+  function handlePoolPicksConfirmed(poolPicks: { poolId: string; exerciseIds: string[] }[]) {
+    setError(null);
+    startTransition(async () => {
+      try {
+        await startFromRoutineDay({ routineDayId: day.id, poolPicks });
+        setResolvingPools(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not start workout.');
+      }
+    });
+  }
+
+  // Resolve each pool's members (with usage stats) for the pool-pick dialog.
+  const poolsForPick: PoolForPick[] = useMemo(
+    () =>
+      day.pools.map((pool) => ({
+        id: pool.id,
+        label: pool.label,
+        pickCount: pool.pickCount,
+        members: day.exercises
+          .filter((e) => e.poolId === pool.id)
+          .map((e) => {
+            const stat = usageStatsMap.get(e.exerciseId);
+            return {
+              exerciseId: e.exerciseId,
+              name: e.name,
+              lastDoneDate: stat?.lastDoneDate ?? null,
+              sessionCount: stat?.sessionCount ?? 0,
+            };
+          }),
+      })),
+    [day.pools, day.exercises, usageStatsMap],
+  );
 
   function openSwap(exerciseId: string, exerciseName: string) {
     setPickerSwap({ outExerciseId: exerciseId, outExerciseName: exerciseName });
@@ -430,6 +503,7 @@ function DayCard({
         <div className="px-4 pb-4 -mt-1 space-y-3">
           <ExerciseList
             exercises={day.exercises}
+            pools={day.pools}
             availableExercises={availableExercises}
             disabled={isPending}
             onSwap={openSwap}
@@ -476,6 +550,20 @@ function DayCard({
           isPending={isPending}
         />
       )}
+
+      {resolvingPools && (
+        <PoolPickDialog
+          dayName={day.templateName}
+          pools={poolsForPick}
+          isPending={isPending}
+          error={error}
+          onConfirm={handlePoolPicksConfirmed}
+          onCancel={() => {
+            setResolvingPools(false);
+            setError(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -484,12 +572,14 @@ function DayCard({
 
 function ExerciseList({
   exercises,
+  pools,
   availableExercises,
   disabled,
   onSwap,
   onClearOneTime,
 }: {
   exercises: RoutineDayExerciseClient[];
+  pools: RoutinePoolClient[];
   // Needed to derive each exercise's body region (RoutineDayExerciseClient
   // doesn't carry primaryMuscles — we look it up via id).
   availableExercises: ExerciseInfo[];
@@ -503,6 +593,7 @@ function ExerciseList({
     );
   }
   const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
+  const poolById = new Map(pools.map((p) => [p.id, p]));
   // Group by module like the active session does — reads as the same
   // chunked workout the user will see when they start it.
   const elements: React.ReactNode[] = [];
@@ -536,6 +627,8 @@ function ExerciseList({
     const effectiveExercise = exerciseById.get(effectiveId);
     const region = effectiveExercise ? regionForExercise(effectiveExercise) : 'other';
     const regionStyles = REGION_STYLES[region];
+    const pool = ex.poolId ? poolById.get(ex.poolId) : undefined;
+    const poolBadge = pool ? pool.label?.trim() || `pick ${pool.pickCount}` : undefined;
     elements.push(
       <div
         key={`${ex.exerciseId}-${idx}`}
@@ -553,6 +646,15 @@ function ExerciseList({
             <>
               <span>{ex.name}</span>
               <VideoLink url={ex.videoUrl} exerciseName={ex.name} size={12} />
+              {poolBadge && (
+                <span
+                  className="text-[9px] tracking-wide uppercase accent-text border accent-border rounded-full px-1.5 py-0.5 inline-flex items-center gap-1 shrink-0"
+                  title="Part of a pool — you'll choose which members to do when you start."
+                >
+                  <Layers size={8} />
+                  {poolBadge}
+                </span>
+              )}
               {effectiveExercise && (
                 <MuscleChips
                   primary={effectiveExercise.primaryMuscles}

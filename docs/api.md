@@ -85,6 +85,8 @@ Actions in `lib/actions.ts` are grouped by `// =====` section headers in the fil
 
 **Routines.** The user's named cycle of templates. One per user, capped at 7 days. Two scheduling modes (`sequence` advances a cursor on completion; `weekday` reads today's `getDay()`). Pending swaps stage a one-time exercise substitution that applies when the session is started from the routine day; permanent swaps edit the underlying `TemplateExercise` and refuse to modify built-in templates. `startFromRoutineDay` populates a session and marks it with `startedFromRoutineDayId`; completing such a session advances the cursor in `sequence` mode. Per-(day, exercise) edits — planned sets/reps/seconds _and_ the free-text `note` — flow through `addExerciseToRoutineDay` and `updateRoutineDayExercise`, both of which accept `note` as an optional patch field that trims to null on empty. See [`docs/decisions.md`](./decisions.md) for the routines stance and [`docs/data-model.md`](./data-model.md) for the entities.
 
+**Template pools.** "Pick X of N" groups on a routine day's template. `createTemplatePool` groups 2+ existing fixed slots into a pool with a `pickCount`; `updateTemplatePool` edits `pickCount`/`label` (clamped to member count); `deleteTemplatePool` dissolves it (members fall back to fixed slots via the `SetNull` FK). `addExerciseToRoutineDay` takes an optional `poolId` to add directly into a pool. `startFromRoutineDay` now accepts `poolPicks: { poolId, exerciseIds }[]` — a day with pools must resolve every one or the action throws an expected error. All of these (plus `removeExerciseFromRoutineDay`, `reorderRoutineDayExercise`, `setRoutineDayExerciseOrder`) run `normalizeTemplatePositions` to keep each pool's members a contiguous position run. See [`docs/data-model.md`](./data-model.md) `TemplatePool` and [`docs/decisions.md`](./decisions.md) for why pools attach to the template.
+
 ## Server-side queries: the categories
 
 Queries in `lib/queries.ts`. All take `userId` as the first parameter; never trust a client-supplied one. Some are `React.cache()`-wrapped (most prominently `getUserPreferences`).
@@ -95,7 +97,9 @@ Queries in `lib/queries.ts`. All take `userId` as the first parameter; never tru
 
 **Preferences and templates.** `getUserPreferences` returns defaults when no row exists, so first-render is cheap. `getTemplates` returns the user's templates + unhidden built-ins, **excluding templates currently used by the routine** (those surface through the routine timeline). `getHiddenBuiltinTemplates` drives the unhide UI in settings.
 
-**Routines.** `getRoutineForUser` returns the full nested structure (routine → days → template → exercises + pending swaps). `getRoutineRecentSessions` lists completed sessions started from a routine day. Pure-logic helpers in `lib/routine.ts` (`pickTodaysRoutineDay`, `pickUpcomingRoutineDays`) compute the timeline.
+**Routines.** `getRoutineForUser` returns the full nested structure (routine → days → template → exercises + pools + pending swaps). `getRoutineRecentSessions` lists completed sessions started from a routine day. Pure-logic helpers in `lib/routine.ts` (`pickTodaysRoutineDay`, `pickUpcomingRoutineDays`) compute the timeline.
+
+**Exercise usage.** `getExerciseUsageStats` returns a `Map<exerciseId, { lastDoneDate, sessionCount }>` over the trailing 365 days (`React.cache()`-wrapped). Feeds the recency/count hints in the exercise picker and the pool-pick dialog — the user rotates pools by eye rather than the app auto-picking.
 
 ## HTTP routes
 

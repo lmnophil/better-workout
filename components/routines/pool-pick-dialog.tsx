@@ -1,0 +1,202 @@
+'use client';
+
+// Pool-pick dialog — shown when starting a workout from a routine day that has
+// one or more "pick X of N" pools. For each pool the user picks which members
+// to do today; the dialog surfaces last-done date + trailing-year session
+// count so the choice is recency-assisted (rotate what's gone stale, drop what
+// you rarely touch). The app doesn't auto-pick — it just shows the signal.
+
+import { useMemo, useState } from 'react';
+import { Check, Play, X } from 'lucide-react';
+import { relativeDay } from '@/lib/utils';
+
+export type PoolPickMember = {
+  exerciseId: string;
+  name: string;
+  // null = not logged in the trailing year (the usage query's window).
+  lastDoneDate: Date | null;
+  sessionCount: number;
+};
+
+export type PoolForPick = {
+  id: string;
+  label: string | null;
+  pickCount: number;
+  members: PoolPickMember[];
+};
+
+// Sort least-recently-done first so rotation candidates surface at the top:
+// never-done before done, then oldest date before newest.
+function byStaleness(a: PoolPickMember, b: PoolPickMember): number {
+  if (a.lastDoneDate === null && b.lastDoneDate === null) return a.name.localeCompare(b.name);
+  if (a.lastDoneDate === null) return -1;
+  if (b.lastDoneDate === null) return 1;
+  return a.lastDoneDate.getTime() - b.lastDoneDate.getTime();
+}
+
+export function PoolPickDialog({
+  dayName,
+  pools,
+  isPending,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  dayName: string;
+  pools: PoolForPick[];
+  isPending: boolean;
+  error: string | null;
+  onConfirm: (picks: { poolId: string; exerciseIds: string[] }[]) => void;
+  onCancel: () => void;
+}) {
+  const sortedPools = useMemo(
+    () => pools.map((p) => ({ ...p, members: [...p.members].sort(byStaleness) })),
+    [pools],
+  );
+
+  const [selections, setSelections] = useState<Record<string, Set<string>>>(() => {
+    const init: Record<string, Set<string>> = {};
+    for (const p of pools) init[p.id] = new Set<string>();
+    return init;
+  });
+
+  // How many a pool needs today — its pickCount, capped at the member count in
+  // case a member was soft-deleted out from under it.
+  function needFor(pool: PoolForPick): number {
+    return Math.min(pool.pickCount, pool.members.length);
+  }
+
+  function toggle(poolId: string, exerciseId: string, need: number) {
+    setSelections((prev) => {
+      const current = prev[poolId] ?? new Set<string>();
+      const next = new Set(current);
+      if (next.has(exerciseId)) {
+        next.delete(exerciseId);
+      } else {
+        if (next.size >= need) return prev; // pool already full — ignore
+        next.add(exerciseId);
+      }
+      return { ...prev, [poolId]: next };
+    });
+  }
+
+  const allResolved = sortedPools.every((p) => (selections[p.id]?.size ?? 0) === needFor(p));
+
+  function handleConfirm() {
+    if (!allResolved) return;
+    onConfirm(
+      sortedPools.map((p) => ({
+        poolId: p.id,
+        exerciseIds: Array.from(selections[p.id] ?? []),
+      })),
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/70 z-[60] flex items-end sm:items-center justify-center"
+      onClick={() => !isPending && onCancel()}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Pick exercises for ${dayName}`}
+    >
+      <div
+        className="bg-ink-950 border border-ink-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg sm:mx-4 max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pt-4 pb-3 border-b border-ink-800 flex items-center justify-between">
+          <div className="min-w-0">
+            <h2 className="font-display text-2xl truncate">Pick your exercises</h2>
+            <p className="text-xs text-ink-500 italic font-display mt-0.5 truncate">
+              {dayName} has {pools.length} {pools.length === 1 ? 'pool' : 'pools'} to resolve.
+            </p>
+          </div>
+          <button
+            onClick={onCancel}
+            disabled={isPending}
+            className="text-ink-500 hover:text-ink-100 transition p-2 -mr-2 disabled:opacity-50"
+            aria-label="Cancel"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {sortedPools.map((pool) => {
+            const need = needFor(pool);
+            const picked = selections[pool.id]?.size ?? 0;
+            return (
+              <div key={pool.id} className="space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="text-sm text-ink-100">
+                    {pool.label?.trim() || 'Exercise pool'}
+                  </div>
+                  <div
+                    className={`text-[11px] font-mono ${
+                      picked === need ? 'accent-text' : 'text-ink-500'
+                    }`}
+                  >
+                    {picked} / {need}
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  {pool.members.map((m) => {
+                    const checked = selections[pool.id]?.has(m.exerciseId) ?? false;
+                    const atCap = !checked && picked >= need;
+                    return (
+                      <button
+                        key={m.exerciseId}
+                        type="button"
+                        onClick={() => toggle(pool.id, m.exerciseId, need)}
+                        disabled={isPending || atCap}
+                        aria-pressed={checked}
+                        className={`w-full text-left rounded-lg border px-3 py-2 flex items-center gap-3 transition ${
+                          checked
+                            ? 'accent-border bg-accent/5'
+                            : atCap
+                              ? 'border-ink-900 opacity-40 cursor-not-allowed'
+                              : 'border-ink-800 hover:border-accent/40'
+                        }`}
+                      >
+                        <span
+                          className={`shrink-0 w-5 h-5 rounded border flex items-center justify-center transition ${
+                            checked ? 'accent-bg accent-border' : 'border-ink-700'
+                          }`}
+                          aria-hidden="true"
+                        >
+                          {checked && (
+                            <Check size={13} strokeWidth={3} className="text-ink-950" />
+                          )}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="text-sm text-ink-100 block truncate">{m.name}</span>
+                          <span className="text-[10px] font-mono text-ink-500">
+                            {m.lastDoneDate
+                              ? `${relativeDay(m.lastDoneDate)} · ${m.sessionCount}×`
+                              : 'not done yet'}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="border-t border-ink-800 px-5 py-3 space-y-2">
+          {error && <p className="text-[11px] text-bad">{error}</p>}
+          <button
+            onClick={handleConfirm}
+            disabled={!allResolved || isPending}
+            className="w-full accent-bg text-ink-950 py-2.5 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+          >
+            <Play size={13} strokeWidth={3} />
+            {allResolved ? 'Start this workout' : 'Pick from every pool to start'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

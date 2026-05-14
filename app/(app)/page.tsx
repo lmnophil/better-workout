@@ -11,6 +11,7 @@ import { redirect } from 'next/navigation';
 import {
   getActiveSession,
   getAvailableExercises,
+  getExerciseUsageStats,
   getLastSetsByExercise,
   getTemplates,
   getRoutineForUser,
@@ -32,15 +33,23 @@ export default async function WorkoutPage() {
   if (!session?.user?.id) redirect('/signin');
   const userId = session.user.id;
 
-  const [activeSession, availableExercises, templates, routine, recentRoutineSessions, bands] =
-    await Promise.all([
-      getActiveSession(userId),
-      getAvailableExercises(userId),
-      getTemplates(userId),
-      getRoutineForUser(userId),
-      getRoutineRecentSessions(userId, 5),
-      getUserBands(userId),
-    ]);
+  const [
+    activeSession,
+    availableExercises,
+    templates,
+    routine,
+    recentRoutineSessions,
+    bands,
+    usageStats,
+  ] = await Promise.all([
+    getActiveSession(userId),
+    getAvailableExercises(userId),
+    getTemplates(userId),
+    getRoutineForUser(userId),
+    getRoutineRecentSessions(userId, 5),
+    getUserBands(userId),
+    getExerciseUsageStats(userId),
+  ]);
 
   // Only fetch "last time" data after we know the active session id (to exclude it)
   const lastSetsByExercise = await getLastSetsByExercise(userId, activeSession?.id);
@@ -68,6 +77,7 @@ export default async function WorkoutPage() {
           name: te.exercise.name,
           module: te.exercise.module,
           position: te.position,
+          poolId: te.poolId,
           plannedSets: te.plannedSets,
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
@@ -86,6 +96,11 @@ export default async function WorkoutPage() {
       templateName: d.template.name,
       templateIsBuiltin: d.template.isBuiltin,
       exercises,
+      pools: d.template.pools.map((p) => ({
+        id: p.id,
+        pickCount: p.pickCount,
+        label: p.label,
+      })),
     };
   }
 
@@ -113,6 +128,11 @@ export default async function WorkoutPage() {
           dayLabel: s.startedFromRoutineDay?.label ?? null,
           templateName: s.startedFromRoutineDay?.template.name ?? null,
           setCount: s._count.setLogs,
+        })),
+        usageStats: Array.from(usageStats.entries()).map(([exerciseId, stat]) => ({
+          exerciseId,
+          lastDoneDate: stat.lastDoneDate.toISOString(),
+          sessionCount: stat.sessionCount,
         })),
       }
     : null;

@@ -292,6 +292,7 @@ model WorkoutTemplate {
   description String?
 
   exercises   TemplateExercise[]
+  pools       TemplatePool[]
   hiddenBy    UserHiddenTemplate[]
   // Routine days that reference this template. A user can't hard-delete a
   // template that's still in their routine — the action checks first and
@@ -345,6 +346,17 @@ model TemplateExercise {
   exercise   Exercise        @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
   position   Int
 
+  // Optional pool membership. Null = a fixed slot (always in the session).
+  // Non-null = a member of a TemplatePool — at session start the user picks
+  // pool.pickCount of the pool's members, the rest sit out. All members of a
+  // pool occupy a contiguous run of `position` values; the actions that touch
+  // pools maintain that invariant so the template's ordered walk still works.
+  poolId String?
+  // SetNull, not Cascade: deleting a pool *ungroups* its members back into
+  // fixed slots — it doesn't delete the exercises. They keep their (already
+  // contiguous) positions, so they read as a normal run of fixed slots.
+  pool TemplatePool? @relation(fields: [poolId], references: [id], onDelete: SetNull)
+
   plannedSets Int?
   // Used when the source Exercise.metric is 'reps'. Null = no plan.
   plannedReps Int?
@@ -371,6 +383,36 @@ model TemplateExercise {
 
   @@unique([templateId, exerciseId])
   @@index([templateId, position])
+  @@index([poolId])
+}
+
+// A "pick X of N" group inside a template. Its members are the TemplateExercise
+// rows that point back at it via `poolId`; at session start the user chooses
+// `pickCount` of them (recency-assisted) and only those are seeded into the
+// session. The pool itself has no position — its members carry the ordering,
+// and they're kept as a contiguous run within the template (app-enforced) so
+// the pool reads as a single slot in the day.
+//
+// The app does not auto-pick or recommend — it surfaces last-done and usage
+// count and lets the user rotate the pool however they like.
+model TemplatePool {
+  id         String          @id @default(cuid())
+  templateId String
+  template   WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  // How many members to seed into the session. Always 1..members.length;
+  // clamped by the actions when a member is removed.
+  pickCount Int
+  // Optional short tag for the pool (e.g. "Accessory rotation"). The members
+  // speak for themselves; this is auxiliary display text like RoutineDay.label.
+  label String?
+
+  members TemplateExercise[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([templateId])
 }
 
 model SetLog {

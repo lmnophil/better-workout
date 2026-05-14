@@ -149,6 +149,7 @@ CREATE TABLE "TemplateExercise" (
     "templateId" TEXT NOT NULL,
     "exerciseId" TEXT NOT NULL,
     "position" INTEGER NOT NULL,
+    "poolId" TEXT,
     "plannedSets" INTEGER,
     "plannedReps" INTEGER,
     "plannedSeconds" INTEGER,
@@ -157,6 +158,18 @@ CREATE TABLE "TemplateExercise" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "TemplateExercise_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "TemplatePool" (
+    "id" TEXT NOT NULL,
+    "templateId" TEXT NOT NULL,
+    "pickCount" INTEGER NOT NULL,
+    "label" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "TemplatePool_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -377,7 +390,13 @@ CREATE UNIQUE INDEX "UserHiddenTemplate_userId_templateId_key" ON "UserHiddenTem
 CREATE INDEX "TemplateExercise_templateId_position_idx" ON "TemplateExercise"("templateId", "position");
 
 -- CreateIndex
+CREATE INDEX "TemplateExercise_poolId_idx" ON "TemplateExercise"("poolId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "TemplateExercise_templateId_exerciseId_key" ON "TemplateExercise"("templateId", "exerciseId");
+
+-- CreateIndex
+CREATE INDEX "TemplatePool_templateId_idx" ON "TemplatePool"("templateId");
 
 -- CreateIndex
 CREATE INDEX "SetLog_sessionId_idx" ON "SetLog"("sessionId");
@@ -492,6 +511,12 @@ ALTER TABLE "TemplateExercise" ADD CONSTRAINT "TemplateExercise_templateId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "TemplateExercise" ADD CONSTRAINT "TemplateExercise_exerciseId_fkey" FOREIGN KEY ("exerciseId") REFERENCES "Exercise"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TemplateExercise" ADD CONSTRAINT "TemplateExercise_poolId_fkey" FOREIGN KEY ("poolId") REFERENCES "TemplatePool"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TemplatePool" ADD CONSTRAINT "TemplatePool_templateId_fkey" FOREIGN KEY ("templateId") REFERENCES "WorkoutTemplate"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "SetLog" ADD CONSTRAINT "SetLog_bandId_fkey" FOREIGN KEY ("bandId") REFERENCES "Band"("id") ON DELETE SET NULL ON UPDATE CASCADE;

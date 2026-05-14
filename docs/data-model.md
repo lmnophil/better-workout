@@ -12,7 +12,7 @@ Five groups of models:
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Auth.js adapter tables          | `User`, `Account`, `AuthSession`, `VerificationToken`                                                                      | Managed by the `@auth/prisma-adapter`. The app reads `User.id` to scope everything; the rest is opaque infrastructure.                                                       |
 | Core domain                     | `Exercise`, `WorkoutSession`, `SetLog`                                                                                     | The spine of the app. Every workout is a session containing setLogs that reference exercises.                                                                                |
-| User-customization layer        | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `Band`, `WorkoutTemplate`, `TemplateExercise`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, the user's resistance-band list, saved workout lineups, and per-user hide markers for built-in templates.              |
+| User-customization layer        | `ExerciseUserSettings`, `UserVolumeTarget`, `UserPreferences`, `Band`, `WorkoutTemplate`, `TemplateExercise`, `TemplatePool`, `UserHiddenTemplate` | Per-user preferences, per-(user, exercise) overrides, the user's resistance-band list, saved workout lineups, "pick X of N" pools, and per-user hide markers for built-in templates.              |
 | Routines                        | `Routine`, `RoutineDay`, `RoutineDayPendingSwap`                                                                           | The user's named cycle of templates and any one-time substitutions staged for upcoming days. Capped at 7 days per routine.                                                   |
 | Routine sharing + notifications | `RoutineShare`, `ShareReviewer`, `ShareComment`, `ShareSuggestion`, `ShareReaction`, `Notification`                        | Owner-minted share links, anonymous-by-cookie reviewer identities, and the in-app inbox the owner reviews. See [decisions.md](./decisions.md) for the philosophical framing. |
 
@@ -39,8 +39,10 @@ erDiagram
     Exercise ||--o{ RoutineDayPendingSwap : "swapped in/out"
 
     WorkoutTemplate ||--o{ TemplateExercise : contains
+    WorkoutTemplate ||--o{ TemplatePool : "groups (pick X of N)"
     WorkoutTemplate ||--o{ UserHiddenTemplate : "hidden by"
     WorkoutTemplate ||--o{ RoutineDay : "scheduled in"
+    TemplatePool ||--o{ TemplateExercise : "members (SetNull)"
 
     Routine ||--o{ RoutineDay : has
     RoutineDay ||--o{ RoutineDayPendingSwap : "stages"
@@ -78,6 +80,13 @@ erDiagram
     TemplateExercise {
         string templateId FK
         string exerciseId FK "Cascade"
+        string poolId FK "null = fixed slot, SetNull"
+        int position "contiguous; pool members blocked"
+    }
+    TemplatePool {
+        string id PK
+        string templateId FK "Cascade"
+        int pickCount "X of N"
     }
     ExerciseUserSettings {
         string userId FK
@@ -165,6 +174,16 @@ The `@@unique([userId, name])` constraint relies on Postgres NULL semantics — 
 `TemplateExercise` is the junction row with a `position` field. If the source `Exercise` is later (hard-)deleted, the junction goes with it (Cascade) — the template degrades gracefully. In practice exercises soft-delete, so this only fires for built-ins.
 
 The junction also carries optional `plannedSets` / `plannedReps` / `plannedSeconds` / `plannedWeight` numerics and a free-text `note` column. The numerics are hints the session seeds from; the note holds whatever the user wants to see while lifting (tempo cues, breathing protocols, coach annotations) — no structured tempo/hold/breathing fields, because surfacing them would push the app toward prescribing rather than reflecting. See [`docs/decisions.md`](./decisions.md) for the structured-vs-free-text trade-off. The note is read-only inside `ExerciseInSession` and edited on the routine page only.
+
+The optional `poolId` FK is `null` for a normal fixed slot. When set, the row is a member of a `TemplatePool` — see below.
+
+### `TemplatePool`
+
+A "pick X of N" group inside a template. The pool itself carries `pickCount` (how many members to seed into a session) and an optional `label`; its members are the `TemplateExercise` rows that point back via `poolId`. When a session is started from a routine day with pools, the user picks `pickCount` of each pool's members (recency-assisted in the UI) and only those are seeded — unpicked members sit the session out.
+
+The pool has **no position of its own**. Its members carry the ordering, and they're kept as a **contiguous run** of `TemplateExercise.position` values (app-enforced, not a DB constraint), so the pool reads as a single slot in the day. The actions that touch a template — `createTemplatePool`, `addExerciseToRoutineDay`, `removeExerciseFromRoutineDay`, `reorderRoutineDayExercise`, `setRoutineDayExerciseOrder` — all run a `gatherPoolMembers` normalization pass to restore that invariant. Contiguity is for display/seed-order niceness; `startFromRoutineDay` filters by `poolId` regardless, so a stray non-contiguous state degrades cosmetically, not functionally.
+
+`onDelete: Cascade` from the template. `TemplateExercise.poolId` is `onDelete: SetNull` — dissolving a pool ungroups its members back into fixed slots in place rather than deleting the exercises. Pools live only on user-owned routine-day templates (created via `createTemplatePool`, which requires a `routineDayId`); the seed never creates pools, so built-in templates have none. See [`docs/decisions.md`](./decisions.md) for why pools attach to the template and why selection is manual-at-session-start, not auto-picked.
 
 ### `UserHiddenTemplate`
 
