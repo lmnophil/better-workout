@@ -266,7 +266,9 @@ export function computeSuggestionDiff(args: {
     exercises: d.exercises.map((ex) => ({
       exerciseId: ex.exerciseId,
       plannedSets: ex.plannedSets,
+      poolId: ex.poolId,
     })),
+    pools: d.pools,
   }));
 
   switch (kind) {
@@ -376,7 +378,8 @@ export function computeSuggestionDiff(args: {
 
 type PlannedDay = {
   id: string;
-  exercises: { exerciseId: string; plannedSets: number | null }[];
+  exercises: { exerciseId: string; plannedSets: number | null; poolId?: string | null }[];
+  pools?: { id: string; pickCount: number }[];
 };
 
 function finalize(

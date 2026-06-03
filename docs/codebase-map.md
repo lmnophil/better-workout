@@ -110,6 +110,7 @@ What's load-bearing about the query surface, rather than the list itself:
 
 - **Recency windows are baked into the queries.** Coverage looks at trailing 90 days; the "last sets" lookup at trailing 180; weekly volume at 7. Tuned to the UI's gradient and to bound memory growth. See [decisions.md](decisions.md).
 - **Weighted credit for multi-muscle exercises.** Volume credits primary muscles at 1.0 and secondary at 0.5; coverage (recency) treats both equally. See [decisions.md](decisions.md).
+- **Structural coverage weights pool members by expected pick.** The *planned* estimate (`computeRoutineVolumes` / `poolPickWeights` in `lib/coverage.ts`, feeding the routine editor's coverage panel + per-day strip + time estimate and the share view) scales each pooled member by `pickCount / memberCount`, so a "do X of N" pool counts what it delivers, not all N. Recorded coverage (from `SetLog`s) is exact and needs no such adjustment. See [decisions.md](decisions.md).
 - **Templates currently used by the routine are excluded from `getTemplates`** — they surface through the routine timeline instead. If you write a new template-listing query, decide whether you want the same filter.
 - **`getUserPreferences` returns `PREFS_DEFAULTS` when no row exists**, so reads are cheap on every render and writes are lazy. The lazy-row pattern would extend to any future "one row per user" preference table.
 

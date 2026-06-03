@@ -51,6 +51,9 @@ export type RoutineExercise = {
   plannedWeight: number | null;
   videoUrl: string | null;
   equipment: string[];
+  // Pool membership — drives the expected-pick weighting in coverage. Null = a
+  // fixed slot.
+  poolId: string | null;
 };
 
 export type RoutineForShare = {
@@ -66,6 +69,8 @@ export type RoutineForShare = {
     label: string | null;
     name: string;
     exercises: RoutineExercise[];
+    // The day's pools (id + how many members to do), for coverage weighting.
+    pools: Array<{ id: string; pickCount: number }>;
   }>;
 };
 

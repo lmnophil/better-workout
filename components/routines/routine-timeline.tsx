@@ -26,7 +26,8 @@ import {
 } from '@/components/workout/workout-view';
 import { moduleDescription } from '@/lib/exercises-data';
 import { usePrefs } from '@/components/ui/prefs-context';
-import { estimatePlannedTotalSeconds, formatEstimate } from '@/lib/time-estimate';
+import { estimatePlannedExerciseSeconds, formatEstimate } from '@/lib/time-estimate';
+import { poolPickWeights } from '@/lib/coverage';
 import { regionForExercise, REGION_STYLES } from '@/lib/region-color';
 
 // A "pick X of N" pool on a routine day. Members are the day's exercises whose
@@ -286,21 +287,24 @@ function DayCard({
   // will actually start with. Per-exercise rest comes from the user's
   // override, or falls back to the global preference.
   const exerciseById = new Map(availableExercises.map((e) => [e.id, e]));
-  const dayPlannedExercises = day.exercises.flatMap((e) => {
+  // Pooled members only contribute the time the pool is expected to spend on
+  // them (pickCount/memberCount), matching the structural coverage + editor
+  // weighting — keyed by the slot's own exerciseId, so a staged swap still
+  // inherits the slot's pool weight.
+  const poolWeights = poolPickWeights(day);
+  const dayEstimateSec = day.exercises.reduce((sum, e) => {
     const effectiveId = e.pendingSwapInExerciseId ?? e.exerciseId;
     const ex = exerciseById.get(effectiveId);
-    if (!ex) return [];
-    return [
-      {
-        metric: ex.metric,
-        restSeconds: ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
-        plannedSets: e.plannedSets,
-        plannedReps: e.plannedReps,
-        plannedSeconds: e.plannedSeconds,
-      },
-    ];
-  });
-  const dayEstimateSec = estimatePlannedTotalSeconds(dayPlannedExercises);
+    if (!ex) return sum;
+    const seconds = estimatePlannedExerciseSeconds({
+      metric: ex.metric,
+      restSeconds: ex.restTimerSecondsOverride ?? prefs.restTimerSeconds,
+      plannedSets: e.plannedSets,
+      plannedReps: e.plannedReps,
+      plannedSeconds: e.plannedSeconds,
+    });
+    return sum + seconds * (poolWeights.get(e.exerciseId) ?? 1);
+  }, 0);
 
   // Picker open for swap. Holds the outgoing exercise's id+name so the
   // picker can show the right title and the post-pick choice dialog can

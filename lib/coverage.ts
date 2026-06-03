@@ -186,17 +186,54 @@ export type ExerciseMuscleShape = {
 export type PlannedExercise = {
   exerciseId: string;
   plannedSets: number | null;
+  // Pool membership, if any. A pooled member only contributes the volume the
+  // pool is *expected* to deliver — see poolPickWeights. Absent/null = a fixed
+  // slot that always counts in full.
+  poolId?: string | null;
 };
+
+export type PlannedPool = { id: string; pickCount: number };
 
 export type PlannedDay = {
   exercises: PlannedExercise[];
+  // The day's pools, if any. Needed to weight pooled members; omit on surfaces
+  // (drafts, presets) that never have pools — every exercise then weighs 1.
+  pools?: PlannedPool[];
 };
 
 export type MuscleVolume = { sets: number; estimated: boolean };
 export type MuscleVolumes = Map<string, MuscleVolume>;
 
+// Expected-pick weight per exercise in a day. A pool of N members that seeds X
+// per session means each member is done X/N of the time on average, so its
+// structural contribution (volume, time) is scaled by that fraction — a
+// "do 1 of 5" member counts a fifth, and the pool as a whole counts ~X
+// members' worth. Fixed slots (no poolId) and exercises on a day with no pool
+// data weigh 1. The fraction is clamped to ≤1 in case pickCount outruns the
+// live member count (e.g. a member was just removed).
+export function poolPickWeights(day: PlannedDay): Map<string, number> {
+  const memberCount = new Map<string, number>();
+  for (const e of day.exercises) {
+    if (e.poolId) memberCount.set(e.poolId, (memberCount.get(e.poolId) ?? 0) + 1);
+  }
+  const pickById = new Map((day.pools ?? []).map((p) => [p.id, p.pickCount]));
+  const weights = new Map<string, number>();
+  for (const e of day.exercises) {
+    if (!e.poolId) {
+      weights.set(e.exerciseId, 1);
+      continue;
+    }
+    const members = memberCount.get(e.poolId) ?? 1;
+    const pick = Math.min(pickById.get(e.poolId) ?? members, members);
+    weights.set(e.exerciseId, members > 0 ? pick / members : 1);
+  }
+  return weights;
+}
+
 // Sum weighted sets per muscle across one full routine cycle. Primary
-// contributes 1.0 × sets, secondary 0.5 ×. An exercise with no planned-sets
+// contributes 1.0 × sets, secondary 0.5 ×. Pooled members are further scaled
+// by their expected-pick weight (see poolPickWeights) so a "do X of N" pool
+// counts what it actually delivers, not all N. An exercise with no planned-sets
 // falls back to ESTIMATED_SETS_FALLBACK and the muscle gets the `estimated`
 // flag so the UI can disclose where numbers are firm vs inferred.
 export function computeRoutineVolumes(
@@ -206,12 +243,13 @@ export function computeRoutineVolumes(
   const totals: MuscleVolumes = new Map();
   let anyEstimated = false;
   for (const day of days) {
+    const weights = poolPickWeights(day);
     for (const dx of day.exercises) {
       const ex = exerciseById.get(dx.exerciseId);
       if (!ex) continue;
-      const sets = dx.plannedSets ?? ESTIMATED_SETS_FALLBACK;
       const estimated = dx.plannedSets === null;
       if (estimated) anyEstimated = true;
+      const sets = (dx.plannedSets ?? ESTIMATED_SETS_FALLBACK) * (weights.get(dx.exerciseId) ?? 1);
       for (const m of ex.primaryMuscles) {
         const cur = totals.get(m) ?? { sets: 0, estimated: false };
         totals.set(m, { sets: cur.sets + sets, estimated: cur.estimated || estimated });

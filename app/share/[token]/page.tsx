@@ -112,7 +112,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           plannedWeight: te.plannedWeight,
           videoUrl: te.exercise.videoUrl,
           equipment: te.exercise.equipment,
+          poolId: te.poolId,
         })),
+      pools: d.template.pools.map((p) => ({ id: p.id, pickCount: p.pickCount })),
     })),
   };
 
@@ -143,7 +145,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       exercises: d.exercises.map((ex) => ({
         exerciseId: ex.exerciseId,
         plannedSets: ex.plannedSets,
+        poolId: ex.poolId,
       })),
+      pools: d.pools,
     })),
     exerciseLookup,
   );

@@ -46,6 +46,7 @@ import {
   deleteRoutine,
   deleteTemplatePool,
   duplicateRoutineDay,
+  removeExerciseFromPool,
   removeExerciseFromRoutineDay,
   removeRoutineDay,
   reorderRoutineDay,
@@ -77,6 +78,7 @@ import {
   TIER_VISUALS,
   computeDayVolumes,
   computeRoutineVolumes,
+  poolPickWeights,
   formatSets,
   tierFor as coverageTierFor,
   type CoverageTier,
@@ -922,6 +924,7 @@ function DraftEditor({
               onCreatePool={null}
               onUpdatePool={null}
               onDeletePool={null}
+              onRemoveFromPool={null}
             />
           </div>
 
@@ -1572,6 +1575,12 @@ function LiveEditor({
             router.refresh();
           });
         }}
+        onRemoveFromPool={(poolId, exerciseId) => {
+          startTransition(async () => {
+            await removeExerciseFromPool({ poolId, exerciseId }).catch(() => {});
+            router.refresh();
+          });
+        }}
       />
 
       <CoveragePanel totals={totals} anyEstimated={anyEstimated} muscleGroups={muscleGroups} />
@@ -1608,6 +1617,30 @@ function LiveEditor({
                   router.refresh();
                 });
               }}
+              onPickAsPool={
+                // Only offer "add as a new pool" when we're adding fresh slots
+                // to the day, not when the picker was opened to extend an
+                // existing pool (targetPoolId set) — those go through onPickMany
+                // with the pool id instead.
+                targetPoolId
+                  ? undefined
+                  : (exerciseIds) => {
+                      setPickerCtx(null);
+                      startTransition(async () => {
+                        for (const exerciseId of exerciseIds) {
+                          await addExerciseToRoutineDay({ routineDayId: day.id, exerciseId });
+                        }
+                        // New pools default to picking 1 of N; the user adjusts
+                        // from the pool afterward.
+                        await createTemplatePool({
+                          routineDayId: day.id,
+                          exerciseIds,
+                          pickCount: 1,
+                        }).catch(() => {});
+                        router.refresh();
+                      });
+                    }
+              }
               onClose={() => setPickerCtx(null)}
               onCreateCustom={(
                 name,
@@ -1934,6 +1967,8 @@ type DaysSectionProps = {
     | ((poolId: string, patch: { pickCount?: number; label?: string | null }) => void)
     | null;
   onDeletePool: ((poolId: string) => void) | null;
+  // Ungroup one member from a pool (keep it in the day as a fixed slot).
+  onRemoveFromPool: ((poolId: string, exerciseId: string) => void) | null;
   // Per-exercise effective rest seconds (override → global default). Lets
   // DayCard estimate per-exercise time without re-resolving the user's prefs.
   restByExerciseId: Map<string, number>;
@@ -2104,6 +2139,7 @@ function dispatchProps(p: DaysSectionProps) {
     onCreatePool: p.onCreatePool,
     onUpdatePool: p.onUpdatePool,
     onDeletePool: p.onDeletePool,
+    onRemoveFromPool: p.onRemoveFromPool,
     restByExerciseId: p.restByExerciseId,
     muscleGroups: p.muscleGroups,
     exerciseById: p.exerciseById,
@@ -2143,6 +2179,7 @@ type DayCardProps = {
     | ((poolId: string, patch: { pickCount?: number; label?: string | null }) => void)
     | null;
   onDeletePool: ((poolId: string) => void) | null;
+  onRemoveFromPool: ((poolId: string, exerciseId: string) => void) | null;
   restByExerciseId: Map<string, number>;
   muscleGroups: MuscleGroupClient[];
   exerciseById: Map<string, ExerciseInfo>;
@@ -2175,6 +2212,7 @@ function DayCard({
   onCreatePool,
   onUpdatePool,
   onDeletePool,
+  onRemoveFromPool,
   restByExerciseId,
   muscleGroups,
   exerciseById,
@@ -2188,11 +2226,9 @@ function DayCard({
   const poolsEnabled = onCreatePool !== null;
   const [grouping, setGrouping] = useState(false);
   const [poolSelection, setPoolSelection] = useState<Set<string>>(new Set());
-  const [newPoolPickCount, setNewPoolPickCount] = useState(1);
   function resetGrouping() {
     setGrouping(false);
     setPoolSelection(new Set());
-    setNewPoolPickCount(1);
   }
   // A pool needs at least two members; a fixed slot can't already be pooled.
   function togglePoolSelection(exerciseId: string) {
@@ -2241,6 +2277,10 @@ function DayCard({
   // back to the seeder's defaults — same behavior as the coverage panel, so
   // the time and volume readouts agree on what an "estimated" set looks like.
   const { dayEstimateSec, groupEstimateSec } = useMemo(() => {
+    // Pooled members only contribute the time the pool is expected to spend on
+    // them (pickCount/memberCount), matching the coverage weighting — a
+    // "do 1 of 5" pool reads as ~one exercise's time, not five.
+    const weights = poolPickWeights({ exercises: day.exercises, pools: day.pools });
     const perGroup = new Map<string, number>();
     let dayTotal = 0;
     for (const group of moduleGroups) {
@@ -2253,13 +2293,13 @@ function DayCard({
           plannedSeconds: ex.plannedSeconds,
           restSeconds: restByExerciseId.get(ex.exerciseId) ?? 90,
         });
-        groupTotal += seconds;
+        groupTotal += seconds * (weights.get(ex.exerciseId) ?? 1);
       }
       perGroup.set(group.module, groupTotal);
       dayTotal += groupTotal;
     }
     return { dayEstimateSec: dayTotal, groupEstimateSec: perGroup };
-  }, [moduleGroups, restByExerciseId]);
+  }, [moduleGroups, restByExerciseId, day.exercises, day.pools]);
 
   const takenWeekdays = new Set(
     allDays.filter((d) => d.id !== day.id && d.weekday !== null).map((d) => d.weekday as number),
@@ -2517,9 +2557,28 @@ function DayCard({
                     const canMoveUp = prev !== null && prev.module === ex.module;
                     const canMoveDown = next !== null && next.module === ex.module;
                     const pool = ex.poolId ? poolById.get(ex.poolId) : undefined;
-                    const poolBadge = pool
-                      ? pool.label?.trim() || `pick ${pool.pickCount}`
-                      : undefined;
+                    // Pool members are a contiguous run; treat the first (by
+                    // position) as the "lead" and hang the editable pick-X
+                    // stepper off its row, so the count lives right on the pool
+                    // instead of only in the management panel below. The other
+                    // members just show a plain "pool" tag.
+                    const poolMembers = pool
+                      ? day.exercises.filter((e) => e.poolId === pool.id)
+                      : [];
+                    const isPoolLead = pool
+                      ? poolMembers[0]?.exerciseId === ex.exerciseId
+                      : false;
+                    const poolControl =
+                      pool && isPoolLead && onUpdatePool
+                        ? {
+                            pickCount: pool.pickCount,
+                            memberCount: poolMembers.length,
+                            label: pool.label,
+                            onChange: (n: number) => onUpdatePool(pool.id, { pickCount: n }),
+                          }
+                        : null;
+                    const poolBadge =
+                      pool && !isPoolLead ? pool.label?.trim() || 'pool' : undefined;
                     // During grouping, only un-pooled fixed slots can join the
                     // new pool — already-pooled rows just show their badge.
                     const selectable =
@@ -2537,6 +2596,7 @@ function DayCard({
                         canMoveDown={canMoveDown}
                         isPending={isPending}
                         poolBadge={poolBadge}
+                        poolControl={poolControl}
                         selectable={selectable}
                         onRemove={() => onRemoveExercise(day.id, ex.exerciseId)}
                         onMove={(dir) => onReorderExercise(day.id, ex.exerciseId, dir)}
@@ -2560,29 +2620,15 @@ function DayCard({
             <div className="text-[11px] text-ink-200">
               {poolSelection.size < 2
                 ? 'Tick two or more exercises to pool them — at the workout you’ll pick which to do.'
-                : `${poolSelection.size} selected.`}
+                : `${poolSelection.size} selected. New pools start at "do 1" — adjust on the pool after.`}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <PoolPickCountStepper
-                label="Pick"
-                value={Math.min(newPoolPickCount, Math.max(poolSelection.size, 1))}
-                max={Math.max(poolSelection.size, 1)}
-                disabled={poolSelection.size < 2 || isPending}
-                onChange={setNewPoolPickCount}
-              />
-              <span className="text-[11px] text-ink-500">
-                of {Math.max(poolSelection.size, 0)}
-              </span>
               <button
                 type="button"
                 disabled={poolSelection.size < 2 || isPending}
                 onClick={() => {
                   if (poolSelection.size < 2 || !onCreatePool) return;
-                  onCreatePool(
-                    day.id,
-                    Array.from(poolSelection),
-                    Math.min(newPoolPickCount, poolSelection.size),
-                  );
+                  onCreatePool(day.id, Array.from(poolSelection), 1);
                   resetGrouping();
                 }}
                 className="text-xs accent-bg text-ink-950 px-3 py-1.5 rounded-md font-semibold tracking-wide disabled:opacity-30 disabled:cursor-not-allowed"
@@ -2600,15 +2646,20 @@ function DayCard({
           </div>
         )}
 
-        {poolsEnabled && day.pools.length > 0 && onUpdatePool && onDeletePool && (
-          <DayPools
-            day={day}
-            isPending={isPending}
-            onUpdatePool={onUpdatePool}
-            onDeletePool={onDeletePool}
-            onAddToPool={(poolId) => onOpenExercisePicker(day.id, poolId)}
-          />
-        )}
+        {poolsEnabled &&
+          day.pools.length > 0 &&
+          onUpdatePool &&
+          onDeletePool &&
+          onRemoveFromPool && (
+            <DayPools
+              day={day}
+              isPending={isPending}
+              onUpdatePool={onUpdatePool}
+              onDeletePool={onDeletePool}
+              onRemoveFromPool={onRemoveFromPool}
+              onAddToPool={(poolId) => onOpenExercisePicker(day.id, poolId)}
+            />
+          )}
 
         <div className="flex items-center gap-2">
           <button
@@ -2795,6 +2846,7 @@ function ExerciseRow({
   canMoveDown,
   isPending,
   poolBadge,
+  poolControl,
   selectable,
   onSwap,
   onRemove,
@@ -2805,9 +2857,17 @@ function ExerciseRow({
   canMoveUp: boolean;
   canMoveDown: boolean;
   isPending: boolean;
-  // When the exercise belongs to a pool, a short badge (pool label or
-  // "pick N") shown next to the module tag.
+  // When the exercise belongs to a pool but isn't its lead member, a short
+  // static badge (pool label or "pool") shown next to the module tag.
   poolBadge?: string;
+  // Set only on a pool's lead member: renders an inline "do X of N" stepper so
+  // the pick count is adjustable right from the pooled exercise.
+  poolControl?: {
+    pickCount: number;
+    memberCount: number;
+    label: string | null;
+    onChange: (n: number) => void;
+  } | null;
   // When set, the row is in pool-grouping selection mode: it renders a
   // checkbox in place of the move arrows.
   selectable?: { checked: boolean; onToggle: () => void } | null;
@@ -2893,6 +2953,27 @@ function ExerciseRow({
               >
                 <Layers size={8} />
                 {poolBadge}
+              </span>
+            )}
+            {poolControl && (
+              <span
+                className="inline-flex items-center gap-1.5 shrink-0"
+                title="This pool's pick count — how many of its members you'll do each session. Adjust any time; you choose which ones at the workout."
+              >
+                {poolControl.label?.trim() && (
+                  <span className="text-[9px] tracking-wide uppercase accent-text inline-flex items-center gap-1">
+                    <Layers size={8} />
+                    {poolControl.label.trim()}
+                  </span>
+                )}
+                <PoolPickCountStepper
+                  label="do"
+                  value={poolControl.pickCount}
+                  max={Math.max(poolControl.memberCount, 1)}
+                  disabled={isPending}
+                  onChange={poolControl.onChange}
+                />
+                <span className="text-[10px] text-ink-500">of {poolControl.memberCount}</span>
               </span>
             )}
             <MuscleChips
@@ -3029,12 +3110,14 @@ function DayPools({
   isPending,
   onUpdatePool,
   onDeletePool,
+  onRemoveFromPool,
   onAddToPool,
 }: {
   day: EditorDay;
   isPending: boolean;
   onUpdatePool: (poolId: string, patch: { pickCount?: number; label?: string | null }) => void;
   onDeletePool: (poolId: string) => void;
+  onRemoveFromPool: (poolId: string, exerciseId: string) => void;
   onAddToPool: (poolId: string) => void;
 }) {
   return (
@@ -3050,6 +3133,7 @@ function DayPools({
           isPending={isPending}
           onUpdatePool={onUpdatePool}
           onDeletePool={onDeletePool}
+          onRemoveFromPool={onRemoveFromPool}
           onAddToPool={onAddToPool}
         />
       ))}
@@ -3057,13 +3141,15 @@ function DayPools({
   );
 }
 
-// One pool: editable label, pick-count stepper, member chips, add/ungroup.
+// One pool: editable label, pick-count stepper, member chips (each removable),
+// add/ungroup.
 function PoolRow({
   pool,
   members,
   isPending,
   onUpdatePool,
   onDeletePool,
+  onRemoveFromPool,
   onAddToPool,
 }: {
   pool: PoolClient;
@@ -3071,6 +3157,7 @@ function PoolRow({
   isPending: boolean;
   onUpdatePool: (poolId: string, patch: { pickCount?: number; label?: string | null }) => void;
   onDeletePool: (poolId: string) => void;
+  onRemoveFromPool: (poolId: string, exerciseId: string) => void;
   onAddToPool: (poolId: string) => void;
 }) {
   // Commit-on-blur label edit — same pattern as the per-exercise note.
@@ -3118,8 +3205,8 @@ function PoolRow({
         )}
         <div className="flex items-center gap-2 shrink-0">
           <PoolPickCountStepper
-            label="Pick"
-            value={pool.pickCount}
+            label="do"
+            value={Math.min(pool.pickCount, Math.max(members.length, 1))}
             max={Math.max(members.length, 1)}
             disabled={isPending}
             onChange={(n) => onUpdatePool(pool.id, { pickCount: n })}
@@ -3152,9 +3239,19 @@ function PoolRow({
           members.map((m) => (
             <span
               key={m.exerciseId}
-              className="text-[10px] text-ink-300 bg-ink-900 border border-ink-800 rounded-full px-2 py-0.5"
+              className="text-[10px] text-ink-300 bg-ink-900 border border-ink-800 rounded-full pl-2 pr-1 py-0.5 inline-flex items-center gap-1"
             >
               {m.name}
+              <button
+                type="button"
+                onClick={() => onRemoveFromPool(pool.id, m.exerciseId)}
+                disabled={isPending}
+                className="text-ink-500 hover:text-bad transition disabled:opacity-50 -mr-0.5"
+                aria-label={`Remove ${m.name} from this pool`}
+                title="Remove from pool — stays in the day as a fixed slot"
+              >
+                <X size={11} />
+              </button>
             </span>
           ))
         ) : (
@@ -3310,7 +3407,9 @@ function computeMuscleTotals(
       exercises: d.exercises.map((dx) => ({
         exerciseId: dx.exerciseId,
         plannedSets: dx.plannedSets,
+        poolId: dx.poolId,
       })),
+      pools: d.pools.map((p) => ({ id: p.id, pickCount: p.pickCount })),
     })),
     exerciseById,
   );
@@ -3371,7 +3470,9 @@ function PerDayCoverageStrip({
         exercises: day.exercises.map((dx) => ({
           exerciseId: dx.exerciseId,
           plannedSets: dx.plannedSets,
+          poolId: dx.poolId,
         })),
+        pools: day.pools.map((p) => ({ id: p.id, pickCount: p.pickCount })),
       },
       exerciseById,
     );
