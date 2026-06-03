@@ -2524,6 +2524,64 @@ export const deleteTemplatePool = withLogging(
   },
 );
 
+const RemoveExerciseFromPoolSchema = z.object({
+  poolId: z.string().min(1),
+  exerciseId: z.string().min(1),
+});
+
+/**
+ * Ungroup a single member from a pool — it stays in the day as a fixed slot,
+ * the other members stay pooled. This is the per-member inverse of adding to a
+ * pool; removing the exercise from the day entirely is a separate action. If
+ * the pool would drop below two members it's dissolved (the lone survivor
+ * falls back to a fixed slot), mirroring removeExerciseFromRoutineDay.
+ */
+export const removeExerciseFromPool = withLogging(
+  'removeExerciseFromPool',
+  async (input: z.infer<typeof RemoveExerciseFromPoolSchema>) => {
+    const userId = await requireUser();
+    const { poolId, exerciseId } = RemoveExerciseFromPoolSchema.parse(input);
+
+    const pool = await db.templatePool.findFirst({
+      where: { id: poolId, template: { userId } },
+      select: { id: true, templateId: true, pickCount: true },
+    });
+    if (!pool) throw new Error('Pool not found');
+
+    await db.$transaction(async (tx) => {
+      // Ungroup the named member. updateMany (not update) so a stale id that no
+      // longer points at this pool is a no-op rather than a throw.
+      await tx.templateExercise.updateMany({
+        where: { poolId: pool.id, exerciseId },
+        data: { poolId: null },
+      });
+
+      const remainingMembers = await tx.templateExercise.count({
+        where: { poolId: pool.id },
+      });
+      if (remainingMembers < 2) {
+        await tx.templateExercise.updateMany({
+          where: { poolId: pool.id },
+          data: { poolId: null },
+        });
+        await tx.templatePool.delete({ where: { id: pool.id } });
+      } else if (pool.pickCount > remainingMembers) {
+        // Keep pickCount in 1..members.length — same clamp as
+        // removeExerciseFromRoutineDay.
+        await tx.templatePool.update({
+          where: { id: pool.id },
+          data: { pickCount: remainingMembers },
+        });
+      }
+
+      await normalizeTemplatePositions(tx, pool.templateId);
+    });
+
+    revalidatePath('/');
+    revalidatePath('/routine');
+  },
+);
+
 const ReorderRoutineDaySchema = z.object({
   routineDayId: z.string().min(1),
   direction: z.enum(['up', 'down']),

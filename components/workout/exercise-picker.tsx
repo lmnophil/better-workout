@@ -74,6 +74,12 @@ type Props = {
   // because not every surface that opens the picker has it loaded.
   usageStats?: Map<string, ExerciseUsageStat>;
   onPickMany: (exerciseIds: string[]) => void;
+  // Optional: when provided, the browse footer offers a second action that
+  // adds the current multi-selection to the day AND groups it into a new pool
+  // of alternatives. Only the routine editor's add-to-day picker passes this;
+  // the workout, swap, and add-to-existing-pool surfaces leave it unset, so no
+  // pool button appears there. Shown only when 2+ exercises are selected.
+  onPickAsPool?: (exerciseIds: string[]) => void;
   onClose: () => void;
   onCreateCustom: (
     name: string,
@@ -102,6 +108,7 @@ export function ExercisePicker({
   gapMuscles,
   usageStats,
   onPickMany,
+  onPickAsPool,
   onClose,
   onCreateCustom,
   onDeleteCustom,
@@ -178,6 +185,14 @@ export function ExercisePicker({
               // because the picker's job is done.
               onClose();
             }}
+            onPickAsPool={
+              onPickAsPool
+                ? (ids) => {
+                    onPickAsPool(ids);
+                    onClose();
+                  }
+                : undefined
+            }
             onDeleteCustom={onDeleteCustom}
             swapMode={
               swap
@@ -236,6 +251,7 @@ function BrowseTab({
   gapMuscles,
   usageStats,
   onPickMany,
+  onPickAsPool,
   onDeleteCustom,
   swapMode,
 }: {
@@ -246,6 +262,7 @@ function BrowseTab({
   gapMuscles?: Set<string>;
   usageStats?: Map<string, ExerciseUsageStat>;
   onPickMany: (ids: string[]) => void;
+  onPickAsPool?: (ids: string[]) => void;
   onDeleteCustom: (id: string) => void;
   // When set, tapping any row commits immediately and the parent closes the
   // picker. The footer + checkbox-multi-select UI is hidden in this mode.
@@ -461,6 +478,13 @@ function BrowseTab({
     // Preserve the order in which the user selected — Set preserves insertion
     // order, which is what we want.
     onPickMany(Array.from(selected));
+  }
+
+  function commitAsPool() {
+    // A pool needs at least two alternatives; the footer only offers this
+    // action when that holds, but guard anyway.
+    if (!onPickAsPool || selected.size < 2) return;
+    onPickAsPool(Array.from(selected));
   }
 
   const anyChipsSelected =
@@ -754,6 +778,7 @@ function BrowseTab({
           hint={hint}
           totalSec={selectedTotalSec}
           onCommit={commit}
+          onCommitAsPool={onPickAsPool ? commitAsPool : undefined}
         />
       )}
     </>
@@ -903,6 +928,7 @@ function PickerFooter({
   hint,
   totalSec,
   onCommit,
+  onCommitAsPool,
 }: {
   selectedCount: number;
   primaryCounts: Map<string, number>;
@@ -912,6 +938,10 @@ function PickerFooter({
   // glance before committing.
   totalSec: number;
   onCommit: () => void;
+  // Optional second action: group the selection into a pool of alternatives
+  // instead of adding them as separate slots. Only the routine editor passes
+  // it; surfaced as a secondary button once 2+ exercises are selected.
+  onCommitAsPool?: () => void;
 }) {
   // Convert the primary-count map into labelled rows. Order by descending
   // count so the dominant muscle reads first.
@@ -951,6 +981,17 @@ function PickerFooter({
           ? 'Pick exercises to add'
           : `Add ${selectedCount} to session · +~${formatEstimate(totalSec)}`}
       </button>
+      {/* Pool action — only meaningful with two or more alternatives, so it
+          appears once the selection clears that bar. Secondary styling keeps
+          the plain "add" the default path. */}
+      {onCommitAsPool && selectedCount >= 2 && (
+        <button
+          onClick={onCommitAsPool}
+          className="w-full border border-accent/50 accent-text py-2.5 rounded-lg text-sm font-semibold tracking-wide hover:bg-accent/10 transition"
+        >
+          Add {selectedCount} as a pool of alternatives
+        </button>
+      )}
     </div>
   );
 }

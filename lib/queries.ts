@@ -652,6 +652,7 @@ export async function getShareByToken(token: string) {
                       },
                     },
                   },
+                  pools: { select: { id: true, pickCount: true } },
                 },
               },
             },
