@@ -6,7 +6,7 @@
 // count so the choice is recency-assisted (rotate what's gone stale, drop what
 // you rarely touch). The app doesn't auto-pick — it just shows the signal.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Play, X } from 'lucide-react';
 import { relativeDay } from '@/lib/utils';
 
@@ -60,6 +60,57 @@ export function PoolPickDialog({
     return init;
   });
 
+  // A11y: this is a modal, so focus has to live inside it. On open we move
+  // focus into the dialog and remember what had it (the "Start this workout"
+  // button), then restore that on close so keyboard users land back where they
+  // were. Escape closes (matching the backdrop/✕, including the isPending
+  // guard), and Tab is trapped so it can't wander onto the page behind.
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => previouslyFocused?.focus();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        if (!isPending) onCancel();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        // Nothing tabbable (every control disabled while pending) — keep focus
+        // pinned to the dialog rather than letting it escape to the page.
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first || active === dialog) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isPending, onCancel]);
+
   // How many a pool needs today — its pickCount, capped at the member count in
   // case a member was soft-deleted out from under it.
   function needFor(pool: PoolForPick): number {
@@ -101,7 +152,9 @@ export function PoolPickDialog({
       aria-label={`Pick exercises for ${dayName}`}
     >
       <div
-        className="bg-ink-950 border border-ink-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg sm:mx-4 max-h-[90vh] flex flex-col"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="bg-ink-950 border border-ink-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg sm:mx-4 max-h-[90vh] flex flex-col focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 pt-4 pb-3 border-b border-ink-800 flex items-center justify-between">
