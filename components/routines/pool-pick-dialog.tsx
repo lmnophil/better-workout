@@ -117,14 +117,26 @@ export function PoolPickDialog({
     return Math.min(pool.pickCount, pool.members.length);
   }
 
-  function toggle(poolId: string, exerciseId: string, need: number) {
+  function pick(poolId: string, exerciseId: string, need: number) {
     setSelections((prev) => {
+      // A "do 1" pool is a radio group: tapping a member just makes it the one,
+      // replacing whatever was picked. No toggle-off — a pool with zero picks
+      // can't start, so there's nothing to express by un-picking the sole pick.
+      if (need === 1) {
+        return { ...prev, [poolId]: new Set([exerciseId]) };
+      }
       const current = prev[poolId] ?? new Set<string>();
       const next = new Set(current);
       if (next.has(exerciseId)) {
         next.delete(exerciseId);
       } else {
-        if (next.size >= need) return prev; // pool already full — ignore
+        // At cap, swap out the oldest pick rather than ignoring the tap — the
+        // user can switch a pick without first hunting for the one to un-tick.
+        // Set preserves insertion order, so the first entry is the oldest.
+        if (next.size >= need) {
+          const oldest = next.values().next().value;
+          if (oldest !== undefined) next.delete(oldest);
+        }
         next.add(exerciseId);
       }
       return { ...prev, [poolId]: next };
@@ -177,6 +189,7 @@ export function PoolPickDialog({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {sortedPools.map((pool) => {
             const need = needFor(pool);
+            const isRadio = need === 1;
             const picked = selections[pool.id]?.size ?? 0;
             return (
               <div key={pool.id} className="space-y-2">
@@ -192,34 +205,51 @@ export function PoolPickDialog({
                     {picked} / {need}
                   </div>
                 </div>
-                <div className="space-y-1.5">
+                {/* A "do 1" pool is a single-choice group, so it's a radiogroup
+                    with round indicators; "do N" pools stay multi-select
+                    checkboxes. Either way a tap at cap swaps rather than being
+                    refused, so no member is ever disabled (except while the
+                    start action is in flight). */}
+                <div
+                  className="space-y-1.5"
+                  role={isRadio ? 'radiogroup' : undefined}
+                  aria-label={isRadio ? pool.label?.trim() || 'Exercise pool' : undefined}
+                >
                   {pool.members.map((m) => {
                     const checked = selections[pool.id]?.has(m.exerciseId) ?? false;
-                    const atCap = !checked && picked >= need;
                     return (
                       <button
                         key={m.exerciseId}
                         type="button"
-                        onClick={() => toggle(pool.id, m.exerciseId, need)}
-                        disabled={isPending || atCap}
-                        aria-pressed={checked}
+                        onClick={() => pick(pool.id, m.exerciseId, need)}
+                        disabled={isPending}
+                        role={isRadio ? 'radio' : undefined}
+                        aria-checked={isRadio ? checked : undefined}
+                        aria-pressed={isRadio ? undefined : checked}
                         className={`w-full text-left rounded-lg border px-3 py-2 flex items-center gap-3 transition ${
                           checked
                             ? 'accent-border bg-accent/5'
-                            : atCap
-                              ? 'border-ink-900 opacity-40 cursor-not-allowed'
-                              : 'border-ink-800 hover:border-accent/40'
+                            : 'border-ink-800 hover:border-accent/40'
                         }`}
                       >
                         <span
-                          className={`shrink-0 w-5 h-5 rounded border flex items-center justify-center transition ${
-                            checked ? 'accent-bg accent-border' : 'border-ink-700'
+                          className={`shrink-0 w-5 h-5 border flex items-center justify-center transition ${
+                            isRadio ? 'rounded-full' : 'rounded'
+                          } ${
+                            checked
+                              ? isRadio
+                                ? 'accent-border'
+                                : 'accent-bg accent-border'
+                              : 'border-ink-700'
                           }`}
                           aria-hidden="true"
                         >
-                          {checked && (
-                            <Check size={13} strokeWidth={3} className="text-ink-950" />
-                          )}
+                          {checked &&
+                            (isRadio ? (
+                              <span className="w-2.5 h-2.5 rounded-full accent-bg" />
+                            ) : (
+                              <Check size={13} strokeWidth={3} className="text-ink-950" />
+                            ))}
                         </span>
                         <span className="flex-1 min-w-0">
                           <span className="text-sm text-ink-100 block truncate">{m.name}</span>

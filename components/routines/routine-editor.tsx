@@ -2558,10 +2558,11 @@ function DayCard({
                     const canMoveDown = next !== null && next.module === ex.module;
                     const pool = ex.poolId ? poolById.get(ex.poolId) : undefined;
                     // Pool members are a contiguous run; treat the first (by
-                    // position) as the "lead" and hang the editable pick-X
-                    // stepper off its row, so the count lives right on the pool
-                    // instead of only in the management panel below. The other
-                    // members just show a plain "pool" tag.
+                    // position) as the "lead" and show a read-only "do X of N"
+                    // badge on its row, so the count is visible right on the
+                    // pool. Editing lives in the Pools panel below — one
+                    // stepper per pool, not two. The other members just show a
+                    // plain "pool" tag.
                     const poolMembers = pool
                       ? day.exercises.filter((e) => e.poolId === pool.id)
                       : [];
@@ -2569,12 +2570,11 @@ function DayCard({
                       ? poolMembers[0]?.exerciseId === ex.exerciseId
                       : false;
                     const poolControl =
-                      pool && isPoolLead && onUpdatePool
+                      pool && isPoolLead
                         ? {
                             pickCount: pool.pickCount,
                             memberCount: poolMembers.length,
                             label: pool.label,
-                            onChange: (n: number) => onUpdatePool(pool.id, { pickCount: n }),
                           }
                         : null;
                     const poolBadge =
@@ -2860,13 +2860,13 @@ function ExerciseRow({
   // When the exercise belongs to a pool but isn't its lead member, a short
   // static badge (pool label or "pool") shown next to the module tag.
   poolBadge?: string;
-  // Set only on a pool's lead member: renders an inline "do X of N" stepper so
-  // the pick count is adjustable right from the pooled exercise.
+  // Set only on a pool's lead member: a read-only "do X of N" badge so the
+  // pick count is visible right on the pooled exercise. Editing lives in the
+  // Pools panel below — one editable stepper per pool, not two.
   poolControl?: {
     pickCount: number;
     memberCount: number;
     label: string | null;
-    onChange: (n: number) => void;
   } | null;
   // When set, the row is in pool-grouping selection mode: it renders a
   // checkbox in place of the move arrows.
@@ -2958,7 +2958,7 @@ function ExerciseRow({
             {poolControl && (
               <span
                 className="inline-flex items-center gap-1.5 shrink-0"
-                title="This pool's pick count — how many of its members you'll do each session. Adjust any time; you choose which ones at the workout."
+                title="How many of this pool's members you do each session — edit it in the Pools panel below."
               >
                 {poolControl.label?.trim() && (
                   <span className="text-[9px] tracking-wide uppercase accent-text inline-flex items-center gap-1">
@@ -2966,14 +2966,9 @@ function ExerciseRow({
                     {poolControl.label.trim()}
                   </span>
                 )}
-                <PoolPickCountStepper
-                  label="do"
-                  value={poolControl.pickCount}
-                  max={Math.max(poolControl.memberCount, 1)}
-                  disabled={isPending}
-                  onChange={poolControl.onChange}
-                />
-                <span className="text-[10px] text-ink-500">of {poolControl.memberCount}</span>
+                <span className="text-[10px] accent-text font-mono">
+                  do {poolControl.pickCount} of {poolControl.memberCount}
+                </span>
               </span>
             )}
             <MuscleChips
