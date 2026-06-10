@@ -29,14 +29,15 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
     startTransition(async () => {
       try {
         const result = await mintRoutineShare({ label: label.trim() || undefined });
+        if (!result.ok) return;
         setLabel('');
         // Optimistically copy the new URL so the user doesn't have to hunt
         // for the row that just appeared and tap the per-row copy button.
         // Clipboard writes after an await can fail silently in some browsers
         // when they decide the user gesture has ended; the explicit per-row
         // button remains as the manual fallback.
-        if (result?.token) {
-          const url = `${baseUrl}/share/${result.token}`;
+        if (result.data.token) {
+          const url = `${baseUrl}/share/${result.data.token}`;
           try {
             await navigator.clipboard.writeText(url);
             setJustMintedCopied(true);

@@ -199,7 +199,9 @@ function SuggestionCard({
   const targetLabel =
     s.targetType && s.targetId ? labelByTarget[`${s.targetType}:${s.targetId}`] : null;
 
-  const run = (fn: () => Promise<void>) =>
+  // Expected failures ({ ok: false } results) are dropped here too — surfacing
+  // them on the owner side is Package 2 (client action discipline) territory.
+  const run = (fn: () => Promise<unknown>) =>
     startTransition(async () => {
       try {
         await fn();

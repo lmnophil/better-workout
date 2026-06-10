@@ -94,9 +94,9 @@ Live in `lib/starter-routines.ts`. Four focuses — Strength, Build, Mobility, L
 
 ## 3. Server actions (`lib/actions.ts`)
 
-All mutations go through here. Every action is wrapped with `withLogging('actionName', ...)` for timing + metrics + error categorization, calls `requireUser()`, Zod-validates inputs at the boundary, scopes DB writes by `userId`, and calls `revalidatePath` after mutating. Expected user-facing errors are thrown as plain `Error('message')` matching `EXPECTED_MESSAGES` in `lib/observability.ts` so they log at warn (not error).
+All mutations go through here. Every action is wrapped with `withLogging('actionName', ...)` for timing + metrics + error categorization, calls `requireUser()` (which redirects to `/signin` on a dead session), Zod-validates inputs at the boundary, scopes DB writes by `userId`, and calls `revalidatePath` after mutating. Expected user-facing errors are thrown as `ExpectedError` (`lib/action-result.ts`); `withLogging` converts them to `{ ok: false, error }` results so the message survives prod's error redaction.
 
-Actions return nothing — the UI reads fresh data via queries on the page revalidation.
+Action bodies return nothing (rare exceptions like `mintRoutineShare` return data) — callers receive an `ActionResult<T>` envelope, and the UI reads fresh data via queries on the page revalidation.
 
 The action surface is organized by `// =====` section headers in the file: session lifecycle, set logging, custom exercises, volume targets, user preferences, bands, per-exercise settings, set notes, workout templates, routines (the largest section), and routine startup. To enumerate them, `grep -n '^export ' lib/actions.ts` — the code is the canonical list. See [api.md](api.md) for the conventions, the recipe for adding one, and what `withLogging` instruments for free.
 
@@ -110,7 +110,7 @@ What's load-bearing about the query surface, rather than the list itself:
 
 - **Recency windows are baked into the queries.** Coverage looks at trailing 90 days; the "last sets" lookup at trailing 180; weekly volume at 7. Tuned to the UI's gradient and to bound memory growth. See [decisions.md](decisions.md).
 - **Weighted credit for multi-muscle exercises.** Volume credits primary muscles at 1.0 and secondary at 0.5; coverage (recency) treats both equally. See [decisions.md](decisions.md).
-- **Structural coverage weights pool members by expected pick.** The *planned* estimate (`computeRoutineVolumes` / `poolPickWeights` in `lib/coverage.ts`, feeding the routine editor's coverage panel + per-day strip + time estimate and the share view) scales each pooled member by `pickCount / memberCount`, so a "do X of N" pool counts what it delivers, not all N. Recorded coverage (from `SetLog`s) is exact and needs no such adjustment. See [decisions.md](decisions.md).
+- **Structural coverage weights pool members by expected pick.** The _planned_ estimate (`computeRoutineVolumes` / `poolPickWeights` in `lib/coverage.ts`, feeding the routine editor's coverage panel + per-day strip + time estimate and the share view) scales each pooled member by `pickCount / memberCount`, so a "do X of N" pool counts what it delivers, not all N. Recorded coverage (from `SetLog`s) is exact and needs no such adjustment. See [decisions.md](decisions.md).
 - **Templates currently used by the routine are excluded from `getTemplates`** — they surface through the routine timeline instead. If you write a new template-listing query, decide whether you want the same filter.
 - **`getUserPreferences` returns `PREFS_DEFAULTS` when no row exists**, so reads are cheap on every render and writes are lazy. The lazy-row pattern would extend to any future "one row per user" preference table.
 
@@ -212,7 +212,7 @@ All writes go through `updateUserPreferences` / `setVolumeTarget` / `resetVolume
 - **Providers**: Google OAuth + Resend magic links.
 - **`allowDangerousEmailAccountLinking: true`** is set on Google — safe here because Google-verified emails + Resend ownership proof remove the impersonation vector. Justified in [decisions.md](decisions.md).
 - **Session strategy**: JWT, `maxAge` = 1 year, `updateAge` = 1 day. Fitness tracker, not banking — see decisions.md.
-- **`requireUser()`** is called at the start of every action; throws `'Unauthorized'` when no session, which `lib/observability.ts` recognises as expected.
+- **`requireUser()`** is called at the start of every action; redirects to `/signin` when no session (`withLogging` passes the redirect through untouched).
 - **Middleware** redirects unauthenticated users to `/signin` and bounces authenticated users away from `/signin`.
 
 ---
@@ -244,7 +244,7 @@ Runs `SELECT 1`. Returns 200 or 503. Docker HEALTHCHECK polls every 30s; 3 conse
 
 ### Error boundaries
 
-- `app/error.tsx` — top-level fallback; recognises `'Unauthorized'` for "session expired" UX.
+- `app/error.tsx` — top-level fallback.
 - `app/(app)/error.tsx` — authenticated app routes.
 - `app/(auth)/error.tsx` — auth routes.
 - `app/global-error.tsx` — root layout failures.
@@ -253,7 +253,7 @@ All boundaries call `useReportError(error, source)` to ship to `/api/log/client-
 
 ### `withLogging` (`lib/observability.ts`)
 
-Wraps every server action. On success: timing + metrics + debug log (warn if >1s). On error: distinguishes expected (matched by `EXPECTED_ERROR_NAMES` and `EXPECTED_MESSAGES`) from bugs (full stack trace).
+Wraps every server action and produces the `ActionResult<T>` envelope. On success: timing + metrics + debug log (warn if >1s), returns `{ ok: true, data }`. On error: `ExpectedError`/`ZodError` log at warn without a stack and return `{ ok: false, error }`; anything else logs at error with the stack and rethrows to the boundary. Next control-flow errors (redirects) are rethrown untouched.
 
 ---
 

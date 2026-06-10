@@ -153,9 +153,7 @@ export function ExerciseInSession({
   const regionStyles = REGION_STYLES[region];
 
   return (
-    <div
-      className={`border border-ink-800 ${regionStyles.leftBorderThick} bg-ink-900 rounded-lg`}
-    >
+    <div className={`border border-ink-800 ${regionStyles.leftBorderThick} bg-ink-900 rounded-lg`}>
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
@@ -170,10 +168,7 @@ export function ExerciseInSession({
           </div>
 
           <div className="mt-1">
-            <MuscleChips
-              primary={exercise.primaryMuscles}
-              secondary={exercise.secondaryMuscles}
-            />
+            <MuscleChips primary={exercise.primaryMuscles} secondary={exercise.secondaryMuscles} />
           </div>
 
           {/* Prescription + settings opener — same row, wraps on narrow screens */}

@@ -122,7 +122,10 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   // numbers baked in. Suggestion diffs are recomputed client-side from the
   // same per-muscle bounds — they only depend on the (already shipped)
   // exercise→muscle data plus the proposed payload.
-  const exerciseLookup = new Map<string, { primaryMuscles: string[]; secondaryMuscles: string[] }>();
+  const exerciseLookup = new Map<
+    string,
+    { primaryMuscles: string[]; secondaryMuscles: string[] }
+  >();
   for (const ex of libraryExercises) {
     exerciseLookup.set(ex.id, {
       primaryMuscles: ex.primaryMuscles,

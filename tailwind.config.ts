@@ -15,8 +15,7 @@ const config: Config = {
     { pattern: /^border-l-region-(upper|lower|core|mobility|other)$/ },
     // Opacity-modified variants used for tints
     {
-      pattern:
-        /^(bg|border)-region-(upper|lower|core|mobility|other)\/(10|20|30|60|70)$/,
+      pattern: /^(bg|border)-region-(upper|lower|core|mobility|other)\/(10|20|30|60|70)$/,
       variants: ['hover'],
     },
   ],

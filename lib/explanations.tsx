@@ -24,8 +24,8 @@ export const ExplainRPE: ReactNode = (
       <strong>8</strong> = two in the tank. Most working sets live at 7–9; warm-ups at 5–6.
     </p>
     <p>
-      Logging this in a note helps you tell &quot;3×8&quot; that felt easy apart from &quot;3×8&quot;
-      that nearly buried you — even though the numbers are identical.
+      Logging this in a note helps you tell &quot;3×8&quot; that felt easy apart from
+      &quot;3×8&quot; that nearly buried you — even though the numbers are identical.
     </p>
   </>
 );
@@ -37,8 +37,8 @@ export const ExplainRIR: ReactNode = (
     </p>
     <p>
       The mirror image of RPE. <strong>RIR 0</strong> = failure, <strong>RIR 1</strong> = one left,
-      <strong> RIR 2</strong> = two left. Productive sets sit at 0–3 RIR; warm-ups deliberately
-      keep more in reserve.
+      <strong> RIR 2</strong> = two left. Productive sets sit at 0–3 RIR; warm-ups deliberately keep
+      more in reserve.
     </p>
   </>
 );
@@ -50,14 +50,14 @@ export const ExplainRIR: ReactNode = (
 export const ExplainWeeklyVolume: ReactNode = (
   <>
     <p>
-      <strong>Weekly volume</strong> is how many working sets you did per muscle in the last 7
-      days. Hypertrophy research treats sets as the most reliable dose unit — more reliable than
-      tonnage or time-under-tension.
+      <strong>Weekly volume</strong> is how many working sets you did per muscle in the last 7 days.
+      Hypertrophy research treats sets as the most reliable dose unit — more reliable than tonnage
+      or time-under-tension.
     </p>
     <p>
-      Exercises count <strong>1×</strong> for muscles they primarily train and{' '}
-      <strong>0.5×</strong> for muscles they secondarily train. A bench press is 1 chest set + 0.5
-      triceps + 0.5 front-delt.
+      Exercises count <strong>1×</strong> for muscles they primarily train and <strong>0.5×</strong>{' '}
+      for muscles they secondarily train. A bench press is 1 chest set + 0.5 triceps + 0.5
+      front-delt.
     </p>
   </>
 );
@@ -66,18 +66,17 @@ export const ExplainVolumeTiers: ReactNode = (
   <>
     <p>
       Three presets scale every muscle&apos;s minimum and target.{' '}
-      <strong>You pick the tier that matches the volume you want to chase</strong> — there&apos;s
-      no &quot;right&quot; answer for everyone.
+      <strong>You pick the tier that matches the volume you want to chase</strong> — there&apos;s no
+      &quot;right&quot; answer for everyone.
     </p>
     <p>
       <strong>Maintenance</strong> halves both bounds — keeping fitness with short sessions.{' '}
-      <strong>Balanced</strong> is the canonical 3–5 day routine target.{' '}
-      <strong>Athlete</strong> keeps the floor at the balanced target but pushes the stretch goal
-      50% higher.
+      <strong>Balanced</strong> is the canonical 3–5 day routine target. <strong>Athlete</strong>{' '}
+      keeps the floor at the balanced target but pushes the stretch goal 50% higher.
     </p>
     <p>
-      Loosely tracks the sports-science <strong>MEV / MAV / MRV</strong> framing — minimum
-      effective dose, hypertrophy sweet spot, and the upper bound before recovery breaks down.
+      Loosely tracks the sports-science <strong>MEV / MAV / MRV</strong> framing — minimum effective
+      dose, hypertrophy sweet spot, and the upper bound before recovery breaks down.
     </p>
   </>
 );
@@ -99,9 +98,9 @@ export const ExplainMinTarget: ReactNode = (
 export const ExplainPrimarySecondary: ReactNode = (
   <>
     <p>
-      Each exercise lists <strong>primary</strong> muscles (its main intent — full credit in
-      weekly volume) and <strong>secondary</strong> muscles (meaningfully worked but not the
-      focus — half credit).
+      Each exercise lists <strong>primary</strong> muscles (its main intent — full credit in weekly
+      volume) and <strong>secondary</strong> muscles (meaningfully worked but not the focus — half
+      credit).
     </p>
     <p>
       Example: barbell row is <em>primary</em> lats &amp; mid-back, <em>secondary</em> biceps &amp;
@@ -132,8 +131,8 @@ export const ExplainCoverageTiers: ReactNode = (
         <strong>On target</strong> — you hit the prescribed dose for your tier.
       </li>
       <li>
-        <strong>Emphasis</strong> — well above target (1.5×+). Often deliberate specialization or
-        a lagging-part block; flagged so you notice, not as a problem.
+        <strong>Emphasis</strong> — well above target (1.5×+). Often deliberate specialization or a
+        lagging-part block; flagged so you notice, not as a problem.
       </li>
     </ul>
   </>
@@ -176,9 +175,7 @@ export const ExplainRecencyTiers: ReactNode = (
 
 export const ExplainRestRanges: ReactNode = (
   <>
-    <p>
-      Rough rest-by-goal heuristics from the strength &amp; hypertrophy literature:
-    </p>
+    <p>Rough rest-by-goal heuristics from the strength &amp; hypertrophy literature:</p>
     <ul className="space-y-1 ml-0.5">
       <li>
         <strong>30–60s</strong> — metabolic / muscular endurance, accessory pump work.
@@ -191,7 +188,9 @@ export const ExplainRestRanges: ReactNode = (
         deadlifts, rows.
       </li>
     </ul>
-    <p>Shorter is not &quot;more efficient&quot; — under-rested heavy sets just produce worse sets.</p>
+    <p>
+      Shorter is not &quot;more efficient&quot; — under-rested heavy sets just produce worse sets.
+    </p>
   </>
 );
 
@@ -202,13 +201,13 @@ export const ExplainRestRanges: ReactNode = (
 export const ExplainWeightIncrement: ReactNode = (
   <>
     <p>
-      The smallest weight jump you&apos;d realistically add to this exercise. The +/- buttons in
-      the workout view step by exactly this amount, so what feels right depends on the lift.
+      The smallest weight jump you&apos;d realistically add to this exercise. The +/- buttons in the
+      workout view step by exactly this amount, so what feels right depends on the lift.
     </p>
     <ul className="space-y-1 ml-0.5">
       <li>
-        <strong>1–2.5 lb</strong> — small isolation work (curls, lateral raises), where adding 5
-        lb is the difference between &quot;hard&quot; and &quot;impossible.&quot;
+        <strong>1–2.5 lb</strong> — small isolation work (curls, lateral raises), where adding 5 lb
+        is the difference between &quot;hard&quot; and &quot;impossible.&quot;
       </li>
       <li>
         <strong>5 lb</strong> — most accessory compounds (rows, presses, RDLs).
@@ -240,19 +239,24 @@ export const ExplainScheduleStyle: ReactNode = (
       <strong>Calendar</strong> pins each day to a specific weekday. Tuesday is always lower body,
       Thursday is always upper, etc. Good if your life is structured around a fixed weekly grid.
     </p>
-    <p>Switching modes keeps your days but clears any weekday pins — your day order is preserved.</p>
+    <p>
+      Switching modes keeps your days but clears any weekday pins — your day order is preserved.
+    </p>
   </>
 );
 
 export const ExplainDayDescription: ReactNode = (
   <>
     <p>
-      A short note framing what this day is <em>for</em> — emphasis, intent, intended duration,
-      cues you want top-of-mind. Visible while you&apos;re lifting; not a prescription.
+      A short note framing what this day is <em>for</em> — emphasis, intent, intended duration, cues
+      you want top-of-mind. Visible while you&apos;re lifting; not a prescription.
     </p>
     <p>
-      Example: <em>&quot;Lower emphasis (glute drive). Stack ~60 min: SMR → Mobility → Activation →
-      Strength → Rev Up. Push the hinge today.&quot;</em>
+      Example:{' '}
+      <em>
+        &quot;Lower emphasis (glute drive). Stack ~60 min: SMR → Mobility → Activation → Strength →
+        Rev Up. Push the hinge today.&quot;
+      </em>
     </p>
   </>
 );

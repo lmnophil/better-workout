@@ -24,13 +24,7 @@ import { SEED_EXERCISES, type SeedExercise } from '../lib/exercises-data';
 // The seed entry can pin an explicit `loadType` to override this — useful
 // for the few activation movements that *are* weighted (Bulgarian split
 // squats etc.), or strength items where the load should be hidden.
-const WEIGHT_BEARING_EQUIPMENT = new Set([
-  'barbell',
-  'dumbbells',
-  'cable',
-  'machine',
-  'rack',
-]);
+const WEIGHT_BEARING_EQUIPMENT = new Set(['barbell', 'dumbbells', 'cable', 'machine', 'rack']);
 function deriveLoadType(ex: SeedExercise): 'weight' | 'band' | 'none' {
   if (ex.loadType) return ex.loadType;
   const mod = ex.module;

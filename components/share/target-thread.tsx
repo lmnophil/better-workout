@@ -246,7 +246,7 @@ function SuggestionInline({
   }
 }
 
-function DeleteButton({ label, onConfirm }: { label: string; onConfirm: () => Promise<void> }) {
+function DeleteButton({ label, onConfirm }: { label: string; onConfirm: () => Promise<unknown> }) {
   const [pending, startTransition] = useTransition();
   return (
     <button

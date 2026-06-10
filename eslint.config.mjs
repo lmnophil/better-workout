@@ -43,6 +43,23 @@ const config = [
       ],
     },
   },
+  // Expected user-facing failures in server actions must be ExpectedError —
+  // a plain Error's message gets redacted by the prod build before it reaches
+  // the client, and withLogging would log it as a bug. Genuine invariant
+  // violations can disable the rule locally with a justification.
+  {
+    files: ['lib/actions.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "ThrowStatement > NewExpression[callee.name='Error']",
+          message:
+            'Throw ExpectedError (lib/action-result.ts) for user-facing failures — plain Error messages are redacted in production builds.',
+        },
+      ],
+    },
+  },
   // CommonJS files (healthcheck.cjs runs in the Docker container outside the
   // Next build) need `require()`.
   {

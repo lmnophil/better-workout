@@ -27,9 +27,10 @@ export function ReviewerGate({ token, ownerName, routineName }: Props) {
     setError(null);
     startTransition(async () => {
       try {
-        await registerShareReviewer({ token, displayName: trimmed });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not register.');
+        const res = await registerShareReviewer({ token, displayName: trimmed });
+        if (!res.ok) setError(res.error);
+      } catch {
+        setError('Could not register. Try again?');
       }
     });
   };

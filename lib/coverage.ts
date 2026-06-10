@@ -29,10 +29,8 @@ export const VOLUME_TIER_LABELS: Record<VolumeTier, string> = {
 };
 
 export const VOLUME_TIER_DESCRIPTIONS: Record<VolumeTier, string> = {
-  maintenance:
-    'Keeping fitness — short sessions, lower frequency. Targets and minimums halved.',
-  balanced:
-    'Moderate growth and strength — typical 3–5 day routines. The default for everyone.',
+  maintenance: 'Keeping fitness — short sessions, lower frequency. Targets and minimums halved.',
+  balanced: 'Moderate growth and strength — typical 3–5 day routines. The default for everyone.',
   athlete:
     'High volume — 5+ days, longer sessions. Pushes the target 50% higher while keeping the floor at the balanced target.',
 };

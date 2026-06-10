@@ -68,13 +68,13 @@ If a fact lives in one doc and is only referenced from others, that's the goal. 
 
 ## Conventions worth respecting
 
-**Server actions.** Every mutation lives in `lib/actions.ts`, wrapped with `withLogging('actionName', ...)`. Every action: `requireUser()`, Zod-validate inputs, scope by `userId`, `revalidatePath` after mutating. Expected user-facing errors throw `Error` with stable message prefixes — match an entry in `EXPECTED_MESSAGES` in `lib/observability.ts` or they'll log as bugs. Full recipe in [docs/api.md](docs/api.md).
+**Server actions.** Every mutation lives in `lib/actions.ts`, wrapped with `withLogging('actionName', ...)`. Every action: `requireUser()`, Zod-validate inputs, scope by `userId`, `revalidatePath` after mutating. Expected user-facing errors throw `ExpectedError` (`lib/action-result.ts`) — `withLogging` converts them to `{ ok: false, error }` results so the message survives prod's error redaction; plain `Error` logs as a bug and ESLint rejects it in that file. Full recipe in [docs/api.md](docs/api.md), rationale in [docs/decisions.md](docs/decisions.md).
 
 **Queries.** `lib/queries.ts`. Server-side only. Some are `React.cache()`-wrapped for request-scoped dedup. Don't import into client components.
 
 **Client components.** Mark with `'use client'`. Wrap action calls with `useTransition`; show `isPending` state on buttons. For prefs that cross the layout/page boundary, use `PrefsContext` in `components/ui/prefs-context.tsx` — don't prop-drill prefs (see [docs/decisions.md](docs/decisions.md) for why).
 
-**Errors.** Server-side: throw expected errors as `Error` with stable prefixes. They bubble to the nearest `error.tsx` boundary. All boundaries use `useReportError` to ship to `/api/log/client-error`.
+**Errors.** Server-side: throw expected errors as `ExpectedError`; clients receive `{ ok: false, error }` and render `res.error` — don't catch-and-read `err.message`, prod redacts it. Only genuine bugs throw through to the nearest `error.tsx` boundary. All boundaries use `useReportError` to ship to `/api/log/client-error`. An expired session redirects to `/signin` from `requireUser` rather than erroring.
 
 **Comments.** Prose paragraphs that explain _why_, not bullets that restate _what_. Match the surrounding voice — direct, doesn't hedge.
 
