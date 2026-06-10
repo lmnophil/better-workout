@@ -25,8 +25,10 @@ export function BandsEditor({ bands }: { bands: Band[] }) {
     if (!trimmed) return;
     startTransition(async () => {
       try {
-        await createBand({ name: trimmed });
-        setNewName('');
+        // Only clear on success — a duplicate name resolves { ok: false } and
+        // the typed name should survive for the user to adjust.
+        const res = await createBand({ name: trimmed });
+        if (res.ok) setNewName('');
       } catch {
         /* surfaced via revalidation */
       }
@@ -125,7 +127,11 @@ function BandNameInput({ band, disabled }: { band: Band; disabled: boolean }) {
     }
     startTransition(async () => {
       try {
-        await renameBand({ bandId: band.id, name: trimmed });
+        // Revert on a rejected rename (name collision) — the local text never
+        // re-syncs from props, so without this the input would show a name
+        // the server refused, indefinitely.
+        const res = await renameBand({ bandId: band.id, name: trimmed });
+        if (!res.ok) setText(band.name);
       } catch {
         setText(band.name);
       }

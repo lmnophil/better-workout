@@ -544,7 +544,6 @@ function DayCard({
           excludeIds={effectiveInDay}
           onPickMany={() => {}} // unused in swap mode
           onClose={() => setPickerSwap(null)}
-          onCreateCustom={async () => ({ ok: true as const, data: undefined })} // unused in swap mode
           onDeleteCustom={() => {}}
           swap={{
             targetName: pickerSwap.outExerciseName,

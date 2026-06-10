@@ -104,14 +104,17 @@ function SwapFlow({
   const dispatch = (payload: Record<string, unknown>) => {
     startTransition(async () => {
       try {
-        await postShareSuggestion({
+        // Close only on success — an expected failure (revoked share, expired
+        // reviewer cookie) resolves { ok: false } and the composed suggestion
+        // shouldn't silently vanish with the modal.
+        const res = await postShareSuggestion({
           token,
           targetType: 'routine_day',
           targetId: state.dayId,
           // The action's Zod schema validates the union; cast keeps TS calm.
           payload: payload as never,
         });
-        onClose();
+        if (res.ok) onClose();
       } catch {
         /* silent */
       }
@@ -268,7 +271,7 @@ function InsertFlow({
       onCancel={onClose}
       onPickMany={async (ids) => {
         try {
-          await postShareSuggestion({
+          const res = await postShareSuggestion({
             token,
             targetType: 'routine_day',
             targetId: state.dayId,
@@ -278,10 +281,9 @@ function InsertFlow({
               exerciseIds: ids,
             } as never,
           });
+          if (res.ok) onClose();
         } catch {
           /* silent */
-        } finally {
-          onClose();
         }
       }}
     />
@@ -310,7 +312,7 @@ function CustomFlow({
     if (!name.trim()) return;
     startTransition(async () => {
       try {
-        await postShareSuggestion({
+        const res = await postShareSuggestion({
           token,
           targetType: state.dayId ? 'routine_day' : 'routine',
           targetId: state.dayId, // null is OK for the routine target
@@ -327,7 +329,7 @@ function CustomFlow({
             notes: notes.trim() || undefined,
           } as never,
         });
-        onClose();
+        if (res.ok) onClose();
       } catch {
         /* silent */
       }
@@ -447,7 +449,7 @@ function ReorderFlow({
   const submit = () => {
     startTransition(async () => {
       try {
-        await postShareSuggestion({
+        const res = await postShareSuggestion({
           token,
           targetType: 'routine_day',
           targetId: state.dayId,
@@ -456,7 +458,7 @@ function ReorderFlow({
             orderedTemplateExerciseIds: order,
           } as never,
         });
-        onClose();
+        if (res.ok) onClose();
       } catch {
         /* silent */
       }
@@ -549,7 +551,7 @@ function HolisticFlow({
     if (!description.trim() && picked.length === 0) return;
     startTransition(async () => {
       try {
-        await postShareSuggestion({
+        const res = await postShareSuggestion({
           token,
           targetType: 'routine',
           targetId: _routine.id,
@@ -559,7 +561,7 @@ function HolisticFlow({
             exerciseIds: picked.length > 0 ? picked : undefined,
           } as never,
         });
-        onClose();
+        if (res.ok) onClose();
       } catch {
         /* silent */
       }

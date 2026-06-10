@@ -84,7 +84,9 @@ type Props = {
   onClose: () => void;
   // Returns the action result so the custom-add form can show expected
   // failures (duplicate name) inline instead of silently dropping them.
-  onCreateCustom: (
+  // Optional: surfaces that don't support creating customs (e.g. the
+  // timeline's swap picker) omit it and the "Add custom" tab never renders.
+  onCreateCustom?: (
     name: string,
     primaryMuscles: string[],
     secondaryMuscles: string[],
@@ -159,10 +161,11 @@ export function ExercisePicker({
           </button>
         </div>
 
-        {/* Tabs are only meaningful in add mode. During a swap the user is
-            replacing a known slot; creating a brand-new custom mid-swap is a
-            workflow we deliberately don't support — finish the swap first. */}
-        {!isSwap && (
+        {/* Tabs are only meaningful in add mode with a create handler. During
+            a swap the user is replacing a known slot; creating a brand-new
+            custom mid-swap is a workflow we deliberately don't support —
+            finish the swap first. */}
+        {!isSwap && onCreateCustom && (
           <div className="flex border-b border-ink-800 px-5">
             <TabButton active={tab === 'browse'} onClick={() => setTab('browse')}>
               Browse
@@ -173,7 +176,7 @@ export function ExercisePicker({
           </div>
         )}
 
-        {isSwap || tab === 'browse' ? (
+        {isSwap || tab === 'browse' || !onCreateCustom ? (
           <BrowseTab
             availableExercises={availableExercises}
             excludeIds={excludeIds}

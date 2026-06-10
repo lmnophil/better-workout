@@ -660,13 +660,15 @@ function FloatingNotes({
     const text = body.trim();
     startTransition(async () => {
       try {
-        await postShareComment({
+        // Only clear on success — an expected failure (revoked share, expired
+        // reviewer cookie) resolves { ok: false } and must not eat the text.
+        const res = await postShareComment({
           token,
           targetType: 'routine',
           targetId: routineId,
           body: text,
         });
-        setBody('');
+        if (res.ok) setBody('');
       } catch {
         /* silent — see ShareView's other action handlers */
       }

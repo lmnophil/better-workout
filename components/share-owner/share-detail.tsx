@@ -16,6 +16,7 @@ import {
   resolveShareSuggestion,
   resolveShareComment,
 } from '@/lib/actions';
+import type { ActionResult } from '@/lib/action-result';
 
 type Comment = {
   id: string;
@@ -201,7 +202,8 @@ function SuggestionCard({
 
   // Expected failures ({ ok: false } results) are dropped here too — surfacing
   // them on the owner side is Package 2 (client action discipline) territory.
-  const run = (fn: () => Promise<unknown>) =>
+  // The ActionResult type keeps the contract greppable for that rework.
+  const run = (fn: () => Promise<ActionResult<unknown>>) =>
     startTransition(async () => {
       try {
         await fn();

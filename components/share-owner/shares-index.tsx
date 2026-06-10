@@ -36,15 +36,13 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
         // Clipboard writes after an await can fail silently in some browsers
         // when they decide the user gesture has ended; the explicit per-row
         // button remains as the manual fallback.
-        if (result.data.token) {
-          const url = `${baseUrl}/share/${result.data.token}`;
-          try {
-            await navigator.clipboard.writeText(url);
-            setJustMintedCopied(true);
-            setTimeout(() => setJustMintedCopied(false), 2000);
-          } catch {
-            /* silent — user can use the per-row copy button */
-          }
+        const url = `${baseUrl}/share/${result.data.token}`;
+        try {
+          await navigator.clipboard.writeText(url);
+          setJustMintedCopied(true);
+          setTimeout(() => setJustMintedCopied(false), 2000);
+        } catch {
+          /* silent — user can use the per-row copy button */
         }
       } catch {
         /* silent */

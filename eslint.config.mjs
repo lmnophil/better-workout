@@ -48,7 +48,9 @@ const config = [
   // the client, and withLogging would log it as a bug. Genuine invariant
   // violations can disable the rule locally with a justification.
   {
-    files: ['lib/actions.ts'],
+    // The directory glob is for a future split of actions.ts — the guard must
+    // follow the files, not the filename.
+    files: ['lib/actions.ts', 'lib/actions/**/*.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',

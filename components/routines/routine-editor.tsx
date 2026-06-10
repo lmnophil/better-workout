@@ -387,6 +387,29 @@ function DraftEditor({
   muscleGroups: MuscleGroupClient[];
 }) {
   const router = useRouter();
+
+  // Shared by every picker this editor opens: create the custom exercise,
+  // refresh routine data on success, and hand the result back so the picker's
+  // custom-add form can surface a duplicate-name failure inline.
+  const handleCreateCustom = async (
+    name: string,
+    primary: string[],
+    secondary: string[],
+    prescription: string | undefined,
+    videoUrl: string | undefined,
+    restTimerSeconds: number | undefined,
+  ) => {
+    const res = await createCustomExercise({
+      name,
+      primaryMuscles: primary,
+      secondaryMuscles: secondary,
+      prescription,
+      videoUrl,
+      restTimerSeconds,
+    });
+    if (res.ok) router.refresh();
+    return res;
+  };
   const [isPending, startTransition] = useTransition();
   const { prefs } = usePrefs();
 
@@ -987,25 +1010,7 @@ function DraftEditor({
                 });
               }}
               onClose={() => setPickerForDayClientId(null)}
-              onCreateCustom={async (
-                name,
-                primary,
-                secondary,
-                prescription,
-                videoUrl,
-                restTimerSeconds,
-              ) => {
-                const res = await createCustomExercise({
-                  name,
-                  primaryMuscles: primary,
-                  secondaryMuscles: secondary,
-                  prescription,
-                  videoUrl,
-                  restTimerSeconds,
-                });
-                if (res.ok) router.refresh();
-                return res;
-              }}
+              onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
                   await deleteCustomExercise({ exerciseId });
@@ -1367,6 +1372,29 @@ function LiveEditor({
   usageStatsMap: Map<string, { lastDoneDate: Date; sessionCount: number }>;
 }) {
   const router = useRouter();
+
+  // Shared by every picker this editor opens: create the custom exercise,
+  // refresh routine data on success, and hand the result back so the picker's
+  // custom-add form can surface a duplicate-name failure inline.
+  const handleCreateCustom = async (
+    name: string,
+    primary: string[],
+    secondary: string[],
+    prescription: string | undefined,
+    videoUrl: string | undefined,
+    restTimerSeconds: number | undefined,
+  ) => {
+    const res = await createCustomExercise({
+      name,
+      primaryMuscles: primary,
+      secondaryMuscles: secondary,
+      prescription,
+      videoUrl,
+      restTimerSeconds,
+    });
+    if (res.ok) router.refresh();
+    return res;
+  };
   const [isPending, startTransition] = useTransition();
   const { confirm, Dialog: ConfirmDialog } = useConfirm();
   const { prefs } = usePrefs();
@@ -1645,25 +1673,7 @@ function LiveEditor({
                     }
               }
               onClose={() => setPickerCtx(null)}
-              onCreateCustom={async (
-                name,
-                primary,
-                secondary,
-                prescription,
-                videoUrl,
-                restTimerSeconds,
-              ) => {
-                const res = await createCustomExercise({
-                  name,
-                  primaryMuscles: primary,
-                  secondaryMuscles: secondary,
-                  prescription,
-                  videoUrl,
-                  restTimerSeconds,
-                });
-                if (res.ok) router.refresh();
-                return res;
-              }}
+              onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
                   await deleteCustomExercise({ exerciseId });
@@ -1700,25 +1710,7 @@ function LiveEditor({
                 });
               }}
               onClose={() => setSwapForDay(null)}
-              onCreateCustom={async (
-                name,
-                primary,
-                secondary,
-                prescription,
-                videoUrl,
-                restTimerSeconds,
-              ) => {
-                const res = await createCustomExercise({
-                  name,
-                  primaryMuscles: primary,
-                  secondaryMuscles: secondary,
-                  prescription,
-                  videoUrl,
-                  restTimerSeconds,
-                });
-                if (res.ok) router.refresh();
-                return res;
-              }}
+              onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
                   await deleteCustomExercise({ exerciseId });
