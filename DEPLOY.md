@@ -75,6 +75,8 @@ After this step `/opt/workout` should contain the project files (Dockerfile, doc
 
 [`docs/caddy-snippet.example`](./docs/caddy-snippet.example) has a paste-ready Caddy block — `reverse_proxy localhost:3000`, sensible security headers, cache directives for `/_next/static/*`, and a 404 on `/api/metrics` so the scrape endpoint isn't reachable from the internet. Adapt it to nginx/Traefik if that's what you run.
 
+> **Your proxy must forward the real host.** Next.js protects Server Actions (every save/log/edit in the app) against CSRF by requiring the browser's `Origin` to match the host the server sees — taken from `X-Forwarded-Host`, or `Host` if that's absent. If your proxy rewrites the `Host` to `localhost:3000` and doesn't set `X-Forwarded-Host`, **pages render fine but every mutation fails** with an "Invalid Server Actions request" error. Caddy sets `X-Forwarded-Host` automatically, so the snippet above just works. On nginx add `proxy_set_header X-Forwarded-Host $host;` (or `proxy_set_header Host $host;`); on Traefik the `Host` is passed through by default. This is why the app does **not** pin `serverActions.allowedOrigins` to a domain — the standalone build is domain-agnostic and the host check covers it.
+
 > **Same-host hardening:** if your reverse proxy is on the same machine as Docker, narrow the published port in `docker-compose.yml` from `'3000:3000'` to `'127.0.0.1:3000:3000'`. The app then only accepts connections from the loopback interface — only your reverse proxy can reach it. The default (all interfaces) is fine for local validation in WSL or for a LAN-only deployment, but tighter is better on a host with a public IP.
 
 ## Part 5 — Get auth credentials

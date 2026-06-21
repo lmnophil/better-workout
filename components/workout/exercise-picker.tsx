@@ -1045,7 +1045,12 @@ function CustomTab({
   function validateUrl(url: string): string | null {
     if (!url.trim()) return null;
     try {
-      new URL(url);
+      const { protocol } = new URL(url);
+      // Mirror the server's http(s)-only gate so a javascript:/data: link fails
+      // here with immediate feedback rather than round-tripping to a rejection.
+      if (protocol !== 'http:' && protocol !== 'https:') {
+        return 'Must start with http:// or https://';
+      }
       return null;
     } catch {
       return 'Must be a full URL (https://…)';

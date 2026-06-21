@@ -60,6 +60,7 @@ reverse_proxy 192.168.1.42:3000 {
     header_up X-Real-IP {remote_host}
     header_up X-Forwarded-For {remote_host}
     header_up X-Forwarded-Proto {scheme}
+    header_up X-Forwarded-Host {host}
 }
 ```
 
@@ -79,18 +80,39 @@ Same as the standard deploy:
 - Router forwards `80` and `443` (TCP) to the **edge server**, not the app server.
 - Don't forward `:3000` anywhere.
 
-## Trust chain — why X-Forwarded-For is safe here
+## Trust chain — how the client IP is derived
 
-`getClientIp()` in [`lib/request.ts`](./lib/request.ts) reads `X-Forwarded-For` and trusts the first entry as the real client. This is only safe when every hop in front of the app is one you control. In this setup:
+`getClientIp()` in [`lib/request.ts`](./lib/request.ts) derives the rate-limit key from `X-Forwarded-For`, and it deliberately does **not** trust the leftmost entry. The leftmost value is whatever the original client sent — a client can put `X-Forwarded-For: 1.2.3.4` on the wire and the first proxy just appends the real source after it, so trusting it lets an attacker rotate the value for a fresh rate-limit bucket per request.
+
+Instead it walks the header from the **right**, skipping hops on private / loopback / link-local ranges (your own proxy infrastructure — every proxy here reaches the app over a private network), and takes the first public address it finds. That's the closest hop a proxy you control vouched for; a forged leftmost value is ignored. With no public hop present it falls back to `X-Real-IP` (set by the immediate proxy from the socket peer), then to a single shared `unknown` bucket.
+
+In the simple single-proxy setup:
 
 1. Internet client connects to edge Caddy on `:443`.
 2. Caddy sets `X-Forwarded-For: <client-ip>` (and `X-Real-IP`, `X-Forwarded-Proto`).
 3. Caddy connects to the app server's `:3000` over LAN.
-4. App reads the headers Caddy set.
+4. App reads the headers Caddy set; `<client-ip>` is the only non-private hop, so it's the key.
 
-The app server's `:3000` is firewalled or bound so only the edge Caddy can reach it (step 1 of the previous section). Nobody else can submit a request that the app sees — so nobody else can plant a forged `X-Forwarded-For`.
+The app server's `:3000` is firewalled or bound so only the edge Caddy can reach it (step 1 of the previous section). Nobody else can submit a request the app sees — so nobody else can plant an `X-Forwarded-For` that survives. **The firewall step isn't optional cosmetics — it's what makes the rest of this safe.** If `:3000` is reachable from the wider LAN (or the internet), an attacker can hit the app directly and set any header — including a private-range `X-Forwarded-For` the app would treat as trusted infrastructure — bypassing per-IP limits and polluting logs.
 
-If you skip the firewall/binding step and `:3000` is reachable from the wider LAN (or worse, the internet), an attacker can hit the app directly and set their own `X-Forwarded-For` to whatever they want. The app would believe it. They'd then bypass per-IP rate limits and pollute logs with forged client IPs. **The firewall step isn't optional cosmetics — it's what makes the rest of this safe.**
+### A proxy in front of Caddy (tunnels: Pangolin/newt, Cloudflare, etc.)
+
+If Caddy isn't your edge — traffic arrives as `internet → tunnel → newt → Caddy → app` — then Caddy's immediate peer is the tunnel, not the client, and the reference snippet's `header_up X-Forwarded-For {remote_host}` would **overwrite** the chain with the tunnel's private IP. The app would then see only private hops and bucket every external user together (the "rate limits hitting unrelated users" symptom below).
+
+Fix it by having Caddy preserve the real client IP the upstream already wrote into `X-Forwarded-For` rather than replacing it. Mark the upstream trusted so Caddy appends instead of overwriting:
+
+```caddyfile
+reverse_proxy app:3000 {
+    trusted_proxies static 192.168.4.11   # the tunnel/newt IP (or a private CIDR)
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+    # No `header_up X-Forwarded-For` line here: with trusted_proxies set, Caddy
+    # keeps the upstream client IP and appends its own peer, so the app's
+    # right-to-left walk lands on the real client.
+}
+```
+
+The thing furthest upstream (the tunnel's own public edge) must be what writes the genuine client IP into `X-Forwarded-For` to begin with. Confirm with the log check below: the recorded client IP should be a real public address, not `192.168.x.x`.
 
 ## Verifying it works
 
@@ -127,7 +149,7 @@ The logged client IP should be your real public IP, not `192.168.x.x`. If it's t
 
 **`502 Bad Gateway` from the edge.** Caddy can't reach the app. From the edge server: `curl -i http://<app-server-lan-ip>:3000/api/healthz`. Failure means the app's port isn't reachable (firewall too strict, wrong IP, app not running, Docker bound to a different interface). Success but still 502 in browser → Caddyfile upstream is pointed somewhere else.
 
-**Rate limits hitting unrelated users.** Every request looks like it's coming from one IP — the edge Caddy's. The trust chain is broken: either the edge Caddy isn't setting `X-Forwarded-For`, or the app is reading the wrong header. Re-check the three `header_up` lines and confirm `getClientIp()` reads `X-Forwarded-For` (it does, but if you've patched it, double-check).
+**Rate limits hitting unrelated users.** Every request looks like it's coming from one IP. `getClientIp()` keys off the rightmost _public_ `X-Forwarded-For` hop; if all it sees are private addresses, every external user shares one bucket. Either the edge Caddy isn't forwarding a client IP at all (re-check the `header_up X-Forwarded-For` / `X-Real-IP` lines), or there's a proxy in front of Caddy and Caddy is overwriting the real client with the tunnel's IP — see "A proxy in front of Caddy" above.
 
 **`OAuthCallbackError: redirect_uri_mismatch`.** `AUTH_URL` in `.env` doesn't match the URL the user reached you on, or doesn't match what's registered in Google Cloud Console. It must be the _public_ URL the user typed, with the exact scheme and host.
 

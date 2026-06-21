@@ -43,6 +43,12 @@ workout.example.com {
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
+        # Server Actions (every mutation in the app) are CSRF-checked by comparing
+        # the browser's Origin against this host. Caddy sets it automatically, but
+        # it's pinned here so the dependency is visible if you port this block to
+        # another proxy — on nginx it's `proxy_set_header X-Forwarded-Host $host`.
+        # Without it, behind a Host-rewriting proxy, pages load but saves 403.
+        header_up X-Forwarded-Host {host}
     }
 
     log {

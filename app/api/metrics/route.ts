@@ -14,6 +14,7 @@
 //         - targets: ['workout.example.com']
 //       metrics_path: /api/metrics
 
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { metrics } from '@/lib/metrics';
 import { logger } from '@/lib/logger';
 import { NextResponse } from 'next/server';
@@ -27,6 +28,15 @@ export const dynamic = 'force-dynamic';
 // values are sensitive operator data and would also go stale instantly.
 const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
+// Constant-time token check. Hash both sides to a fixed-width digest first so
+// timingSafeEqual never sees mismatched lengths (it throws on those) and the
+// token's length can't leak through comparison timing.
+function tokenMatches(provided: string, expected: string): boolean {
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
+
 export async function GET(request: Request) {
   const expected = process.env.METRICS_TOKEN;
   if (!expected) {
@@ -39,13 +49,13 @@ export async function GET(request: Request) {
     });
   }
 
-  // Accept either Authorization: Bearer <token> or ?token= query param
+  // Authorization: Bearer <token> only. We deliberately don't accept a ?token=
+  // query param: query strings land in proxy access logs and Referer headers,
+  // which would leak the credential.
   const auth = request.headers.get('authorization');
-  const headerToken = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null;
-  const queryToken = new URL(request.url).searchParams.get('token');
-  const provided = headerToken ?? queryToken;
+  const provided = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null;
 
-  if (provided !== expected) {
+  if (!provided || !tokenMatches(provided, expected)) {
     return new NextResponse('Forbidden', { status: 403, headers: NO_STORE });
   }
 

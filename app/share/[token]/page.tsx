@@ -72,7 +72,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       <main className="min-h-screen flex items-center justify-center p-6">
         <ReviewerGate
           token={token}
-          ownerName={share.routine.user.name ?? share.routine.user.email ?? 'a friend'}
+          ownerName={share.routine.user.name ?? 'a friend'}
           routineName={share.routine.name}
         />
       </main>
@@ -89,7 +89,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     scheduleStyle: isScheduleStyle(share.routine.scheduleStyle)
       ? share.routine.scheduleStyle
       : ('sequence' as const),
-    ownerName: share.routine.user.name ?? share.routine.user.email ?? 'a friend',
+    ownerName: share.routine.user.name ?? 'a friend',
     days: share.routine.days.map((d) => ({
       id: d.id,
       position: d.position,

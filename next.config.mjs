@@ -29,13 +29,23 @@ const nextConfig = {
   output: 'standalone',
   // Reactivate strict mode for catching issues in dev
   reactStrictMode: true,
-  experimental: {
-    // Server actions are stable in Next 15 but we declare allowed origins
-    // for production CSRF protection. Update with your real domain.
-    serverActions: {
-      allowedOrigins: ['localhost:3000'],
-    },
-  },
+  // Server Actions get CSRF protection from Next's built-in check: the request's
+  // Origin host must equal the forwarded host (X-Forwarded-Host, falling back to
+  // Host). We deliberately do NOT set experimental.serverActions.allowedOrigins:
+  //
+  //   - The old ['localhost:3000'] value was inert. allowedOrigins is matched
+  //     against the browser Origin (the public host), never against the upstream
+  //     Host — so a localhost entry could never match a real request and did
+  //     nothing either way.
+  //   - It can't be driven from AUTH_URL at runtime either. `output: 'standalone'`
+  //     freezes this config into the build (.next/required-server-files.json,
+  //     re-read at boot via __NEXT_PRIVATE_STANDALONE_CONFIG), and the Docker
+  //     image is built with no AUTH_URL present — so any process.env read here
+  //     would bake an empty value into the image for good.
+  //
+  // The operator requirement is therefore on the proxy, not this file: it must
+  // forward the real host. Caddy sets X-Forwarded-Host automatically; nginx needs
+  // `proxy_set_header X-Forwarded-Host $host`. See DEPLOY.md.
 };
 
 export default withSerwist(nextConfig);

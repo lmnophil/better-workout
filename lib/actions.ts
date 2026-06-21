@@ -797,6 +797,21 @@ export const reorderExercise = withLogging(
 // CUSTOM EXERCISE ACTIONS
 // ============================================================
 
+// A user-supplied URL is only safe to render as an <a href> (the share view
+// shows the demo link to anonymous reviewers) if it actually navigates. new
+// URL() — and Zod's .url() — happily parse javascript:/data:/vbscript:, which
+// would execute in the viewer's browser instead. Constrain to http(s). The
+// scheme check runs in the action body so it can throw a friendly ExpectedError;
+// a ZodError would be flattened to the generic "invalid input" copy.
+function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 const CreateCustomExerciseSchema = z.object({
   name: z.string().trim().min(1).max(100),
   primaryMuscles: z.array(z.string()).min(1).max(20),
@@ -805,7 +820,6 @@ const CreateCustomExerciseSchema = z.object({
   videoUrl: z
     .string()
     .trim()
-    .url()
     .max(500)
     .optional()
     .or(z.literal('').transform(() => undefined)),
@@ -833,6 +847,10 @@ export const createCustomExercise = withLogging(
       metric,
       equipment,
     } = CreateCustomExerciseSchema.parse(input);
+
+    if (videoUrl !== undefined && !isHttpUrl(videoUrl)) {
+      throw new ExpectedError('Enter a valid video link starting with http:// or https://');
+    }
 
     // Check for collision with the user's existing *live* customs. This matches
     // the partial unique index (ownerId, name) WHERE deletedAt IS NULL, so a
@@ -3474,6 +3492,45 @@ async function requireReviewer(shareId: string) {
   return reviewer;
 }
 
+// A reviewer's comment / suggestion / reaction names a polymorphic target — the
+// routine, a day, a template-exercise row, or (comments only) another
+// suggestion. There's no FK to enforce it, so confirm the (type, id) actually
+// belongs to THIS share's routine before persisting. This isn't an IDOR guard —
+// the owner's apply paths re-scope every mutation by userId — it just keeps
+// orphaned threads, addressed at IDs from some other routine, out of the owner's
+// inbox. Holistic suggestions legitimately carry a null target and skip the check.
+async function assertShareTarget(
+  shareId: string,
+  routineId: string,
+  targetType: string | null,
+  targetId: string | null,
+): Promise<void> {
+  if (targetType === null || targetId === null) return;
+
+  let ok: boolean;
+  switch (targetType) {
+    case 'routine':
+      ok = targetId === routineId;
+      break;
+    case 'routine_day':
+      ok = (await db.routineDay.count({ where: { id: targetId, routineId } })) > 0;
+      break;
+    case 'template_exercise':
+      ok =
+        (await db.templateExercise.count({
+          where: { id: targetId, template: { routineDays: { some: { routineId } } } },
+        })) > 0;
+      break;
+    case 'suggestion':
+      ok = (await db.shareSuggestion.count({ where: { id: targetId, shareId } })) > 0;
+      break;
+    default:
+      ok = false;
+  }
+
+  if (!ok) throw new ExpectedError('That part of the routine is no longer available');
+}
+
 // Notification is a side effect — never let it block the parent action.
 async function notifyRoutineOwner(
   ownerUserId: string,
@@ -4127,6 +4184,7 @@ export const postShareComment = withLogging(
 
     const share = await requireActiveShare(token);
     const reviewer = await requireReviewer(share.id);
+    await assertShareTarget(share.id, share.routine.id, targetType, targetId);
 
     const comment = await db.shareComment.create({
       data: {
@@ -4268,6 +4326,7 @@ export const postShareSuggestion = withLogging(
 
     const share = await requireActiveShare(token);
     const reviewer = await requireReviewer(share.id);
+    await assertShareTarget(share.id, share.routine.id, targetType, targetId);
 
     const created = await db.shareSuggestion.create({
       data: {
@@ -4307,6 +4366,7 @@ export const toggleShareReaction = withLogging(
 
     const share = await requireActiveShare(token);
     const reviewer = await requireReviewer(share.id);
+    await assertShareTarget(share.id, share.routine.id, targetType, targetId);
 
     const existing = await db.shareReaction.findUnique({
       where: {

@@ -630,7 +630,10 @@ export async function getShareByToken(token: string) {
     include: {
       routine: {
         include: {
-          user: { select: { id: true, name: true, email: true } },
+          // No email here: this routine is rendered to anonymous share visitors.
+          // The owner's display name falls back to a non-PII label, never their
+          // address (magic-link-only users have name = null). See app/share/[token].
+          user: { select: { id: true, name: true } },
           days: {
             orderBy: { position: 'asc' },
             include: {
