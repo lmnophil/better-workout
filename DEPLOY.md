@@ -159,13 +159,13 @@ If the app container won't start, `docker compose logs app` shows exactly what's
 
 If you suspect a secret leaked, replace it and restart:
 
-| Secret               | Effect of rotating                                                                                                                                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `AUTH_SECRET`        | All existing JWT sessions invalidated → users must sign in again. Do this if leaked.                                                                                                                               |
-| `POSTGRES_PASSWORD`  | Update the env var, restart the `db` and `app` containers together. Postgres re-reads the password on container restart only if the user is recreated — see "Rotating Postgres password" in Day-to-day operations. |
-| `AUTH_GOOGLE_SECRET` | Generate a new one in Google Cloud Console, paste into `.env`, restart `app`. The old one is invalidated immediately.                                                                                              |
-| `AUTH_RESEND_KEY`    | Revoke the old key in Resend dashboard, create a new one, paste into `.env`, restart `app`.                                                                                                                        |
-| `METRICS_TOKEN`      | Update the env var, restart `app`, update your scraper's credential.                                                                                                                                               |
+| Secret               | Effect of rotating                                                                                                                                                                                                                                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`        | All existing JWT sessions invalidated → users must sign in again. Do this if leaked.                                                                                                                                                                                                                              |
+| `POSTGRES_PASSWORD`  | Postgres only reads this when its data volume is first initialized — editing `.env` and restarting won't rotate a live user's password. Follow the full procedure in "Rotating the Postgres password" (Day-to-day operations); it `ALTER`s the live user, then restarts `app` **and** `backup` so both reconnect. |
+| `AUTH_GOOGLE_SECRET` | Generate a new one in Google Cloud Console, paste into `.env`, restart `app`. The old one is invalidated immediately.                                                                                                                                                                                             |
+| `AUTH_RESEND_KEY`    | Revoke the old key in Resend dashboard, create a new one, paste into `.env`, restart `app`.                                                                                                                                                                                                                       |
+| `METRICS_TOKEN`      | Update the env var, restart `app`, update your scraper's credential.                                                                                                                                                                                                                                              |
 
 Always restart the relevant container after editing `.env`:
 
@@ -245,8 +245,10 @@ docker compose exec db psql -U workout -d workout -c "ALTER USER workout WITH PA
 # 3. Update .env with the new password
 sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$NEW_PW|" .env
 
-# 4. Restart app so it reconnects with the new password
-docker compose up -d app
+# 4. Restart the services that connect to Postgres so they reconnect with the
+#    new password. Both `app` and `backup` hold it — restart both, or every
+#    nightly dump fails auth from here on.
+docker compose up -d app backup
 ```
 
 ## Backups
@@ -275,8 +277,9 @@ Create the directory before bringing the stack up:
 
 ```bash
 sudo mkdir -p /var/backups/workout
-sudo chown 999:999 /var/backups/workout   # 999 is postgres in the alpine image
 ```
+
+No `chown` is needed. The `backup` service overrides the postgres image's entrypoint, so it runs as **root** and writes to the directory regardless of owner. Dumps land owned by `root:root`, mode `644` (world-readable), so an offsite pipeline reading them as any user works fine. If your pipeline needs to _delete_ or rotate the local copies rather than just read them, run it as root or `sudo chown` the directory to the pipeline's user.
 
 ### Verify backups are running
 
@@ -294,7 +297,7 @@ If the host directory is empty after the container starts, check:
 
 - `docker compose logs backup` for permission errors
 - That `BACKUP_HOST_DIR` in `.env` matches the directory you created
-- That the directory is writable by UID 999
+- That the directory is writable by the `backup` container (it runs as root, so this is rarely the cause)
 
 ### Run a manual backup
 
@@ -354,7 +357,7 @@ So the database backup is everything.
 
 **"Magic links never arrive"** — Resend domain isn't fully verified, or `AUTH_EMAIL_FROM` is using a different domain than you verified. Check Resend's dashboard for the email's status.
 
-**"Database connection refused on startup"** — happens occasionally when the app container starts before Postgres is fully ready, despite the healthcheck. The entrypoint will retry the migration once. If it persists, raise the healthcheck's `start_period` in `docker-compose.yml`.
+**"Database connection refused on startup"** — happens occasionally when the app container starts before Postgres is fully ready, despite the `depends_on` healthcheck gate. The entrypoint runs under `set -e`, so a failed migration exits the container non-zero and `restart: unless-stopped` restarts it, re-running the migration — it usually self-heals within a restart or two. If it persists, raise the `db` healthcheck's `start_period` in `docker-compose.yml`.
 
 **"Service worker won't update"** — service workers are sticky. After a deploy, hard-refresh (Cmd+Shift+R / Ctrl+F5) or open dev tools → Application → Service Workers → Unregister.
 
@@ -374,16 +377,16 @@ Tail the app logs:
 docker compose logs -f app
 ```
 
-Pipe to `jq` for filtering — e.g. all errors:
+Pipe to `jq` for filtering — e.g. all errors. The `--no-log-prefix` flag is required: without it Compose prefixes every line with the service name, and `jq` chokes on the non-JSON prefix.
 
 ```bash
-docker compose logs app | jq -c 'select(.level >= 50)'
+docker compose logs --no-log-prefix app | jq -c 'select(.level >= 50)'
 ```
 
 Or all slow actions:
 
 ```bash
-docker compose logs app | jq -c 'select(.msg == "action.slow")'
+docker compose logs --no-log-prefix app | jq -c 'select(.msg == "action.slow")'
 ```
 
 Access logs come from your reverse proxy, not from this stack. The Caddy snippet at [`docs/caddy-snippet.example`](./docs/caddy-snippet.example) emits JSON access logs to stdout — pipe through `jq` the same way.
@@ -428,11 +431,14 @@ scrape_configs:
       - targets: ['app:3000']
 ```
 
-To run a quick check from your laptop:
+To run a quick check from the docker host:
 
 ```bash
-docker compose exec app curl -s -H "Authorization: Bearer $METRICS_TOKEN" \
-  http://localhost:3000/api/metrics | head -50
+# wget (busybox), not curl — the node:22-alpine runtime image ships no curl. The
+# token is single-quoted so it expands inside the container, where the app
+# service has METRICS_TOKEN set — not in your host shell, where it doesn't.
+docker compose exec app sh -c \
+  'wget -qO- --header="Authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:3000/api/metrics' | head -50
 ```
 
 ### Metrics that ship

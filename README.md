@@ -105,11 +105,11 @@ The app emits structured JSON logs (Pino) to stdout and Prometheus metrics at `/
 # Tail app logs
 docker compose logs -f app
 
-# All errors:
-docker compose logs app | jq -c 'select(.level >= 50)'
+# All errors (--no-log-prefix so jq sees raw JSON, not Compose's line prefix):
+docker compose logs --no-log-prefix app | jq -c 'select(.level >= 50)'
 
 # Slow queries:
-docker compose logs app | jq -c 'select(.msg == "db.slow_query")'
+docker compose logs --no-log-prefix app | jq -c 'select(.msg == "db.slow_query")'
 ```
 
 Full details (PromQL examples, log filtering recipes, optional Prometheus + Grafana setup) in [`DEPLOY.md`](./DEPLOY.md#observability).

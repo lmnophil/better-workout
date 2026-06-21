@@ -22,19 +22,36 @@ set -eu
 BACKUP_DIR="/backups"
 mkdir -p "$BACKUP_DIR"
 
+# Sweep intermediates left behind by a previously crashed run. A SIGKILL mid-dump
+# can't fire our cleanup trap, and the leftovers carry a unique timestamp so the
+# prune glob below (*.sql.gz) never matches them — they'd just pile up forever.
+rm -f "$BACKUP_DIR"/*.partial
+
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H-%M-%SZ")
 TARGET="${BACKUP_DIR}/${POSTGRES_DB}-${TIMESTAMP}.sql.gz"
-TARGET_TMP="${TARGET}.partial"
+DUMP_TMP="${TARGET}.dump.partial" # uncompressed dump, before gzip
+GZIP_TMP="${TARGET}.partial"      # gzipped, before the atomic rename
+
+# Always sweep our own intermediates on exit. The final TARGET has no .partial
+# suffix, so a successful run leaves it untouched.
+cleanup() {
+  rm -f "$DUMP_TMP" "$GZIP_TMP"
+}
+trap cleanup EXIT
 
 echo "[backup] starting → ${TARGET}"
 
-# Dump to a .partial file first so a failure mid-dump doesn't leave a half-baked
-# file that looks like a real backup to the offsite pipeline. Rename atomically
-# only after pg_dump succeeds end-to-end.
+# Dump and compress as TWO separate steps, deliberately NOT `pg_dump | gzip`. In
+# POSIX sh a pipeline's exit status is the LAST command's — gzip's — so a failed
+# pg_dump (bad password, db down, dropped connection) sails into the success
+# branch and an empty/truncated .sql.gz gets renamed into place as a "good"
+# backup, which then ages the real ones out via pruning. We need pg_dump's own
+# status, so it writes an uncompressed temp file we check directly. (scripts/CLAUDE.md
+# keeps the no-`set -o pipefail` rule; this sidesteps the pipeline entirely.)
 #
 # --no-owner / --no-privileges keep the dump portable across environments
 # (e.g. restoring to a freshly-initialized DB with a different role).
-if pg_dump \
+if ! pg_dump \
     --host="$POSTGRES_HOST" \
     --username="$POSTGRES_USER" \
     --dbname="$POSTGRES_DB" \
@@ -42,13 +59,40 @@ if pg_dump \
     --no-owner \
     --no-privileges \
     --quote-all-identifiers \
-    | gzip -9 > "$TARGET_TMP"; then
-  mv "$TARGET_TMP" "$TARGET"
-else
-  echo "[backup] pg_dump failed; cleaning up partial file" >&2
-  rm -f "$TARGET_TMP"
+    >"$DUMP_TMP"; then
+  echo "[backup] pg_dump failed; no backup written" >&2
   exit 1
 fi
+
+# pg_dump writes this trailer comment only after streaming the whole database,
+# so its presence is positive confirmation the dump ran to completion — not
+# merely that the exit code was 0. Cheap guard against a truncated dump being
+# published. Grep the whole file (anchored to the exact comment line) rather than
+# a fixed `tail -n N` window: recent pg_dump emits a trailing `\unrestrict …`
+# line after the trailer, and a tail window would silently start missing the
+# marker if that trailing output grows in a future version — turning good backups
+# into false failures. The dump is small (single-user DB); a full grep is cheap.
+if ! grep -q '^-- PostgreSQL database dump complete$' "$DUMP_TMP"; then
+  echo "[backup] dump missing its completion trailer; refusing to publish" >&2
+  exit 1
+fi
+
+if ! gzip -9 <"$DUMP_TMP" >"$GZIP_TMP"; then
+  echo "[backup] gzip failed; no backup written" >&2
+  exit 1
+fi
+rm -f "$DUMP_TMP"
+
+# Verify the gzip stream is intact before publishing — insurance against a
+# truncated write (e.g. a full disk) reaching the offsite pipeline.
+if ! gzip -t "$GZIP_TMP"; then
+  echo "[backup] gzip integrity check failed; no backup written" >&2
+  exit 1
+fi
+
+# Publish atomically. Until this rename nothing the offsite pipeline globs
+# (*.sql.gz) exists, so a partial backup is never visible as a real one.
+mv "$GZIP_TMP" "$TARGET"
 
 SIZE=$(du -h "$TARGET" | awk '{print $1}')
 echo "[backup] wrote ${TARGET} (${SIZE})"

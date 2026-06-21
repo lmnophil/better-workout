@@ -1,17 +1,35 @@
+# Build context exclusions. The runtime image is built from `COPY . .` in the
+# builder stage, so anything here that's sensitive or heavy must NOT reach it —
+# even though the final stage copies only the standalone trace, the build cache
+# keeps the builder layer, which leaks if the image or cache is pushed.
+
+# Dependencies and build output — regenerated inside the image
 node_modules
 .next
-.git
+*.tsbuildinfo
+
+# Secrets and live credentials — never belong in a build context
 .env
 .env.*
 !.env.example
+.playwright-profile
+.claude
+
+# VCS, editor, and local tooling state
+.git
+.vscode
+.idea
+.playwright-mcp
+*.log
+.DS_Store
+
+# Docs and compose config the image doesn't need
 README.md
 DEPLOY.md
 CLAUDE.md
 docs
-.vscode
-.idea
-*.log
-.DS_Store
 docker-compose.yml
-Caddyfile
+
+# Real DB dumps, and operator scripts (bind-mounted at runtime, not baked in)
+backups
 scripts

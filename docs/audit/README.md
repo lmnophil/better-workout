@@ -42,7 +42,7 @@ surfaces in the UI) and loosely for 1 → 3. Packages 4–9 are independent of e
 | 5   | [05-schema-races-and-integrity.md](05-schema-races-and-integrity.md) | Schema-backed race fixes, soft-delete vs unique              | done (2026-06-21) |
 | 6   | [06-pwa-offline-auth-recovery.md](06-pwa-offline-auth-recovery.md)   | Offline fallback, HTTPS cookie-recovery loop                 | done (2026-06-21) |
 | 7   | [07-security-config-hardening.md](07-security-config-hardening.md)   | allowedOrigins, XFF, URL schemes, email leak                 | done (2026-06-21) |
-| 8   | [08-ops-and-repo-hygiene.md](08-ops-and-repo-hygiene.md)             | backup.sh, .dockerignore, DEPLOY.md, repo cruft              | pending           |
+| 8   | [08-ops-and-repo-hygiene.md](08-ops-and-repo-hygiene.md)             | backup.sh, .dockerignore, DEPLOY.md, repo cruft              | done (2026-06-21) |
 | 9   | [09-shared-ui-consolidation.md](09-shared-ui-consolidation.md)       | Dedupe divergent re-implementations, UX polish               | pending           |
 
 ## Deferred (real, but not testing-blockers — pick up opportunistically)

@@ -7,7 +7,12 @@
 
 const http = require('http');
 
-const req = http.get('http://127.0.0.1:3000/api/healthz', { timeout: 5000 }, (res) => {
+// Match the port the server actually binds. The Dockerfile sets PORT=3000 and
+// Next's standalone server honors it, so the probe must read the same env var
+// rather than hardcoding a port that a non-default PORT would silently break.
+const port = process.env.PORT ?? 3000;
+
+const req = http.get(`http://127.0.0.1:${port}/api/healthz`, { timeout: 5000 }, (res) => {
   // Drain the response so Node can clean up cleanly.
   res.resume();
   process.exit(res.statusCode === 200 ? 0 : 1);
