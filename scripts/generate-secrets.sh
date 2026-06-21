@@ -22,6 +22,5 @@ cat <<EOF
 # Copy these into your .env file.
 
 AUTH_SECRET=$(openssl rand -base64 32)
-POSTGRES_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)
 METRICS_TOKEN=$(openssl rand -hex 32)
 EOF

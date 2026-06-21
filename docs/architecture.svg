@@ -129,37 +129,20 @@
     <text x="710" y="654" text-anchor="middle" class="box-sub" fill="#993c1d">Rotated, ready for log shipper</text>
   </g>
 
-  <!-- Prisma → Postgres: arrow exits the app box at y=696 (bottom of container), continues to Postgres at y=740 -->
+  <!-- Prisma → SQLite: arrow exits the app box at y=696 (bottom of container), continues to the SQLite box at y=740 -->
   <line x1="250" y1="660" x2="250" y2="740" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
 
-  <!-- ===== POSTGRES (clearly outside the app container) ===== -->
+  <!-- ===== SQLITE (a file on a Docker volume, outside the app container) ===== -->
   <g>
     <rect x="140" y="740" width="220" height="64" rx="8" fill="#faeeda" stroke="#854f0b" stroke-width="1"/>
-    <text x="250" y="761" text-anchor="middle" class="box-title" fill="#633806">Postgres 16</text>
-    <text x="250" y="781" text-anchor="middle" class="box-sub" fill="#854f0b">Application data</text>
-    <text x="250" y="795" text-anchor="middle" class="box-sub" fill="#854f0b">postgres-data Docker volume</text>
+    <text x="250" y="761" text-anchor="middle" class="box-title" fill="#633806">SQLite</text>
+    <text x="250" y="781" text-anchor="middle" class="box-sub" fill="#854f0b">Application data (single file)</text>
+    <text x="250" y="795" text-anchor="middle" class="box-sub" fill="#854f0b">workout.db · app-data Docker volume</text>
   </g>
 
-  <!-- pg_dump arrow from Postgres to Backup service -->
-  <line x1="360" y1="772" x2="438" y2="772" stroke="#888" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow-dashed)"/>
-  <text x="399" y="763" text-anchor="middle" class="arrow-label" fill="#666">pg_dump</text>
-
-  <!-- ===== BACKUP SERVICE ===== -->
-  <g>
-    <rect x="438" y="740" width="380" height="64" rx="8" fill="#eaf3de" stroke="#3b6d11" stroke-width="1"/>
-    <text x="628" y="761" text-anchor="middle" class="box-title" fill="#27500a">Backup service</text>
-    <text x="628" y="781" text-anchor="middle" class="box-sub" fill="#3b6d11">Daily pg_dump → gzipped SQL</text>
-    <text x="628" y="795" text-anchor="middle" class="box-sub" fill="#3b6d11">Atomic write, retention pruning</text>
-  </g>
-
-  <line x1="628" y1="804" x2="628" y2="844" stroke="#555" stroke-width="1.5" marker-end="url(#arrow)"/>
-
-  <!-- ===== HOST FOLDER + OFFSITE ===== -->
-  <g>
-    <rect x="438" y="844" width="380" height="60" rx="8" fill="#eaf3de" stroke="#3b6d11" stroke-width="1" stroke-dasharray="5 4"/>
-    <text x="628" y="864" text-anchor="middle" class="box-title" fill="#27500a">Host folder + offsite pipeline</text>
-    <text x="628" y="884" text-anchor="middle" class="box-sub" fill="#3b6d11">User-managed (encryption, transit, retention)</text>
-  </g>
+  <!-- Backups are no longer a service. The SQLite file is copied out of the
+       app-data volume safely (online VACUUM INTO, or stop-and-copy) and handed
+       to the operator's own offsite pipeline — nothing to draw inside the stack. -->
 
   <!-- ===== GOOGLE OAUTH (top left, outside the Next.js box) ===== -->
   <g>
@@ -219,9 +202,6 @@
 
     <rect x="560" y="40" width="14" height="14" rx="3" fill="#faeeda" stroke="#854f0b"/>
     <text x="580" y="47" class="legend-text">Data layer</text>
-
-    <rect x="680" y="40" width="14" height="14" rx="3" fill="#eaf3de" stroke="#3b6d11"/>
-    <text x="700" y="47" class="legend-text">Backup pipeline</text>
 
     <rect x="800" y="40" width="14" height="14" rx="3" fill="#fbeaf0" stroke="#993556"/>
     <text x="820" y="47" class="legend-text">Third-party / external</text>

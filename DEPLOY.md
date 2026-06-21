@@ -7,7 +7,7 @@ End-to-end deployment of the workout tracker. Primary target: an Ubuntu LXC on P
 ## What you'll end up with
 
 - Single Ubuntu container running Docker
-- Three containers managed by Docker Compose: Postgres, the Next.js app, a backup helper
+- One container managed by Docker Compose: the Next.js app, with its SQLite database on a named volume
 - HTTPS handled by your own reverse proxy (Caddy / nginx / Traefik) sitting in front of port 3000
 - Auto-applied database migrations on every deploy
 - Reachable at `https://your-domain.com`
@@ -34,7 +34,7 @@ In the Proxmox web UI:
    - Template: the Ubuntu 24.04 you downloaded
    - Disk: 16 GB is plenty (the DB + images come in well under 4 GB)
    - CPU: 2 cores
-   - Memory: 1024 MB (Postgres + Next.js fits comfortably)
+   - Memory: 1024 MB is comfortable for the single Node app (it needs nowhere near that — ~512 MB is plenty)
    - Network: DHCP is fine; pin a static lease in your router so port forwarding stays sticky
 3. **Enable nesting** so Docker can run inside the LXC: `Container → Options → Features → check Nesting=1`. Restart the container.
 4. **(Privileged vs unprivileged)** Unprivileged is the default and works for Docker on modern Proxmox. If Docker misbehaves with weird permission errors, flipping to privileged is a known fix — but try unprivileged first.
@@ -106,7 +106,7 @@ For testing only, you can skip step 3 and set `AUTH_EMAIL_FROM=onboarding@resend
 ```bash
 cd /opt/workout
 cp .env.example .env
-./scripts/generate-secrets.sh >> .env   # appends AUTH_SECRET, POSTGRES_PASSWORD, METRICS_TOKEN
+./scripts/generate-secrets.sh >> .env   # appends AUTH_SECRET, METRICS_TOKEN
 nano .env                                # fill in the rest
 ```
 
@@ -125,22 +125,13 @@ Required everywhere (dev and prod):
 | `AUTH_RESEND_KEY`    | Resend dashboard (Part 5)                                       | **Yes**    |
 | `AUTH_EMAIL_FROM`    | Address on your verified Resend domain                          | No         |
 
-Compose-deployment only (used by `docker-compose.yml`):
-
-| Variable               | Where to get it                                                                                                             | Sensitive? |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| `POSTGRES_PASSWORD`    | `openssl rand -base64 24` (or use generate-secrets.sh)                                                                      | **Yes**    |
-| `POSTGRES_USER`        | Defaults to `workout`. Override only if you have a reason.                                                                  | No         |
-| `POSTGRES_DB`          | Defaults to `workout`. Override only if you have a reason.                                                                  | No         |
-| `BACKUP_HOST_DIR`      | Host path where DB backups land (e.g. `/var/backups/workout`). Must exist; readable by your offsite pipeline. **Required.** | No         |
-| `BACKUP_SCHEDULE_HOUR` | UTC hour for daily backup, 00–23. Default `03`.                                                                             | No         |
-| `BACKUP_KEEP_LOCAL`    | How many local backup files to keep before pruning. Default `7`.                                                            | No         |
+The compose deployment sets `DATABASE_URL` itself — it's hardcoded in `docker-compose.yml` to `file:/app/data/workout.db` (the SQLite file on the `app-data` volume), so you don't put it in `.env`.
 
 Local dev only (ignored by compose):
 
-| Variable       | Where to get it                                                                                      |
-| -------------- | ---------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL` | Connection string for your local Postgres, e.g. `postgres://postgres:devpass@localhost:5432/workout` |
+| Variable       | Where to get it                                                                                                |
+| -------------- | -------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL` | A `file:` URL for your local SQLite database, e.g. `file:./prisma/dev.db` (resolved relative to the repo root) |
 
 Optional:
 
@@ -159,13 +150,12 @@ If the app container won't start, `docker compose logs app` shows exactly what's
 
 If you suspect a secret leaked, replace it and restart:
 
-| Secret               | Effect of rotating                                                                                                                                                                                                                                                                                                |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AUTH_SECRET`        | All existing JWT sessions invalidated → users must sign in again. Do this if leaked.                                                                                                                                                                                                                              |
-| `POSTGRES_PASSWORD`  | Postgres only reads this when its data volume is first initialized — editing `.env` and restarting won't rotate a live user's password. Follow the full procedure in "Rotating the Postgres password" (Day-to-day operations); it `ALTER`s the live user, then restarts `app` **and** `backup` so both reconnect. |
-| `AUTH_GOOGLE_SECRET` | Generate a new one in Google Cloud Console, paste into `.env`, restart `app`. The old one is invalidated immediately.                                                                                                                                                                                             |
-| `AUTH_RESEND_KEY`    | Revoke the old key in Resend dashboard, create a new one, paste into `.env`, restart `app`.                                                                                                                                                                                                                       |
-| `METRICS_TOKEN`      | Update the env var, restart `app`, update your scraper's credential.                                                                                                                                                                                                                                              |
+| Secret               | Effect of rotating                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`        | All existing JWT sessions invalidated → users must sign in again. Do this if leaked.                                  |
+| `AUTH_GOOGLE_SECRET` | Generate a new one in Google Cloud Console, paste into `.env`, restart `app`. The old one is invalidated immediately. |
+| `AUTH_RESEND_KEY`    | Revoke the old key in Resend dashboard, create a new one, paste into `.env`, restart `app`.                           |
+| `METRICS_TOKEN`      | Update the env var, restart `app`, update your scraper's credential.                                                  |
 
 Always restart the relevant container after editing `.env`:
 
@@ -180,10 +170,10 @@ cd /opt/workout
 docker compose up -d --build
 ```
 
-First build takes a few minutes — Docker pulls Node and Postgres and builds the Next.js production bundle. After that:
+First build takes a few minutes — Docker pulls Node and builds the Next.js production bundle. After that:
 
-- The `app` container's entrypoint runs `prisma migrate deploy` automatically — schema is created on first boot.
-- Postgres comes up with an empty `workout` database.
+- The `app` container's entrypoint runs `prisma migrate deploy` automatically — it creates and migrates the SQLite file at `/app/data/workout.db` on first boot.
+- The database starts empty, including **zero built-in exercises** — you load those with the seed step below.
 - The app listens on port 3000. Your reverse proxy (Part 4) handles TLS and forwards to it.
 
 **Seed the built-in exercises (one-time):**
@@ -192,12 +182,12 @@ First build takes a few minutes — Docker pulls Node and Postgres and builds th
 docker compose exec app node prisma/seed.js
 ```
 
-Use `exec` against the already-running app container, not `run` — the entrypoint script hardcodes `node server.js` and ignores any args you pass to `run`. The seed script is compiled at build time so it runs with plain `node` (no need for `tsx` in the runtime image). It's idempotent — safe to re-run after updating `lib/exercises-data.ts` and rebuilding.
+Prisma 7's migrate commands do **not** auto-run the seed, so the entrypoint's `migrate deploy` leaves the database with no built-in exercises. Run the seed explicitly after the first boot to load the 151 built-in exercises. Use `exec` against the already-running app container, not `run` — the entrypoint script hardcodes `node server.js` and ignores any args you pass to `run`. The seed script is compiled at build time so it runs with plain `node` (no need for `tsx` in the runtime image). It's idempotent — safe to re-run after updating `lib/exercises-data.ts` and rebuilding.
 
 ## Part 8 — Verify
 
 ```bash
-# All three containers should be up: db, app, backup
+# The app container should be up
 docker compose ps
 
 # App logs — look for "Ready" / "Listening on..."
@@ -224,130 +214,86 @@ docker compose ps
 # Tail logs
 docker compose logs -f app
 
-# Database shell
-docker compose exec db psql -U workout -d workout
+# Database shell (Prisma Studio — the runtime image ships no sqlite3 CLI)
+docker compose exec app node ./node_modules/prisma/build/index.js studio
 
 # Re-seed (idempotent — re-running won't duplicate)
 docker compose exec app node prisma/seed.js
 ```
 
-### Rotating the Postgres password
-
-Postgres only reads `POSTGRES_PASSWORD` when initializing a fresh data volume — restarting an existing container with a new password value won't change the actual user's password. To rotate it on a live system:
-
-```bash
-# 1. Generate a new password
-NEW_PW=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)
-
-# 2. Update the live database user (uses the OLD password from .env to connect)
-docker compose exec db psql -U workout -d workout -c "ALTER USER workout WITH PASSWORD '$NEW_PW';"
-
-# 3. Update .env with the new password
-sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$NEW_PW|" .env
-
-# 4. Restart the services that connect to Postgres so they reconnect with the
-#    new password. Both `app` and `backup` hold it — restart both, or every
-#    nightly dump fails auth from here on.
-docker compose up -d app backup
-```
-
 ## Backups
 
-A `backup` service runs in compose alongside the app. Once a day at `BACKUP_SCHEDULE_HOUR` UTC (default 03 = 3 AM), it runs `pg_dump`, gzips the output, and writes it to the host directory you set as `BACKUP_HOST_DIR`. Older local copies are pruned to `BACKUP_KEEP_LOCAL` (default 7).
+There is no backup service anymore. The database is a single SQLite file living in the `app-data` Docker volume at `/app/data/workout.db` (plus its `-wal` and `-shm` companions while the app is running). Backing up means copying that file out of the volume **safely** — and "safely" is the whole game with SQLite.
 
-The local files are **not encrypted at rest** — the assumption is that you have your own offsite pipeline that handles encryption, transit, and long-term retention. The local copies exist as a short-term buffer if your offsite pipeline is briefly unavailable. If you don't have an offsite pipeline, this setup is not enough on its own — locally on the same disk as the database doesn't protect against host failure.
+**Never `cp` a live WAL database.** With write-ahead logging on, the real database state is split across `workout.db` and `workout.db-wal` at any instant. A plain `cp` of just the `.db` — or even of all three files while writes are in flight — can capture a torn, inconsistent snapshot that won't open cleanly later. Use one of the two safe options below instead.
 
-### Setup
+The local copy is **not encrypted at rest** and a copy on the same disk as the database doesn't survive a host failure. The assumption is that you have your own offsite pipeline handling encryption, transit, and retention — your job here is to produce a consistent copy of the file and hand it to that pipeline. If you don't have an offsite pipeline, this is not enough on its own.
 
-In `.env`:
+### Option A — online backup while the app runs
 
-```env
-# Host path where backups land. Your offsite pipeline picks them up from here.
-# Must exist and be writable by Docker. No default — be explicit.
-BACKUP_HOST_DIR=/var/backups/workout
-
-# UTC hour for daily backup (00–23). Default 03.
-BACKUP_SCHEDULE_HOUR=03
-
-# How many local files to retain before pruning oldest. Default 7.
-BACKUP_KEEP_LOCAL=7
-```
-
-Create the directory before bringing the stack up:
+SQLite can produce a consistent copy of a live database without stopping it, via the backup API. The simplest form is `VACUUM INTO`, which writes a fresh, fully-checkpointed `.db` (no separate WAL to carry along):
 
 ```bash
-sudo mkdir -p /var/backups/workout
+# Writes a clean snapshot next to the live DB inside the volume, then copy it
+# out. `db execute` reads the datasource (file:/app/data/workout.db) from the
+# container's DATABASE_URL via prisma.config.ts, so no URL flag is needed.
+docker compose exec app sh -c \
+  "echo \"VACUUM INTO '/app/data/workout-backup.db';\" | node ./node_modules/prisma/build/index.js db execute --stdin"
+
+docker compose cp app:/app/data/workout-backup.db ./workout-backup.db
+docker compose exec app rm /app/data/workout-backup.db
 ```
 
-No `chown` is needed. The `backup` service overrides the postgres image's entrypoint, so it runs as **root** and writes to the directory regardless of owner. Dumps land owned by `root:root`, mode `644` (world-readable), so an offsite pipeline reading them as any user works fine. If your pipeline needs to _delete_ or rotate the local copies rather than just read them, run it as root or `sudo chown` the directory to the pipeline's user.
+The resulting `workout-backup.db` is a single self-contained file — hand it to your offsite pipeline. This is the option to prefer: no downtime, guaranteed consistent.
 
-### Verify backups are running
+### Option B — stop the app, then copy the files
 
-The service runs once on startup, then on schedule:
+If you'd rather copy at the filesystem level, stop the app first so nothing is mid-write, copy **all** of `workout.db`, `workout.db-wal`, and `workout.db-shm`, then start it again:
 
 ```bash
-docker compose logs backup
-# expect: "[backup] starting → /backups/workout-2026-05-07T...sql.gz"
-# expect: "[backup] wrote /backups/workout-...sql.gz (XXX KB)"
+docker compose stop app
 
-ls -lh /var/backups/workout/
+# Copy the whole DB fileset out of the named volume. The volume is the compose
+# project name + "_app-data" — e.g. for the project `workout` it's
+# `workout_app-data`. Check yours with `docker volume ls`.
+docker run --rm \
+  -v workout_app-data:/data \
+  -v "$PWD:/backup" \
+  alpine sh -c 'cd /data && cp -a workout.db workout.db-wal workout.db-shm /backup/'
+
+docker compose start app
 ```
 
-If the host directory is empty after the container starts, check:
+(If the `-wal`/`-shm` files are absent — they exist only when the app has run since the last checkpoint — `cp` will warn about the missing ones; that's harmless, `workout.db` is the file that must be present.)
 
-- `docker compose logs backup` for permission errors
-- That `BACKUP_HOST_DIR` in `.env` matches the directory you created
-- That the directory is writable by the `backup` container (it runs as root, so this is rarely the cause)
-
-### Run a manual backup
-
-```bash
-docker compose exec backup sh /usr/local/bin/backup.sh
-```
-
-Useful before you do anything risky (schema migration, dependency upgrade) or to test the restore procedure.
+Then ship the copied file(s) offsite. This means a few seconds of downtime, which for a single-user tracker is usually fine.
 
 ### Restore from a backup
 
-The `scripts/restore.sh` helper takes a backup file path, drops the existing schema, and pipes the dump back in. **Destructive** — confirms before proceeding.
+Restoring replaces the live database with a backed-up file. **Destructive** — it overwrites whatever is currently in the volume. There's no helper script; do it by hand:
 
 ```bash
-./scripts/restore.sh /var/backups/workout/workout-2026-05-07T03-00-00Z.sql.gz
-```
+# 1. Stop the app so nothing is reading or writing the DB.
+docker compose stop app
 
-Then restart the app so it reconnects:
+# 2. Replace workout.db in the volume and remove any stale WAL/SHM so SQLite
+#    doesn't try to replay an old log on top of the restored file. Adjust the
+#    volume name (project + "_app-data") and the source filename to match yours.
+docker run --rm \
+  -v workout_app-data:/data \
+  -v "$PWD:/backup" \
+  alpine sh -c 'cp -a /backup/workout-backup.db /data/workout.db && rm -f /data/workout.db-wal /data/workout.db-shm'
 
-```bash
-docker compose restart app
+# 3. Start the app and confirm it comes up healthy.
+docker compose start app
 docker compose logs -f app
 ```
 
 ### Test your restore (do this before you need it)
 
-The most common backup failure mode is "the backups exist but they don't actually restore." Test it once on a non-production DB before rolling out:
+The most common backup failure mode is "the backups exist but they don't actually restore." Test it once before you rely on it: take a backup with Option A, run the restore steps above against it (ideally on a throwaway copy of the stack, not prod), then sign in and confirm your data is intact. A backup you've never restored is a guess, not a backup.
 
-```bash
-# 1. Take a manual backup
-docker compose exec backup sh /usr/local/bin/backup.sh
-ls /var/backups/workout/
-
-# 2. Restore from it
-./scripts/restore.sh /var/backups/workout/<latest-file>.sql.gz
-
-# 3. Sign in to the app and confirm your data is intact
-```
-
-### What's in a backup
-
-`pg_dump --format=plain --no-owner --no-privileges` — every table, index, sequence, and row, as plain SQL. Portable across Postgres environments (the `--no-owner` flag means restore works against a different DB role). You can `zcat backup.sql.gz | head` to read the first lines if you want to verify it looks sensible.
-
-What's NOT in a backup:
-
-- Reverse proxy state (TLS certs etc.) — lives outside this stack now
-- App container state — there is none worth preserving
-- Uploaded files — there are no file uploads in this app
-
-So the database backup is everything.
+What's NOT in a backup: reverse proxy state (TLS certs etc.) lives outside this stack; the app container has no state worth preserving; and there are no file uploads in this app. So the SQLite file is everything.
 
 ## Troubleshooting
 
@@ -357,7 +303,7 @@ So the database backup is everything.
 
 **"Magic links never arrive"** — Resend domain isn't fully verified, or `AUTH_EMAIL_FROM` is using a different domain than you verified. Check Resend's dashboard for the email's status.
 
-**"Database connection refused on startup"** — happens occasionally when the app container starts before Postgres is fully ready, despite the `depends_on` healthcheck gate. The entrypoint runs under `set -e`, so a failed migration exits the container non-zero and `restart: unless-stopped` restarts it, re-running the migration — it usually self-heals within a restart or two. If it persists, raise the `db` healthcheck's `start_period` in `docker-compose.yml`.
+**"App exits on startup with a migration error"** — the entrypoint runs `prisma migrate deploy` against the SQLite file under `set -e`, so if a migration can't apply, the container exits non-zero and `restart: unless-stopped` keeps retrying. Check `docker compose logs app` for the actual Prisma error. The usual cause on a long-lived deployment is a database whose schema drifted from the migration history — inspect it with the Prisma Studio command under "Day-to-day operations", or (since data is disposable in this project) reset the `app-data` volume to start clean.
 
 **"Service worker won't update"** — service workers are sticky. After a deploy, hard-refresh (Cmd+Shift+R / Ctrl+F5) or open dev tools → Application → Service Workers → Unregister.
 
@@ -412,9 +358,9 @@ prometheus:
   volumes:
     - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     - prometheus-data:/prometheus
-  networks:
-    - internal
 ```
+
+Adding it to this `docker-compose.yml` puts it on the compose default network, so it can reach `app:3000/api/metrics` by service name.
 
 …with a minimal `prometheus.yml`:
 
@@ -490,7 +436,7 @@ If you wire up external uptime monitoring (BetterStack, Uptime Kuma, etc.), poin
 
 ### Log retention
 
-Compose configures all three services with `json-file` rotation: 10MB per file, 5 files, gzip-compressed when rotated. Each service tops out at ~50MB on disk and you can always go back roughly 50MB worth of activity. Adjust the `x-logging:` block at the top of `docker-compose.yml` if you have different needs.
+Compose configures the `app` service with `json-file` rotation: 10MB per file, 5 files, gzip-compressed when rotated. It tops out at ~50MB on disk and you can always go back roughly 50MB worth of activity. Adjust the `x-logging:` block at the top of `docker-compose.yml` if you have different needs.
 
 ### What to add later
 

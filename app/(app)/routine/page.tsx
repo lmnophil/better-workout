@@ -14,6 +14,7 @@ import {
   getUserPreferences,
   getUserVolumeTargets,
 } from '@/lib/queries';
+import { parseStringList } from '@/lib/scalar-list';
 import { isScheduleStyle } from '@/lib/routine';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { effectiveBounds } from '@/lib/coverage';
@@ -86,8 +87,8 @@ export default async function RoutinePage() {
               plannedSeconds: te.plannedSeconds,
               note: te.note,
               metric: te.exercise.metric,
-              primaryMuscles: te.exercise.primaryMuscles,
-              secondaryMuscles: te.exercise.secondaryMuscles,
+              primaryMuscles: parseStringList(te.exercise.primaryMuscles),
+              secondaryMuscles: parseStringList(te.exercise.secondaryMuscles),
             })),
           pools: d.template.pools.map((p) => ({
             id: p.id,
@@ -139,13 +140,13 @@ export default async function RoutinePage() {
           name: e.name,
           module: e.module,
           prescription: e.prescription,
-          primaryMuscles: e.primaryMuscles,
-          secondaryMuscles: e.secondaryMuscles,
+          primaryMuscles: parseStringList(e.primaryMuscles),
+          secondaryMuscles: parseStringList(e.secondaryMuscles),
           videoUrl: e.videoUrl,
           isCustom: e.isCustom,
           metric: e.metric,
           loadType: e.loadType,
-          equipment: e.equipment,
+          equipment: parseStringList(e.equipment),
           restTimerSecondsOverride: e.restTimerSecondsOverride,
           weightIncrementOverride: e.weightIncrementOverride,
         }))}

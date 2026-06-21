@@ -43,9 +43,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate
 
 # Pre-compile the seed script with esbuild so it runs in the runtime image
-# without needing tsx. Bundles lib/exercises-data.ts and the generated Prisma
-# client (pure JS in v7) into one file. node_modules packages stay external —
-# @prisma/adapter-pg, pg, and friends are already in the runtime image.
+# without needing tsx. Bundles lib/exercises-data.ts, lib/scalar-list.ts, and
+# the generated Prisma client (pure JS in v7) into one file. node_modules
+# packages stay external — @prisma/adapter-libsql, libsql (a prebuilt native
+# module; no compile step), and friends are already in the runtime image.
 # Output is ESM because package.json sets "type": "module".
 RUN npx esbuild prisma/seed.ts \
     --bundle \
@@ -72,6 +73,12 @@ ENV HOSTNAME="0.0.0.0"
 # Non-root user
 RUN addgroup --system --gid 1001 nodejs \
  && adduser --system --uid 1001 nextjs
+
+# SQLite lives on a mounted volume at /app/data. Create the directory owned by
+# the app user so a fresh named volume inherits that ownership on first run
+# (Docker seeds a new empty volume from the image dir, owner included) and the
+# non-root process can create + write the database file.
+RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
 
 # Copy the Next.js standalone server (includes only what's needed at runtime)
 COPY --from=builder /app/public ./public

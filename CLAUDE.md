@@ -97,7 +97,7 @@ If a fact lives in one doc and is only referenced from others, that's the goal. 
 
 ## Stack (the bits that aren't in package.json)
 
-Next.js 15 (App Router, Server Actions). TypeScript strict. Prisma 7 + Postgres 16 — Rust query engine is gone, queries run through `@prisma/adapter-pg` (see `lib/db.ts`); generated client lives at `prisma/generated/prisma/client`; CLI config is `prisma.config.ts`, not `package.json#prisma`. Auth.js v5 with Google OAuth + Resend magic links, JWT sessions. Tailwind 3 (no CSS-in-JS). Pino for structured logging. prom-client for metrics. Serwist for PWA. Docker Compose for deployment; TLS is the operator's reverse proxy.
+Next.js 15 (App Router, Server Actions). TypeScript strict. Prisma 7 + SQLite — Rust query engine is gone, queries run through the `@prisma/adapter-libsql` driver adapter against a local file (see `lib/db.ts`); `libsql` ships as a prebuilt NAPI native module, so nothing compiles at install time; generated client lives at `prisma/generated/prisma/client`; CLI config is `prisma.config.ts`, not `package.json#prisma`. Auth.js v5 with Google OAuth + Resend magic links, JWT sessions. Tailwind 3 (no CSS-in-JS). Pino for structured logging. prom-client for metrics. Serwist for PWA. Docker Compose for deployment (a single `app` service + a named volume for the SQLite file); TLS is the operator's reverse proxy.
 
 Not used (deliberately): no ORM besides Prisma; no state library; no CSS-in-JS; no Sentry-style error tracking (the `/api/log/client-error` endpoint + Pino is the pipeline); no analytics.
 

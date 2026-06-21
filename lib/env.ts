@@ -46,11 +46,9 @@ const CHECKS: EnvCheck[] = [
   {
     name: 'DATABASE_URL',
     level: 'required',
-    description: 'Postgres connection string',
+    description: 'SQLite database file URL (e.g. file:./prisma/dev.db)',
     validate: (v) =>
-      v.startsWith('postgres://') || v.startsWith('postgresql://')
-        ? null
-        : "must start with 'postgres://' or 'postgresql://'",
+      v.startsWith('file:') ? null : "must be a SQLite file URL starting with 'file:'",
   },
   {
     name: 'AUTH_GOOGLE_ID',

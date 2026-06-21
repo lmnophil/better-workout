@@ -34,17 +34,12 @@ yarn-error.log*
 .idea/
 .DS_Store
 
-# Prisma
-prisma/migrations/dev.db*
+# Prisma — local SQLite dev database (libsql writes -wal/-shm/-journal alongside).
+prisma/dev.db*
 # Prisma 7 generates the client into the project tree (no longer node_modules).
 # It's build output — never commit.
 prisma/generated/
 prisma/seed.js
-
-# Local backup target. Production sets BACKUP_HOST_DIR to /var/backups/...;
-# local dev points it at ./backups so the workflow in .env.example
-# (`mkdir -p backups`) doesn't dump real DB contents into git history.
-backups/
 
 # Serwist / PWA
 public/sw.js

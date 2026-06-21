@@ -12,6 +12,7 @@ import {
   getUserPreferences,
   getUserVolumeTargets,
 } from '@/lib/queries';
+import { parseStringList } from '@/lib/scalar-list';
 import { isScheduleStyle } from '@/lib/routine';
 import { MUSCLE_GROUPS } from '@/lib/exercises-data';
 import { computeRoutineVolumes, effectiveBounds } from '@/lib/coverage';
@@ -104,14 +105,14 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           name: te.exercise.name,
           module: te.exercise.module,
           metric: te.exercise.metric,
-          primaryMuscles: te.exercise.primaryMuscles,
-          secondaryMuscles: te.exercise.secondaryMuscles,
+          primaryMuscles: parseStringList(te.exercise.primaryMuscles),
+          secondaryMuscles: parseStringList(te.exercise.secondaryMuscles),
           plannedSets: te.plannedSets,
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
           plannedWeight: te.plannedWeight,
           videoUrl: te.exercise.videoUrl,
-          equipment: te.exercise.equipment,
+          equipment: parseStringList(te.exercise.equipment),
           poolId: te.poolId,
         })),
       pools: d.template.pools.map((p) => ({ id: p.id, pickCount: p.pickCount })),
@@ -126,7 +127,15 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     string,
     { primaryMuscles: string[]; secondaryMuscles: string[] }
   >();
-  for (const ex of libraryExercises) {
+  // libraryExercises arrive with JSON-encoded muscle lists (SQLite has no array
+  // column); parse them back to string[] before they feed the lookup and the
+  // client payload.
+  const library = libraryExercises.map((e) => ({
+    ...e,
+    primaryMuscles: parseStringList(e.primaryMuscles),
+    secondaryMuscles: parseStringList(e.secondaryMuscles),
+  }));
+  for (const ex of library) {
     exerciseLookup.set(ex.id, {
       primaryMuscles: ex.primaryMuscles,
       secondaryMuscles: ex.secondaryMuscles,
@@ -214,7 +223,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           kind: r.kind,
         })),
       }}
-      library={libraryExercises}
+      library={library}
       coverage={{
         muscleGroups: muscleGroupsForClient,
         baseTotals: baseTotalsForClient,

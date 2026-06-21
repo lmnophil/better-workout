@@ -27,10 +27,11 @@ import { MAX_ROUTINE_DAYS } from './routine';
 import { PREFS_DEFAULTS } from './prefs';
 import { parsePrescriptionSetCount } from './prescription';
 import { getLastSetsForExerciseIds } from './queries';
+import { serializeStringList } from './scalar-list';
 
 /**
- * True when a write failed a unique constraint (Postgres unique violation,
- * Prisma P2002). Used to turn find-then-create races into either an idempotent
+ * True when a write failed a unique constraint (Prisma P2002). Used to turn
+ * find-then-create races into either an idempotent
  * recovery or the existing friendly error, instead of a raw crash logged as a
  * bug. Several of these guard partial unique indexes the schema can't declare
  * (active session, live custom-exercise name) — see prisma/CLAUDE.md.
@@ -874,13 +875,13 @@ export const createCustomExercise = withLogging(
             name,
             module: 'Custom',
             prescription: prescription || null,
-            primaryMuscles,
-            secondaryMuscles: secondaryMuscles ?? [],
+            primaryMuscles: serializeStringList(primaryMuscles),
+            secondaryMuscles: serializeStringList(secondaryMuscles ?? []),
             videoUrl: videoUrl ?? null,
             isCustom: true,
             ownerId: userId,
             metric: metric ?? 'reps',
-            equipment: equipment ?? [],
+            equipment: serializeStringList(equipment ?? []),
           },
         });
 
@@ -1310,7 +1311,7 @@ export const saveActiveAsTemplate = withLogging(
     }
 
     // Friendly error on name collision against the user's own templates. We
-    // intentionally don't check against built-ins — Postgres treats (null, name)
+    // intentionally don't check against built-ins — SQL treats (null, name)
     // and (userId, name) as distinct, and surfacing "you already have a template
     // by that name" when the conflict is with a built-in would be confusing.
     // The user can rename or hide the built-in if they want to.
@@ -1499,11 +1500,14 @@ export const hideTemplate = withLogging(
       throw new ExpectedError('Only built-in templates can be hidden');
     }
 
-    // upsert pattern via createMany skipDuplicates — cleanly idempotent without
-    // a select-then-insert race window.
-    await db.userHiddenTemplate.createMany({
-      data: [{ userId, templateId }],
-      skipDuplicates: true,
+    // Idempotent without a select-then-insert race window: upsert keyed by the
+    // (userId, templateId) unique with a no-op update, so a concurrent double-
+    // hide can't crash the loser with a P2002. (SQLite's createMany has no
+    // skipDuplicates.)
+    await db.userHiddenTemplate.upsert({
+      where: { userId_templateId: { userId, templateId } },
+      create: { userId, templateId },
+      update: {},
     });
 
     revalidatePath('/');
@@ -4077,8 +4081,8 @@ export const applyShareCustomExercise = withLogging(
         data: {
           name: await uniqueOwnedExerciseName(tx, userId, name),
           module: payload.module || 'Custom',
-          primaryMuscles: payload.primaryMuscles ?? [],
-          secondaryMuscles: payload.secondaryMuscles ?? [],
+          primaryMuscles: serializeStringList(payload.primaryMuscles ?? []),
+          secondaryMuscles: serializeStringList(payload.secondaryMuscles ?? []),
           metric: payload.metric === 'time' ? 'time' : 'reps',
           isCustom: true,
           ownerId: userId,
@@ -4386,18 +4390,24 @@ export const toggleShareReaction = withLogging(
         where: { reviewerId: reviewer.id, targetType, targetId, kind },
       });
     } else {
-      // Toggle on. createMany + skipDuplicates resolves the find-then-create race
-      // at the DB level (ON CONFLICT DO NOTHING), so a concurrent double-tap-on
-      // can't throw P2002. Notify only when a row was actually inserted, so the
-      // racing tap doesn't double-notify the owner. A reviewer who deliberately
-      // un-reacts then re-reacts will re-notify — reactions are the intentionally
-      // quiet tier and the link is revocable, so we accept that rather than
-      // persisting per-(reviewer, target) notification history across un-reacts.
-      const { count } = await db.shareReaction.createMany({
-        data: [{ shareId: share.id, reviewerId: reviewer.id, targetType, targetId, kind }],
-        skipDuplicates: true,
-      });
-      if (count > 0) {
+      // Toggle on. SQLite's createMany has no skipDuplicates, so create directly
+      // and treat a unique violation as "a concurrent double-tap-on already
+      // inserted it" — swallow it instead of crashing the loser. Notify only
+      // when our insert actually won, so the racing tap doesn't double-notify
+      // the owner. A reviewer who deliberately un-reacts then re-reacts will
+      // re-notify — reactions are the intentionally quiet tier and the link is
+      // revocable, so we accept that rather than persisting per-(reviewer,
+      // target) notification history across un-reacts.
+      let inserted = true;
+      try {
+        await db.shareReaction.create({
+          data: { shareId: share.id, reviewerId: reviewer.id, targetType, targetId, kind },
+        });
+      } catch (e) {
+        if (!isUniqueViolation(e)) throw e;
+        inserted = false;
+      }
+      if (inserted) {
         await notifyRoutineOwner(share.routine.userId, {
           kind: 'share_reaction',
           title: `${reviewer.displayName} liked an exercise`,

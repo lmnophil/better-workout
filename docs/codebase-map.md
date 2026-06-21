@@ -10,7 +10,7 @@ The doc is maintained alongside code changes (see the maintenance contract in th
 
 ## TL;DR
 
-Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript strict + Prisma 7 + Postgres 16, deployed via Docker Compose (postgres + app + nightly pg_dump backup). Auth.js v5 with Google OAuth + Resend magic links, JWT sessions. Single-user / small-group; data is disposable by design (see project status section in CLAUDE.md). Mutations go through server actions in `lib/actions.ts`; reads go through `lib/queries.ts`. The two routine concepts to internalise: a **WorkoutSession is a record of what happened** (date + sets), a **Routine is the user's declared plan** (a cycle of templates) — the app does not invent or prescribe.
+Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript strict + Prisma 7 + SQLite (via the `@prisma/adapter-libsql` driver adapter), deployed via Docker Compose (a single app service with the SQLite file on a named volume). Auth.js v5 with Google OAuth + Resend magic links, JWT sessions. Single-user / small-group; data is disposable by design (see project status section in CLAUDE.md). Mutations go through server actions in `lib/actions.ts`; reads go through `lib/queries.ts`. The two routine concepts to internalise: a **WorkoutSession is a record of what happened** (date + sets), a **Routine is the user's declared plan** (a cycle of templates) — the app does not invent or prescribe.
 
 ---
 
@@ -25,11 +25,11 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
 
 ### Exercise model
 
-- **Exercise** — id, name, module (one of `EXERCISE_MODULES`), prescription, `metric` (`'reps'|'time'`, default `'reps'`), `loadType` (`'weight'|'band'|'none'`, default `'weight'`), `equipment` (string[]), `primaryMuscles[]`, `secondaryMuscles[]`, `videoUrl`, `isCustom`.
+- **Exercise** — id, name, module (one of `EXERCISE_MODULES`), prescription, `metric` (`'reps'|'time'`, default `'reps'`), `loadType` (`'weight'|'band'|'none'`, default `'weight'`), `equipment` / `primaryMuscles` / `secondaryMuscles` (string[] at the app layer, stored as JSON-encoded TEXT since SQLite has no array type — (de)serialized via `lib/scalar-list.ts`), `videoUrl`, `isCustom`.
   - `ownerId` (nullable FK→User Cascade) + `isCustom`: built-ins are `ownerId=null, isCustom=false`; user customs are `ownerId=userId, isCustom=true`.
   - **Soft-delete** via `deletedAt` (nullable). Used for user customs so existing SetLog history isn't orphaned.
   - `loadType` decides what the set row renders for load: `'weight'` shows the numeric stepper (default), `'band'` swaps to a chip picker of the user's Bands, `'none'` drops the load column entirely. Drives SMR / mobility / banded activation work logging the right thing.
-  - Indices: (ownerId), (module). **Partial** unique (ownerId, name) `WHERE "deletedAt" IS NULL` (raw SQL in the init migration) — only live customs collide, so a deleted custom's name is free to reuse; Postgres NULL semantics also let two `null` owners coexist with the same name.
+  - Indices: (ownerId), (module). **Partial** unique (ownerId, name) `WHERE "deletedAt" IS NULL` (raw SQL in the init migration) — only live customs collide, so a deleted custom's name is free to reuse; SQL NULL semantics (NULLs distinct in a unique index) also let two `null` owners coexist with the same name.
 - **ExerciseUserSettings** — per-user per-exercise overrides for `restTimerSeconds` and `weightIncrement`. Unique (userId, exerciseId), both Cascade.
 
 ### Sessions and sets
@@ -284,20 +284,17 @@ Multi-stage, three stages:
 
 ### docker-compose.yml
 
-Three services on an internal bridge:
+A single service:
 
-- **db**: postgres:16-alpine, persistent `postgres-data` volume, `pg_isready` healthcheck.
-- **app**: built from Dockerfile. Publishes 3000:3000. Depends on db (healthy). Env: `DATABASE_URL`, `AUTH_SECRET`, `AUTH_URL`, `AUTH_TRUST_HOST`, provider keys, `LOG_LEVEL`, `METRICS_TOKEN`, `NODE_ENV=production`.
-- **backup**: postgres:16-alpine running `backup-loop.sh`. Env: `BACKUP_SCHEDULE_HOUR` (default 03 UTC), `BACKUP_KEEP_LOCAL` (default 7). Mounts `BACKUP_HOST_DIR` → `/backups`.
+- **app**: built from Dockerfile. Publishes 3000:3000. SQLite file on the `app-data` named volume (mounted at `/app/data`). Env: `DATABASE_URL` (hardcoded `file:/app/data/workout.db`), `AUTH_SECRET`, `AUTH_URL`, `AUTH_TRUST_HOST`, provider keys, `LOG_LEVEL`, `METRICS_TOKEN`, `NODE_ENV=production`. Healthcheck hits `/api/healthz`.
 
-JSON-file log driver, 10MB × 5 with gzip per service.
+JSON-file log driver, 10MB × 5 with gzip. (The Postgres `db` and `pg_dump` `backup` services were removed in the SQLite move — see the ADR in [decisions.md](decisions.md).)
 
-### Backup scripts (`scripts/`) — has its own [CLAUDE.md](../scripts/CLAUDE.md)
+### Scripts (`scripts/`) — has its own [CLAUDE.md](../scripts/CLAUDE.md)
 
-- `backup.sh` — `pg_dump | gzip -9` to `/backups/<dbname>-<ISO-timestamp>.sql.gz`. Atomic write (`.partial` rename). Prunes to `BACKUP_KEEP_LOCAL` newest. **No encryption** — operator's offsite pipeline handles that.
-- `backup-loop.sh` — POSIX sh; runs once on start, then sleeps until next `BACKUP_SCHEDULE_HOUR`.
-- `generate-secrets.sh` — outputs `AUTH_SECRET`, `POSTGRES_PASSWORD`, `METRICS_TOKEN`.
-- `restore.sh` — manual host-side helper; confirms 'restore', drops public schema, pipes dump in.
+- `generate-secrets.sh` — outputs `AUTH_SECRET` and `METRICS_TOKEN`.
+
+Backups are no longer a script or service: the DB is a single SQLite file copied safely (online `VACUUM INTO`, or stop-and-copy). See DEPLOY.md → "Backups".
 
 ---
 
@@ -321,7 +318,7 @@ Read these when working in the matching directory.
 - **`lib/prescription.ts`** — parses "3×12" out of an exercise's prescription string to extract default set count.
 - **`lib/starter-routines.ts`** — Strength / Build / Mobility / Longevity preset families used in the routine empty state.
 - **`lib/area-filter.ts`** — region (Upper/Lower/Full/Mobility) and muscle chip taxonomy + `balanceHint()`. Used by picker filters and empty-state suggestions.
-- **`lib/db.ts`** — Prisma client singleton with `@prisma/adapter-pg` (PrismaPg) adapter. Slow-query logging (>100ms hits stderr). Histogram observation per query.
+- **`lib/db.ts`** — Prisma client singleton with the `@prisma/adapter-libsql` (PrismaLibSql) adapter over a `file:` SQLite database. Slow-query logging (>100ms hits stderr). Histogram observation per query.
 - **`lib/env.ts`** — boot-time env validation, called from `instrumentation.ts`.
 - **Hooks**: `useRestTimer()` (absolute-deadline), `usePrefs()` (context read/update in `components/ui/prefs-context.tsx`), `useReportError()` (`components/ui/use-report-error.tsx`), `useAction()` (`components/ui/use-action.tsx` — the client driver for the `ActionResult` contract: `run` + `isPending` + `error`; recovers rejections inline, see api.md).
 

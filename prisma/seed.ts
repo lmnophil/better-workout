@@ -14,9 +14,10 @@
 // file isn't present (e.g. inside the Docker runtime, where env vars come
 // from compose).
 import 'dotenv/config';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaLibSql } from '@prisma/adapter-libsql';
 import { PrismaClient } from './generated/prisma/client';
 import { SEED_EXERCISES, type SeedExercise } from '../lib/exercises-data';
+import { serializeStringList } from '../lib/scalar-list';
 
 // Default loadType for built-ins. SMR / Mobility / Balance have no
 // meaningful external load; activation work that uses bands needs band
@@ -38,9 +39,9 @@ function deriveLoadType(ex: SeedExercise): 'weight' | 'band' | 'none' {
   return 'weight';
 }
 
-const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL,
-});
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error('DATABASE_URL is not set — expected a sqlite `file:` URL');
+const adapter = new PrismaLibSql({ url });
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
@@ -61,12 +62,12 @@ async function main() {
         data: {
           module: ex.module,
           prescription: ex.prescription,
-          primaryMuscles: ex.primaryMuscles,
-          secondaryMuscles: ex.secondaryMuscles ?? [],
+          primaryMuscles: serializeStringList(ex.primaryMuscles),
+          secondaryMuscles: serializeStringList(ex.secondaryMuscles ?? []),
           videoUrl: ex.videoUrl ?? null,
           metric: ex.metric ?? 'reps',
           loadType,
-          equipment: ex.equipment ?? [],
+          equipment: serializeStringList(ex.equipment ?? []),
           deletedAt: null, // Restore if previously soft-deleted
         },
       });
@@ -77,12 +78,12 @@ async function main() {
           name: ex.name,
           module: ex.module,
           prescription: ex.prescription,
-          primaryMuscles: ex.primaryMuscles,
-          secondaryMuscles: ex.secondaryMuscles ?? [],
+          primaryMuscles: serializeStringList(ex.primaryMuscles),
+          secondaryMuscles: serializeStringList(ex.secondaryMuscles ?? []),
           videoUrl: ex.videoUrl ?? null,
           metric: ex.metric ?? 'reps',
           loadType,
-          equipment: ex.equipment ?? [],
+          equipment: serializeStringList(ex.equipment ?? []),
           isCustom: false,
           ownerId: null,
         },

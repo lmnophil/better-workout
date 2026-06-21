@@ -169,7 +169,7 @@ Templates come in two flavors, mirroring the `Exercise` built-in/custom split:
 - **Built-in:** `userId` is null, `isBuiltin` is true. Seeded from `STARTER_TEMPLATES` in `lib/exercises-data.ts`. Shared across all users. Rebuilt from scratch on every seed run (no revision history — explicit trade-off).
 - **User:** `userId` is set, `isBuiltin` is false. Owned by the creating user. `saveActiveAsTemplate` always creates this kind.
 
-The `@@unique([userId, name])` constraint relies on Postgres NULL semantics — `(null, 'Push')` and `(userId, 'Push')` are distinct rows, so a user creating a custom template named the same as a built-in is allowed. The picker shows both with a "Default" tag distinguishing built-ins.
+The `@@unique([userId, name])` constraint relies on SQL NULL semantics — `(null, 'Push')` and `(userId, 'Push')` are distinct rows (NULLs compare distinct in a unique index, on SQLite as on Postgres), so a user creating a custom template named the same as a built-in is allowed. The picker shows both with a "Default" tag distinguishing built-ins.
 
 `TemplateExercise` is the junction row with a `position` field. If the source `Exercise` is later (hard-)deleted, the junction goes with it (Cascade) — the template degrades gracefully. In practice exercises soft-delete, so this only fires for built-ins.
 
@@ -238,7 +238,7 @@ A position within the cycle. Always has a `position` (0-indexed, contiguous, uni
 
 The `description` field is a longer free-text paragraph framing the whole day (e.g. "Lower emphasis (glute drive). Stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up."). It's the day-level companion to `TemplateExercise.note`'s per-exercise scope: `description` is "what is this day for?" while `note` is "how do I perform this exercise here?". Same neutral-tool rationale — user types it, the app stores and renders verbatim.
 
-Weekday is only meaningful in weekday mode; in sequence mode it's null. The `(routineId, weekday)` unique constraint relies on Postgres NULL semantics — multiple sequence-mode rows with weekday=null don't collide.
+Weekday is only meaningful in weekday mode; in sequence mode it's null. The `(routineId, weekday)` unique constraint relies on SQL NULL semantics (NULLs compare distinct) — multiple sequence-mode rows with weekday=null don't collide.
 
 `onDelete: Cascade` from the routine; `onDelete: Cascade` from the template. Sessions started from the day reference it via `WorkoutSession.startedFromRoutineDayId` with `onDelete: SetNull`, so completed sessions stay in history even after the day is removed.
 

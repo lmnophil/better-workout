@@ -23,12 +23,12 @@ The app is deliberately neutral about _how_ you train — no prescribed program,
 - YouTube demo links on exercises (manually populated; built-ins ship without, customs can include them)
 - PWA: installable, offline-friendly
 - Auth: Google OAuth + Resend magic-link emails, 1-year session lifetime
-- Self-hosted: Docker Compose stack (Postgres + app + nightly backup) you put behind your own reverse proxy
+- Self-hosted: a single-container Docker Compose stack (SQLite on a volume) you put behind your own reverse proxy
 
 ## Stack
 
 - **Next.js 15** (App Router, React 19, Server Actions), **TypeScript** strict
-- **Prisma 7** + **Postgres 16** (driver adapter via `@prisma/adapter-pg`, no Rust query engine)
+- **Prisma 7** + **SQLite** (driver adapter via `@prisma/adapter-libsql`, no Rust query engine)
 - **Auth.js v5** (Google OAuth + Resend magic links)
 - **Tailwind 3** + custom design tokens (warm dark theme)
 - **Serwist** for PWA / offline support
@@ -74,7 +74,7 @@ workout-tracker/
 │   ├── env.ts                   Boot-time validation
 │   ├── rate-limit.ts, request.ts, exercises-data.ts, utils.ts
 ├── prisma/                      Schema, migrations, seed (has its own CLAUDE.md)
-├── scripts/                     Backup, restore, secret-gen (has its own CLAUDE.md)
+├── scripts/                     Secret generation (has its own CLAUDE.md)
 ├── public/                      Static assets, PWA icons
 ├── auth.ts, auth.config.ts      Auth.js config (split for Edge compatibility)
 ├── middleware.ts                Edge middleware — auth gate
@@ -116,9 +116,9 @@ Full details (PromQL examples, log filtering recipes, optional Prometheus + Graf
 
 ## Backups
 
-A `backup` service runs in compose alongside the app. Daily `pg_dump` → gzip → host-mounted directory you configure. Local copies are pruned to a configurable retention; the app assumes you have your own offsite pipeline (encryption, transit, long-term retention) that picks up files from the host directory.
+The database is a single SQLite file on a Docker volume. There's no backup service — you copy the file safely (online `VACUUM INTO`, or stop-and-copy; never a plain `cp` of a live WAL database) and hand it to your own offsite pipeline (encryption, transit, long-term retention).
 
-If you don't have an offsite pipeline already, this isn't enough on its own — local backups on the same disk as the database don't protect against host failure.
+A copy on the same disk as the database doesn't survive a host failure — if you don't already have an offsite pipeline, this isn't enough on its own.
 
 See [`DEPLOY.md`](./DEPLOY.md#backups) for setup, restore procedure, and a "test your restore before you need it" checklist.
 

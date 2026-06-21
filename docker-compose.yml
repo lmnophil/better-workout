@@ -1,13 +1,17 @@
-# Stack: Postgres + Next.js app + nightly backup. The app publishes port 3000
-# to the host; put your own reverse proxy (Caddy, nginx, Traefik, …) in front
-# for TLS. See docs/caddy-snippet.example for a Caddy config you can paste
-# into an existing site.
+# Stack: a single Next.js app service backed by a SQLite file on a named volume.
+# The app publishes port 3000 to the host; put your own reverse proxy (Caddy,
+# nginx, Traefik, …) in front for TLS. See docs/caddy-snippet.example for a
+# Caddy config you can paste into an existing site.
 #
 # All secrets live in .env (sibling to this file).
 #
-# Log rotation: every service uses the json-file driver with size + count
-# caps. Each service tops out at ~50MB on disk (5 × 10MB rotated, gzipped).
-# That keeps Docker logs friendly to small VMs without losing recent history.
+# Backups: the database is a single file at /app/data/workout.db inside the
+# `app-data` volume. Copy it safely (SQLite backup API, or while the app is
+# stopped) rather than `cp`-ing a live WAL database. See DEPLOY.md → "Backups".
+#
+# Log rotation: the service uses the json-file driver with size + count caps —
+# ~50MB on disk (5 × 10MB rotated, gzipped) — friendly to small VMs without
+# losing recent history.
 
 x-logging: &default-logging
   driver: json-file
@@ -17,31 +21,9 @@ x-logging: &default-logging
     compress: 'true'
 
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-workout}
-      POSTGRES_USER: ${POSTGRES_USER:-workout}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-workout} -d ${POSTGRES_DB:-workout}']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - internal
-    logging: *default-logging
-
   app:
     build: .
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     ports:
       # Published to all interfaces so a reverse proxy on the host (or another
       # device on your LAN) can reach the app. If your reverse proxy lives on
@@ -49,7 +31,9 @@ services:
       # '127.0.0.1:3000:3000'.
       - '3000:3000'
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-workout}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-workout}
+      # SQLite database file, persisted on the app-data volume mounted below.
+      # entrypoint.sh runs `prisma migrate deploy` against it on every start.
+      DATABASE_URL: file:/app/data/workout.db
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_URL: ${AUTH_URL}
       # The app sits behind a reverse proxy in real deployments — trusting
@@ -63,52 +47,19 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       METRICS_TOKEN: ${METRICS_TOKEN}
       NODE_ENV: production
+    volumes:
+      - app-data:/app/data
     healthcheck:
-      # Hits /api/healthz which does SELECT 1 against Postgres — confirms the
-      # full path (driver, network, db) is working, not just that the Node
-      # process is alive.
+      # Hits /api/healthz which does SELECT 1 against SQLite — confirms the full
+      # path (driver, db file) is working, not just that the Node process is up.
       test: ['CMD', 'node', 'healthcheck.cjs']
       interval: 30s
       timeout: 10s
       retries: 3
-      # First-boot grace: migrations run during entrypoint, then the server
-      # has to compile. 30s is comfortable on a small VM.
+      # First-boot grace: migrations run during entrypoint, then the server has
+      # to compile. 30s is comfortable on a small VM.
       start_period: 30s
-    networks:
-      - internal
     logging: *default-logging
-
-  backup:
-    # Same Postgres major version as the db service so pg_dump matches the
-    # server format exactly. (pg_dump from a newer client to an older server
-    # works; the reverse can fail. Pinning the same image is simplest.)
-    image: postgres:16-alpine
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      POSTGRES_HOST: db
-      POSTGRES_USER: ${POSTGRES_USER:-workout}
-      POSTGRES_DB: ${POSTGRES_DB:-workout}
-      # PGPASSWORD is the standard env var pg_dump reads; no flag needed.
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      BACKUP_SCHEDULE_HOUR: ${BACKUP_SCHEDULE_HOUR:-03}
-      BACKUP_KEEP_LOCAL: ${BACKUP_KEEP_LOCAL:-7}
-    volumes:
-      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
-      - ./scripts/backup-loop.sh:/usr/local/bin/backup-loop.sh:ro
-      # BACKUP_HOST_DIR is the host path where dumps land. Your existing
-      # offsite pipeline picks them up from there.
-      - ${BACKUP_HOST_DIR:?BACKUP_HOST_DIR must be set in .env}:/backups
-    entrypoint: ['sh', '/usr/local/bin/backup-loop.sh']
-    networks:
-      - internal
-    logging: *default-logging
-
-networks:
-  internal:
-    driver: bridge
 
 volumes:
-  postgres-data:
+  app-data:

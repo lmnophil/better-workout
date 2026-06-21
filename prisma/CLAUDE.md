@@ -17,11 +17,19 @@ npx prisma migrate dev --name init        # generates a fresh init from the sche
 # "Raw partial indexes" below). Hand-edit the new prisma/migrations/*_init/migration.sql:
 #   1. append `WHERE "deletedAt" IS NULL` to the Exercise_ownerId_name_key index
 #   2. add the WorkoutSession_userId_active_key partial unique index
-npx prisma migrate reset --force          # re-applies the hand-edited migration, runs seed
-npm run db:seed                            # idempotent belt (the reset above already seeds)
+npx prisma migrate reset --force          # re-applies the hand-edited migration
+npm run db:seed                            # REQUIRED — Prisma 7's migrate/reset do NOT auto-run the seed
 ```
 
-`migration_lock.toml` stays put across resets.
+`migration_lock.toml` stays put across resets (it pins `provider = "sqlite"`).
+
+## SQLite gotchas (the ones that bit during the Postgres → SQLite move)
+
+- **Scalar-list columns are JSON-encoded TEXT.** SQLite has no array type, so `Exercise.equipment`, `primaryMuscles`, and `secondaryMuscles` are `String` columns holding a JSON array. The data layer (de)serializes via `lib/scalar-list.ts` (`serializeStringList` on write, `parseStringList` on read) so everything above `lib/queries.ts` / `lib/actions.ts` still sees `string[]`. If you add a list-valued column, follow the same pattern — and watch out: a JSON string is silently iterable as characters, so `for…of` / `.includes` / `[0]` on the raw column won't type-error but will be wrong. Convert at the boundary.
+- **`createMany({ skipDuplicates: true })` is unsupported on SQLite** (it types to `never`). For idempotent, race-safe inserts use `upsert` with a no-op `update: {}` (see `hideTemplate`, the band seeding in `getUserBands`), or catch the P2002 from a plain `create` via `isUniqueViolation` (see `toggleShareReaction`).
+- **Seeding is not automatic.** Prisma 7's `migrate dev` / `migrate reset` do NOT run the seed here — run `npm run db:seed` explicitly after either (the recipe above does).
+- **`Json` columns work on SQLite** (stored as TEXT, Prisma (de)serializes) — `ShareSuggestion.payload` is unchanged.
+- **Partial unique indexes work on SQLite** (`CREATE UNIQUE INDEX … WHERE …`), so the two raw partial indexes carry over unchanged — see "Raw partial indexes".
 
 **Don't skip the manual step.** `migrate dev --name init` regenerates `migration.sql` purely from the schema, which can't carry the `WHERE` clauses — so a regen that omits the hand-edit silently downgrades both indexes to full (or drops the active-session one entirely), reviving the delete-then-recreate crash and the two-tabs double-active-session bug. Diff the generated `migration.sql` against the partial-index block below before resetting.
 
@@ -47,7 +55,7 @@ The seed (`seed.ts`) is idempotent — re-running it is safe and necessary after
 The structural split (`ownerId=null` / `userId=null` vs. the user's id) is in [`docs/data-model.md`](../docs/data-model.md). The operational rules:
 
 - **Don't split the models.** A unified `Exercise` lets the picker render one list and `requireAvailableExercise()` does one ownership check covering both (`OR: [{ ownerId: null }, { ownerId: userId }]`). Same shape on `WorkoutTemplate`.
-- **The `@@unique([userId, name])` (and equivalent on `Exercise`) relies on Postgres treating NULLs as distinct.** `(null, 'Push')` and `(userId, 'Push')` coexist. The seed is responsible for not creating duplicates among built-ins; the action layer enforces the user side.
+- **The `@@unique([userId, name])` (and equivalent on `Exercise`) relies on SQL treating NULLs as distinct in unique indexes.** `(null, 'Push')` and `(userId, 'Push')` coexist (true on SQLite as on Postgres). The seed is responsible for not creating duplicates among built-ins; the action layer enforces the user side.
 - **Built-in templates have no revision history.** Re-running the seed rebuilds each built-in's exercise list from scratch. Users who want a customized version should fork to a user template (`saveActiveAsTemplate`).
 - **`hideTemplate` and `deleteTemplate` enforce the split.** `hideTemplate` requires `isBuiltin: true`; `deleteTemplate` requires the inverse. The settings page exposes the unhide UI.
 
@@ -67,7 +75,7 @@ A few v7-specific things that bite if you assume v6 patterns:
 
 **Generated client lives in the project tree, not `node_modules`.** The generator outputs `prisma/generated/prisma/` (gitignored, regenerated on every `prisma generate`). The PrismaClient export is at `prisma/generated/prisma/client` — note the `/client` suffix. Importing the directory itself fails under ESM resolution (no `package.json` exports map). Both `lib/db.ts` and `prisma/seed.ts` use the `/client` import path; new code should too.
 
-**Driver adapter, not query engine.** v7 ships pure JS — there's no Rust binary to ship. `lib/db.ts` constructs `PrismaPg` from `@prisma/adapter-pg` with `process.env.DATABASE_URL` and passes it to `new PrismaClient({ adapter, log: [...] })`. `client.$on('query'|'error'|'warn', ...)` event listeners still work; that's how slow-query logging and the Prometheus histogram are wired up. (If a future Prisma drops `$on`, fall back to a `client.$extends({ query: { ... } })` extension.)
+**Driver adapter, not query engine.** v7 ships pure JS — there's no Rust binary to ship. `lib/db.ts` constructs `PrismaLibSql` from `@prisma/adapter-libsql` with the `file:` `DATABASE_URL` and passes it to `new PrismaClient({ adapter, log: [...] })`. The underlying `libsql` driver is a prebuilt NAPI native module (glibc + musl variants published on npm), so nothing compiles at install time — the host and Alpine both pull a published binary. `client.$on('query'|'error'|'warn', ...)` event listeners still work; that's how slow-query logging and the Prometheus histogram are wired up. (If a future Prisma drops `$on`, fall back to a `client.$extends({ query: { ... } })` extension.)
 
 **`prisma.config.ts` replaces `package.json#prisma`.** It sets the schema path, migrations path, seed command, and the datasource URL. Two non-obvious things:
 

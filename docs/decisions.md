@@ -23,8 +23,7 @@ These are decisions worth knowing but where the rationale is summarizable in a s
 - **Recency windows on coverage and last-sets queries.** 90 days for coverage, 180 for last-sets. The UI gradient maxes at 7 days neglected; older sessions render identically. Last-sets after 6 months is more confusing than helpful. Bounds memory growth.
 - **`React.cache()` on `getUserPreferences`.** Both layout and (formerly) page wanted it; cache de-duplicates the DB hit. Now layout is the only caller, but the cache stays.
 - **Muscle IDs use spaces** (`'rear delts'`, `'lower back'`). Cosmetic — chosen for label-readability when seed data is being authored. URL/debug output sometimes needs quoting; lived with. _Reverse if_ muscle IDs ever appear in URL paths and the quoting friction outweighs the seed-readability win.
-- **Plain SQL gzipped backups.** Human-readable, partially restorable, no `pg_restore` needed. Tradeoff is larger files. Custom format is the right call once the DB grows to GB-scale; we're not there.
-- **Backups not encrypted at rest.** The user's offsite pipeline handles encryption. Doing it twice complicates restore.
+- **~~Plain SQL gzipped backups / not encrypted at rest.~~** _Superseded (2026-06-21) by the "Postgres → SQLite" ADR: the move to SQLite removed the `pg_dump` backup service entirely. The DB is now a single file backed up by safe file-copy; the operator's offsite pipeline still owns encryption + retention._
 - **`x-logging` anchor in compose with json-file rotation.** All services share the same rotation policy. Compatible with future log shippers.
 - **Duplicate-day clones everything except weekday.** `duplicateRoutineDay` carries the name, label, description, and the full TemplateExercise lineup (planned numerics + note included), but always sets `weekday: null` on the new day. Reasoning: when the user duplicates, they almost always want to pin the clone to a _different_ day. Inheriting the source's weekday would either silently overwrite an existing pin (via the unique `(routineId, weekday)` constraint failing or some merge) or quietly land on an unintended day. Forcing the user to pick is one extra click that catches the foot-gun. _Reverse if_ this turns out to feel like a papercut for users who actually want same-weekday clones — likely never, since two days sharing a weekday isn't a supported state.
 - **Stale-cookie recovery via `/api/auth/recover`.** When the (app) layout's `auth()` returns null despite the JWT cookie being parseable — almost always because `prisma migrate reset` wiped the User row the JWT points at — the layout redirects to `/api/auth/recover` instead of `/signin` directly. The recover route expires every session-token cookie the request carries (base, `__Secure-` prefixed, and the numbered `.0/.1` chunks Auth.js emits for large JWTs) then bounces to `/signin`. Why the indirection: the JWT callback in `auth.ts` can return null to invalidate the session for a single request, but it has no way to mutate response cookies, so middleware (Edge config, can't hit the DB) keeps seeing the cookie as valid and a direct `/signin` redirect loops between the middleware bounce and the layout redirect. The route handler is the one place that can actually clear the cookie. The expiry must mirror Auth.js's own cookie options — crucially `Secure` for the `__Secure-`-prefixed name, since browsers reject any `Set-Cookie` for a `__Secure-` cookie that lacks it, so an options-less delete silently no-ops on HTTPS and the loop never breaks (works on HTTP localhost, which is why dev never catches it). _Reverse if_ Auth.js gains a sanctioned way to invalidate the cookie from within a server callback.
@@ -60,7 +59,7 @@ These are calls where the alternatives are genuinely worth remembering, in case 
 **Alternatives considered.**
 
 - _30-day or 90-day expiry._ Standard for SaaS. But this is a fitness tracker — a user who returns from a 4-month hiatus shouldn't be greeted by a sign-in wall. Friction at exactly the wrong moment.
-- _Database sessions._ Would let us invalidate centrally on demand. But adds a DB hit per request and complicates middleware (which runs Edge-side, can't hit Postgres).
+- _Database sessions._ Would let us invalidate centrally on demand. But adds a DB hit per request and complicates middleware (which runs Edge-side, can't hit the database).
 
 **Why it stays.** This is a workout tracker, not a banking app. The tradeoff is: if the JWT signing key (`AUTH_SECRET`) ever leaks, every existing session is forgeable until rotation. Mitigation: rotation is a single env var change, documented in DEPLOY.md.
 
@@ -83,6 +82,8 @@ These are calls where the alternatives are genuinely worth remembering, in case 
 **Reverse if.** A clear feature need emerges that requires it (e.g. "show me all my Lower 1 sessions"). Don't add it speculatively.
 
 ### Backups: plain SQL gzip, not encrypted at rest
+
+> **Superseded (2026-06-21)** by the "Postgres → SQLite" ADR at the end of this file. The `pg_dump`-based `backup` / `backup-loop` / `restore` machinery was removed with Postgres; the SQLite database is a single file backed up by safe copy. Kept for the reasoning trail.
 
 **Context.** Decided against three things at once: pg_custom format, in-app encryption, in-app offsite shipping.
 
@@ -357,6 +358,29 @@ Forms that must await-and-decide for themselves keep their own state and do **no
 - _Defer all day math to the client._ Would eliminate the server zone need entirely, but the routine timeline is server-shaped (page pre-selects today's day) and moving selection to the client is a bigger refactor than the cookie. The label _is_ effectively client-sourced (the cookie is the browser's report); we just resolve it server-side to avoid a hydration flash.
 
 **Reverse if.** See the per-alternative triggers above; the most likely is genuine multi-device use wanting a persisted, override-able zone — at which point promote the cookie to a `UserPreference` column and keep `getRequestTimeZone` as the single read point.
+
+### Postgres → SQLite (single-user self-hosted)
+
+**Context.** The app is deployed by one operator on their own hardware and will realistically have a single user for the foreseeable future. The Postgres deployment carried a second container (`postgres:16-alpine`), a `pg_dump` backup service in a third container, an `internal` network, a `POSTGRES_*` credential trio, and a password-rotation procedure — a lot of moving parts for a single-writer workload. The goal was to shrink the deployable package ahead of the first real deployment.
+
+**Decision.** Move to SQLite, accessed through Prisma 7's `@prisma/adapter-libsql` driver adapter against a `file:` database on a Docker volume. Compose collapses to a single `app` service plus an `app-data` volume; the `db` and `backup` services, the `internal` network, and all `POSTGRES_*` / `BACKUP_*` env are gone. `DATABASE_URL` becomes a `file:` URL (`file:./prisma/dev.db` in dev, `file:/app/data/workout.db` in compose).
+
+**Alternatives considered.**
+
+- _Keep Postgres._ The most capable option, and the right call the moment a second writer or horizontal scaling appears. But for one user it's pure operational overhead — a whole RDBMS, its container, its backup tooling, and a credential to rotate, to serve a workload SQLite handles in a single file.
+- _`better-sqlite3` instead of libsql._ The more "standard" embedded binding and a touch lighter. Rejected because its prebuilds are Node-ABI-locked and glibc-only, so on a current Node and on Alpine/musl it falls back to a native compile needing a C toolchain in the image. `libsql` ships NAPI prebuilds (ABI-stable, glibc **and** musl), so nothing compiles anywhere — the Dockerfile needed no build tools, which is more in keeping with "simplify." libsql also leaves a door open to remote/Turso later. _Reverse if_ libsql's footprint or fork-of-SQLite status becomes a problem; the swap is isolated to `lib/db.ts` + `prisma/seed.ts`.
+- _A relation table for the muscle/equipment lists instead of JSON._ More correct relationally and queryable in SQL, but overkill: nothing filters those lists in the database (all matching is in JS), so a `String` column holding a JSON array, (de)serialized at the data-access boundary (`lib/scalar-list.ts`), was the smaller change. _Reverse if_ a feature needs to filter exercises by muscle/equipment in the query itself.
+
+**Consequences.**
+
+- **Scalar lists became JSON strings.** SQLite has no array type; `Exercise.equipment` / `primaryMuscles` / `secondaryMuscles` are `String` columns of JSON, converted at the boundary. See prisma/CLAUDE.md → "SQLite gotchas."
+- **`createMany({ skipDuplicates: true })` is gone** (unsupported on SQLite). The three race-safe idempotent inserts moved to `upsert` with a no-op update / catching P2002.
+- **Backups are a file copy, not a service.** There is no automated backup anymore — an explicit choice for this single-user deploy. The DB is one file; back it up via the SQLite backup API or while the app is stopped, never a plain `cp` of a live WAL database. The operator's offsite pipeline still owns encryption + retention. This supersedes the "Backups: plain SQL gzip" ADR above.
+- **Seeding is manual.** Prisma 7's `migrate dev` / `reset` don't auto-run the seed; first boot needs `npm run db:seed` (dev) or `docker compose exec app node prisma/seed.js` (compose) to load the built-in exercises.
+- **Single writer.** SQLite serializes writes — invisible at one user, and the hard limit that defines the reverse-if below. The partial unique indexes (active session, live-custom name) and the NULL-distinct uniques all carry over unchanged; SQLite supports both.
+- **Smaller footprint.** One Node process instead of Node + Postgres; backups are a file; one fewer credential and no rotation dance.
+
+**Reverse if.** A second concurrent writer appears (multi-user, or a background writer), write contention shows up, or the deployment needs more than one app replica. Going back is bounded: swap the adapter in `lib/db.ts` / `seed.ts`, return the three list columns to native arrays (dropping the `scalar-list` boundary), reinstate `skipDuplicates`, and restore a `db` service + dump-based backups. The schema and app logic are otherwise provider-agnostic.
 
 ### Active-session uniqueness is now DB-enforced (reverses "app-enforced not DB-enforced" above)
 

@@ -7,10 +7,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   // The connection URL lives in prisma.config.ts (Prisma 7 no longer accepts
   // it in the schema). At runtime, the Prisma client is constructed with a
-  // PrismaPg driver adapter that reads DATABASE_URL directly — see lib/db.ts.
+  // libsql driver adapter that reads DATABASE_URL (a `file:` path) directly —
+  // see lib/db.ts.
 }
 
 // ================================================================
@@ -48,12 +49,12 @@ model Account {
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -124,16 +125,21 @@ model Exercise {
   // gating — it surfaces in the preset preview as a small note.
   // Canonical tokens: 'barbell', 'rack', 'bench', 'dumbbells', 'cable',
   // 'machine', 'bands', 'pull-up bar', 'foam roller', 'lacrosse ball',
-  // 'bodyweight', 'mat'. Empty array means "no equipment / always available."
-  equipment String[] @default([])
+  // 'bodyweight', 'mat'. Empty list means "no equipment / always available."
+  //
+  // Stored as a JSON-encoded string, not a native array: SQLite has no array
+  // column type. The data layer (de)serializes through lib/scalar-list.ts so
+  // everything above it still sees string[]. Same goes for primaryMuscles and
+  // secondaryMuscles below.
+  equipment String @default("[]")
 
   // Muscles trained, split by emphasis:
   //   primary   = the targets the lift was chosen for (full credit in volume)
   //   secondary = muscles meaningfully worked but not the focus (half credit)
   // Coverage (recency) treats both equally — being touched at all "freshens" a muscle.
   // Volume tracking weights them: each primary set counts 1.0; each secondary set counts 0.5.
-  primaryMuscles   String[]
-  secondaryMuscles String[] @default([])
+  primaryMuscles   String // JSON-encoded string[] — see equipment note above.
+  secondaryMuscles String @default("[]") // JSON-encoded string[].
 
   // Optional demonstration video. Manually added, no auto-fetching. UI surfaces
   // a small play icon when present.
@@ -367,11 +373,11 @@ model TemplateExercise {
   // SetNull, not Cascade: deleting a pool *ungroups* its members back into
   // fixed slots — it doesn't delete the exercises. They keep their (already
   // contiguous) positions, so they read as a normal run of fixed slots.
-  pool TemplatePool? @relation(fields: [poolId], references: [id], onDelete: SetNull)
+  pool   TemplatePool? @relation(fields: [poolId], references: [id], onDelete: SetNull)
 
-  plannedSets Int?
+  plannedSets    Int?
   // Used when the source Exercise.metric is 'reps'. Null = no plan.
-  plannedReps Int?
+  plannedReps    Int?
   // Used when the source Exercise.metric is 'time'. Null = no plan. Only one of
   // plannedReps / plannedSeconds should be populated for a given row, dictated
   // by the exercise's metric; the actions enforce this rather than the schema.
@@ -417,7 +423,7 @@ model TemplatePool {
   pickCount Int
   // Optional short tag for the pool (e.g. "Accessory rotation"). The members
   // speak for themselves; this is auxiliary display text like RoutineDay.label.
-  label String?
+  label     String?
 
   members TemplateExercise[]
 
@@ -475,9 +481,9 @@ model SetLog {
 // the set row. Lazily seeded on first need so a new user immediately sees
 // the three defaults when they pick their first banded exercise.
 model Band {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   name     String
   position Int
@@ -542,15 +548,15 @@ model RoutineDay {
   templateId String
   template   WorkoutTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
-  position Int
+  position    Int
   // Sequence mode: null. Weekday mode: 0-6, unique within a routine so a
-  // weekday can't be double-booked. The unique constraint relies on Postgres
-  // NULL semantics — multiple sequence-mode rows with weekday=null don't
-  // collide.
-  weekday  Int?
+  // weekday can't be double-booked. The unique constraint relies on SQL NULL
+  // semantics (NULLs compare distinct) — multiple sequence-mode rows with
+  // weekday=null don't collide.
+  weekday     Int?
   // Optional user-defined label (e.g. "Heavy day"). The template name is
   // primary; this is auxiliary display text.
-  label    String?
+  label       String?
   // Longer free-text framing for the whole day (e.g. "Lower emphasis (glute
   // drive). Stack ~60 min: SMR → Mobility → Activation → Strength → Rev Up.").
   // Sibling to `label`: label is a short tag, description is a paragraph.
@@ -642,7 +648,7 @@ model RoutineShare {
 // share path. Two reviewers on the same browser can't accidentally collide
 // because the cookie is shareId-scoped.
 model ShareReviewer {
-  id          String  @id @default(cuid())
+  id          String       @id @default(cuid())
   shareId     String
   share       RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
   reviewerKey String
@@ -664,9 +670,9 @@ model ShareReviewer {
 // the app layer to validate the (type, id) shape rather than a real FK because
 // the target is genuinely polymorphic. The id is opaque to the schema.
 model ShareComment {
-  id         String @id @default(cuid())
+  id         String        @id @default(cuid())
   shareId    String
-  share      RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  share      RoutineShare  @relation(fields: [shareId], references: [id], onDelete: Cascade)
   reviewerId String
   reviewer   ShareReviewer @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
 
@@ -701,9 +707,9 @@ model ShareComment {
 // target is the routine itself; for sticker/swap/insert/remove the target is
 // the routine day or template-exercise row depending on what makes sense.
 model ShareSuggestion {
-  id         String @id @default(cuid())
+  id         String        @id @default(cuid())
   shareId    String
-  share      RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  share      RoutineShare  @relation(fields: [shareId], references: [id], onDelete: Cascade)
   reviewerId String
   reviewer   ShareReviewer @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
 
@@ -718,7 +724,7 @@ model ShareSuggestion {
   // 'applied' = owner one-click-applied the structured edit
   // 'rejected' = owner dismissed
   // 'resolved' = advisory-style suggestion the owner acknowledged (sticker, holistic)
-  state      String   @default("open")
+  state      String    @default("open")
   resolvedAt DateTime?
 
   createdAt DateTime @default(now())
@@ -734,9 +740,9 @@ model ShareSuggestion {
 // the schema is permissive so we can extend later. Unique per
 // (reviewer, target, kind) so a reviewer's "good" is a toggle, not a tally.
 model ShareReaction {
-  id         String @id @default(cuid())
+  id         String        @id @default(cuid())
   shareId    String
-  share      RoutineShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
+  share      RoutineShare  @relation(fields: [shareId], references: [id], onDelete: Cascade)
   reviewerId String
   reviewer   ShareReviewer @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
 

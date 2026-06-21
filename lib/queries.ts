@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { PREFS_DEFAULTS, type UserPrefs } from '@/lib/prefs';
 import { DEFAULT_VOLUME_TIER, isVolumeTier } from '@/lib/coverage';
 import type { ExerciseUsageStat } from '@/lib/usage-stats';
+import { parseStringList } from '@/lib/scalar-list';
 
 export type ActiveSession = Awaited<ReturnType<typeof getActiveSession>>;
 export type AvailableExercise = Awaited<ReturnType<typeof getAvailableExercises>>[number];
@@ -286,12 +287,12 @@ export async function getCoverageData(userId: string) {
   const lastWorkedByMuscle = new Map<string, Date>();
   for (const session of sessions) {
     for (const setLog of session.setLogs) {
-      for (const muscle of setLog.exercise.primaryMuscles) {
+      for (const muscle of parseStringList(setLog.exercise.primaryMuscles)) {
         if (!lastWorkedByMuscle.has(muscle)) {
           lastWorkedByMuscle.set(muscle, session.date);
         }
       }
-      for (const muscle of setLog.exercise.secondaryMuscles) {
+      for (const muscle of parseStringList(setLog.exercise.secondaryMuscles)) {
         if (!lastWorkedByMuscle.has(muscle)) {
           lastWorkedByMuscle.set(muscle, session.date);
         }
@@ -375,10 +376,10 @@ export async function getWeeklyVolume(userId: string) {
 
   const counts = new Map<string, number>();
   for (const setLog of setLogs) {
-    for (const muscle of setLog.exercise.primaryMuscles) {
+    for (const muscle of parseStringList(setLog.exercise.primaryMuscles)) {
       counts.set(muscle, (counts.get(muscle) ?? 0) + 1);
     }
-    for (const muscle of setLog.exercise.secondaryMuscles) {
+    for (const muscle of parseStringList(setLog.exercise.secondaryMuscles)) {
       counts.set(muscle, (counts.get(muscle) ?? 0) + 0.5);
     }
   }
@@ -420,19 +421,22 @@ export async function getUserBands(userId: string) {
     select: { id: true, name: true, position: true },
   });
   if (existing.length > 0) return existing;
-  // First touch — seed the default set. skipDuplicates makes the insert an
-  // ON CONFLICT DO NOTHING, so two concurrent first-touch renders (this seeds
-  // during a Server Component render) can't both insert and crash the loser with
-  // a P2002 on unique(userId,name)/unique(userId,position) — the second just
-  // inserts nothing and both refetch the same three rows below.
-  await db.band.createMany({
-    data: [
-      { userId, name: 'Light', position: 0 },
-      { userId, name: 'Medium', position: 1 },
-      { userId, name: 'Heavy', position: 2 },
-    ],
-    skipDuplicates: true,
-  });
+  // First touch — seed the default set. SQLite's createMany has no
+  // skipDuplicates, so we upsert each default keyed by the (userId, name) unique
+  // with a no-op update. Two concurrent first-touch renders (this seeds during a
+  // Server Component render) then can't crash the loser with a P2002 — the
+  // conflicting upserts no-op and both refetch the same three rows below.
+  for (const b of [
+    { name: 'Light', position: 0 },
+    { name: 'Medium', position: 1 },
+    { name: 'Heavy', position: 2 },
+  ]) {
+    await db.band.upsert({
+      where: { userId_name: { userId, name: b.name } },
+      create: { userId, name: b.name, position: b.position },
+      update: {},
+    });
+  }
   return db.band.findMany({
     where: { userId },
     orderBy: { position: 'asc' },
@@ -725,11 +729,11 @@ export async function getRoutineSharesForUser(userId: string) {
  * The owner-facing inbox feed. Unread first, then read by read-recency. Bounded
  * so the dropdown stays small.
  *
- * `readAt` ascends NULLs-last in Postgres, so a plain `readAt: 'asc'` buried the
- * unread items at the bottom — with `take: 30` a backlog of read notifications
- * could push every unread one off the end. Sorting `readAt` descending with
- * NULLs first puts unread on top, then the most-recently-read; `createdAt`
- * breaks ties.
+ * Unread rows have `readAt = null`. Sorting `readAt` descending with NULLs first
+ * floats unread to the top, then the most-recently-read; `createdAt` breaks
+ * ties. The explicit `nulls: 'first'` (rather than leaning on a DB default)
+ * keeps this correct on SQLite — with `take: 30`, a backlog of read
+ * notifications must never push unread items off the end.
  */
 export async function getNotificationsForUser(userId: string, take: number = 30) {
   return db.notification.findMany({

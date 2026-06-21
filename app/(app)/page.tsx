@@ -18,6 +18,7 @@ import {
   getRoutineRecentSessions,
   getUserBands,
 } from '@/lib/queries';
+import { parseStringList } from '@/lib/scalar-list';
 import { pickTodaysRoutineDay, pickUpcomingRoutineDays, isScheduleStyle } from '@/lib/routine';
 import { getRequestTimeZone } from '@/lib/timezone';
 import { WorkoutView } from '@/components/workout/workout-view';
@@ -83,7 +84,7 @@ export default async function WorkoutPage() {
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
           videoUrl: te.exercise.videoUrl,
-          equipment: te.exercise.equipment,
+          equipment: parseStringList(te.exercise.equipment),
           pendingSwapInExerciseId: swap?.id,
           pendingSwapInExerciseName: swap?.name,
         };
@@ -190,13 +191,13 @@ export default async function WorkoutPage() {
         name: e.name,
         module: e.module,
         prescription: e.prescription,
-        primaryMuscles: e.primaryMuscles,
-        secondaryMuscles: e.secondaryMuscles,
+        primaryMuscles: parseStringList(e.primaryMuscles),
+        secondaryMuscles: parseStringList(e.secondaryMuscles),
         videoUrl: e.videoUrl,
         isCustom: e.isCustom,
         metric: e.metric,
         loadType: e.loadType,
-        equipment: e.equipment,
+        equipment: parseStringList(e.equipment),
         restTimerSecondsOverride: e.restTimerSecondsOverride,
         weightIncrementOverride: e.weightIncrementOverride,
       }))}
