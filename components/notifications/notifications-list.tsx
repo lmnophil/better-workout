@@ -1,8 +1,8 @@
 'use client';
 
-import { useTransition } from 'react';
 import Link from 'next/link';
 import { markNotificationsRead } from '@/lib/actions';
+import { useAction } from '@/components/ui/use-action';
 
 type Item = {
   id: string;
@@ -15,7 +15,7 @@ type Item = {
 };
 
 export function NotificationsList({ items }: { items: Item[] }) {
-  const [pending, startTransition] = useTransition();
+  const { run, isPending } = useAction();
   const unreadCount = items.filter((i) => !i.readAt).length;
 
   if (items.length === 0) {
@@ -26,15 +26,7 @@ export function NotificationsList({ items }: { items: Item[] }) {
     );
   }
 
-  const markAll = () => {
-    startTransition(async () => {
-      try {
-        await markNotificationsRead({ all: true });
-      } catch {
-        /* silent */
-      }
-    });
-  };
+  const markAll = () => run(() => markNotificationsRead({ all: true }));
 
   return (
     <>
@@ -42,7 +34,7 @@ export function NotificationsList({ items }: { items: Item[] }) {
         <div className="flex justify-end mb-2">
           <button
             type="button"
-            disabled={pending}
+            disabled={isPending}
             onClick={markAll}
             className="text-xs text-ink-300 hover:text-ink-100 disabled:opacity-50"
           >

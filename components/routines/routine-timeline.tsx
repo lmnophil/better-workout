@@ -445,8 +445,14 @@ function DayCard({
   }
 
   function clearOneTime(outExerciseId: string) {
-    startTransition(() => {
-      clearPendingSwap({ routineDayId: day.id, outExerciseId });
+    setError(null);
+    startTransition(async () => {
+      try {
+        const res = await clearPendingSwap({ routineDayId: day.id, outExerciseId });
+        if (!res.ok) setError(res.error);
+      } catch {
+        setError('Could not clear swap. Try again?');
+      }
     });
   }
 

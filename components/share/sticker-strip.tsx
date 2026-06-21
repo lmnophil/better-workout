@@ -5,8 +5,8 @@
 // accept. Designed for low cognitive load: 5 (reps) or 4 (time) buttons in a
 // single tap-through row.
 
-import { useTransition } from 'react';
 import { postShareSuggestion } from '@/lib/actions';
+import { useAction } from '@/components/ui/use-action';
 
 const REPS_STICKERS = [
   { key: 'more_sets', label: '+ sets' },
@@ -43,22 +43,20 @@ export function StickerStrip({
   targetId: string;
   metric: 'reps' | 'time';
 }) {
-  const [pending, startTransition] = useTransition();
+  // A failed sticker stays quiet (no toast on the share page); isPending blocks
+  // a double-tap and a dead network no longer crashes the page.
+  const { run, isPending } = useAction();
   const stickers = metric === 'time' ? TIME_STICKERS : REPS_STICKERS;
 
   const send = (sticker: StickerKey) => {
-    startTransition(async () => {
-      try {
-        await postShareSuggestion({
-          token,
-          targetType,
-          targetId,
-          payload: { kind: 'sticker', sticker } as never,
-        });
-      } catch {
-        /* silent */
-      }
-    });
+    run(() =>
+      postShareSuggestion({
+        token,
+        targetType,
+        targetId,
+        payload: { kind: 'sticker', sticker } as never,
+      }),
+    );
   };
 
   return (
@@ -67,7 +65,7 @@ export function StickerStrip({
         <button
           key={s.key}
           type="button"
-          disabled={pending}
+          disabled={isPending}
           onClick={() => send(s.key)}
           className="px-1.5 py-0.5 text-[10px] rounded-md border border-ink-700 text-ink-400 hover:text-ink-100 hover:border-ink-500 disabled:opacity-50"
         >

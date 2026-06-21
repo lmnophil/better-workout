@@ -26,6 +26,7 @@ import {
 } from '@/lib/time-estimate';
 import type { ExerciseMuscleShape, MuscleVolumes, VolumeTier } from '@/lib/coverage';
 import { ShareCoveragePanel, computeSuggestionDiff, type ShareMuscleGroup } from './share-coverage';
+import { useAction } from '@/components/ui/use-action';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
 import { MuscleChips } from '@/components/ui/muscle-chips';
@@ -450,10 +451,7 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                           })
                         }
                       />
-                      <SmallButton
-                        label="suggest remove"
-                        onClick={() => quickRemove(token, ex.templateExerciseId, day.id)}
-                      />
+                      <QuickRemoveButton token={token} templateExerciseId={ex.templateExerciseId} />
                       <SmallButton
                         icon={<Plus size={12} />}
                         label="insert after"
@@ -566,19 +564,34 @@ function plannedSummary(ex: RoutineExercise): string {
   return parts.length > 0 ? ' · ' + parts.join(' · ') : '';
 }
 
-function quickRemove(token: string, templateExerciseId: string, _dayId: string) {
-  // Reviewer fires this off without confirmation — it's a *suggestion*, not
-  // an applied change. The owner still has to accept on their side.
-  postShareSuggestion({
-    token,
-    targetType: 'template_exercise',
-    targetId: templateExerciseId,
-    payload: { kind: 'remove', templateExerciseId },
-  }).catch(() => {
-    // The page revalidates on success; failures are quiet by design (we
-    // don't have a toast system on the share page, and the reviewer can
-    // try again).
-  });
+function QuickRemoveButton({
+  token,
+  templateExerciseId,
+}: {
+  token: string;
+  templateExerciseId: string;
+}) {
+  // Reviewer fires this off without confirmation — it's a *suggestion*, not an
+  // applied change, and the owner still has to accept. isPending blocks a
+  // double-tap from filing duplicate suggestions; a failure stays quiet (no
+  // toast on the share page) but no longer crashes the page on a dead network.
+  const { run, isPending } = useAction();
+  return (
+    <SmallButton
+      label="suggest remove"
+      disabled={isPending}
+      onClick={() =>
+        run(() =>
+          postShareSuggestion({
+            token,
+            targetType: 'template_exercise',
+            targetId: templateExerciseId,
+            payload: { kind: 'remove', templateExerciseId },
+          }),
+        )
+      }
+    />
+  );
 }
 
 function ReactionToggle({
@@ -594,20 +607,14 @@ function ReactionToggle({
   active: boolean;
   count: number;
 }) {
-  const [pending, startTransition] = useTransition();
+  // A failed toggle stays quiet (no toast on the share page); isPending blocks a
+  // double-tap and the dead-network case no longer crashes the page.
+  const { run, isPending } = useAction();
   return (
     <button
       type="button"
-      disabled={pending}
-      onClick={() => {
-        startTransition(async () => {
-          try {
-            await toggleShareReaction({ token, targetType, targetId, kind: 'good' });
-          } catch {
-            /* silent — see quickRemove */
-          }
-        });
-      }}
+      disabled={isPending}
+      onClick={() => run(() => toggleShareReaction({ token, targetType, targetId, kind: 'good' }))}
       aria-pressed={active}
       className={`shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border transition ${
         active
@@ -652,26 +659,17 @@ function FloatingNotes({
   // overlays the routine, never reflows it, so reading position is preserved.
   const [expanded, setExpanded] = useState(false);
   const [body, setBody] = useState('');
-  const [pending, startTransition] = useTransition();
+  const { run, isPending, error, setError } = useAction();
   const noteCount = comments.length + suggestions.length;
 
   const submit = () => {
-    if (!body.trim()) return;
     const text = body.trim();
-    startTransition(async () => {
-      try {
-        // Only clear on success — an expected failure (revoked share, expired
-        // reviewer cookie) resolves { ok: false } and must not eat the text.
-        const res = await postShareComment({
-          token,
-          targetType: 'routine',
-          targetId: routineId,
-          body: text,
-        });
-        if (res.ok) setBody('');
-      } catch {
-        /* silent — see ShareView's other action handlers */
-      }
+    // Guard pending so Enter can't double-post (the button disables, Enter
+    // doesn't). Clear on success only — an expected failure (revoked share,
+    // expired reviewer cookie) keeps the text and shows the reason inline.
+    if (!text || isPending) return;
+    run(() => postShareComment({ token, targetType: 'routine', targetId: routineId, body: text }), {
+      onSuccess: () => setBody(''),
     });
   };
 
@@ -721,11 +719,15 @@ function FloatingNotes({
           />
         </div>
       )}
+      {error && <p className="px-5 pt-1 text-[10px] text-rose-400">{error}</p>}
       <div className="px-5 py-2 flex items-center gap-2">
         <input
           type="text"
           value={body}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(e) => {
+            setBody(e.target.value);
+            if (error) setError(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') submit();
           }}
@@ -735,7 +737,7 @@ function FloatingNotes({
         />
         <button
           type="button"
-          disabled={pending || !body.trim()}
+          disabled={isPending || !body.trim()}
           onClick={submit}
           className="px-2 py-1 text-xs bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md disabled:opacity-40"
         >
@@ -791,6 +793,7 @@ function ReviewerNameTag({
   }
 
   const commit = () => {
+    if (pending) return; // Enter bypasses the save button's disabled guard
     const trimmed = value.trim();
     if (!trimmed) {
       setError('Pick a name.');
@@ -851,16 +854,19 @@ function SmallButton({
   label,
   onClick,
   icon,
+  disabled,
 }: {
   label: string;
   onClick: () => void;
   icon?: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-ink-700 text-ink-300 hover:text-ink-100 hover:border-ink-500 text-[11px]"
+      disabled={disabled}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-ink-700 text-ink-300 hover:text-ink-100 hover:border-ink-500 text-[11px] disabled:opacity-40"
     >
       {icon}
       {label}

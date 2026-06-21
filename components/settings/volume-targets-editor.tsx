@@ -4,9 +4,10 @@
 // Local state mirrors the input; commit happens on blur. "Reset" clears the
 // override and falls back to the default target.
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { RotateCcw, Check } from 'lucide-react';
 import { setVolumeTarget, resetVolumeTarget } from '@/lib/actions';
+import { useAction } from '@/components/ui/use-action';
 
 type MuscleSetting = {
   id: string;
@@ -56,7 +57,7 @@ export function VolumeTargetsEditor({ muscles }: { muscles: MuscleSetting[] }) {
 function Row({ muscle }: { muscle: MuscleSetting }) {
   const [value, setValue] = useState(muscle.currentTarget.toString());
   const [justSaved, setJustSaved] = useState(false);
-  const [, startTransition] = useTransition();
+  const { run } = useAction();
 
   function commit() {
     const n = Number(value);
@@ -66,23 +67,21 @@ function Row({ muscle }: { muscle: MuscleSetting }) {
       return;
     }
     if (n === muscle.currentTarget) return;
-    startTransition(async () => {
-      // Only flash the saved check when the write actually landed.
-      const res = await setVolumeTarget({ muscleId: muscle.id, target: Math.round(n) });
-      if (!res.ok) {
-        setValue(muscle.currentTarget.toString());
-        return;
-      }
-      setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 1200);
+    // Flash the saved check only when the write lands; revert the input if the
+    // server rejects it, so the number shown always matches what's stored.
+    run(() => setVolumeTarget({ muscleId: muscle.id, target: Math.round(n) }), {
+      onSuccess: () => {
+        setJustSaved(true);
+        setTimeout(() => setJustSaved(false), 1200);
+      },
+      onError: () => setValue(muscle.currentTarget.toString()),
     });
   }
 
   function handleReset() {
     if (!muscle.isOverridden) return;
-    startTransition(async () => {
-      const res = await resetVolumeTarget({ muscleId: muscle.id });
-      if (res.ok) setValue(muscle.defaultTarget.toString());
+    run(() => resetVolumeTarget({ muscleId: muscle.id }), {
+      onSuccess: () => setValue(muscle.defaultTarget.toString()),
     });
   }
 

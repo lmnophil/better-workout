@@ -2,10 +2,12 @@
 
 // The interactive workout tracker.
 // Receives initial data from the server, calls server actions for every mutation.
-// Uses isPending from useTransition to disable buttons during in-flight actions
-// (prevents double-submit) and useConfirm for on-brand confirmation dialogs.
+// Every mutation goes through useAction (lib transport-aware run + isPending +
+// error), so buttons disable for the real request duration and an expected or
+// offline failure surfaces in the pinned banner instead of vanishing. useConfirm
+// supplies the on-brand confirmation dialogs.
 
-import { useState, useTransition, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { Plus, Check, Calendar, Clock, Trash2, BookmarkPlus, ArrowRight } from 'lucide-react';
 import {
@@ -38,6 +40,7 @@ import { ExerciseInSession } from './exercise-in-session';
 import { ExercisePicker } from './exercise-picker';
 import { RestTimerBar, useRestTimer } from './rest-timer';
 import { useConfirm } from '@/components/ui/use-confirm';
+import { useAction, ActionError } from '@/components/ui/use-action';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { groupBy, relativeDay } from '@/lib/utils';
 import type { ActionResult } from '@/lib/action-result';
@@ -192,7 +195,7 @@ export function WorkoutView({
     exerciseName: string;
   } | null>(null);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const { run, isPending, error, setError } = useAction();
   const { confirm, Dialog: ConfirmDialog } = useConfirm();
   const { prefs, updatePrefs } = usePrefs();
   const restTimer = useRestTimer(prefs);
@@ -261,9 +264,7 @@ export function WorkoutView({
   // Handlers — all wrap server actions in a transition so UI stays responsive
   const handleAddExercises = (exerciseIds: string[]) => {
     if (exerciseIds.length === 0) return;
-    startTransition(() => {
-      addExercisesToActiveSession({ exerciseIds });
-    });
+    run(() => addExercisesToActiveSession({ exerciseIds }));
     setPickerOpen(false);
     // Drop the carried-through chip selection — next picker open starts fresh
     // unless the user re-applies chips from the empty state. Mid-session
@@ -293,9 +294,7 @@ export function WorkoutView({
   const handleSwap = (newExerciseId: string) => {
     if (!swapTarget) return;
     const oldExerciseId = swapTarget.exerciseId;
-    startTransition(() => {
-      swapExerciseInActiveSession({ oldExerciseId, newExerciseId });
-    });
+    run(() => swapExerciseInActiveSession({ oldExerciseId, newExerciseId }));
     setPickerOpen(false);
     setSwapTarget(null);
     setPendingRegionIds([]);
@@ -303,15 +302,11 @@ export function WorkoutView({
   };
 
   const handleRemoveExercise = (exerciseId: string) => {
-    startTransition(() => {
-      removeExerciseFromActiveSession({ exerciseId });
-    });
+    run(() => removeExerciseFromActiveSession({ exerciseId }));
   };
 
   const handleAddSet = (exerciseId: string) => {
-    startTransition(() => {
-      addSet({ exerciseId });
-    });
+    run(() => addSet({ exerciseId }));
   };
 
   // Patch-shaped update so the row can send only the fields it actually touched
@@ -326,9 +321,7 @@ export function WorkoutView({
       bandId?: string | null;
     },
   ) => {
-    startTransition(() => {
-      updateSet({ setLogId, ...patch });
-    });
+    run(() => updateSet({ setLogId, ...patch }));
     // Auto-start rest timer when a set is committed with meaningful values.
     // "Meaningful" = at least reps (for reps-metric) or seconds (for time-
     // metric) committed positive. Weight alone doesn't trigger — bodyweight
@@ -347,39 +340,27 @@ export function WorkoutView({
   };
 
   const handleUpdateNotes = (setLogId: string, notes: string) => {
-    startTransition(() => {
-      updateSetNotes({ setLogId, notes });
-    });
+    run(() => updateSetNotes({ setLogId, notes }));
   };
 
   const handleSetExerciseRestOverride = (exerciseId: string, seconds: number | null) => {
-    startTransition(() => {
-      setExerciseRestOverride({ exerciseId, restTimerSeconds: seconds });
-    });
+    run(() => setExerciseRestOverride({ exerciseId, restTimerSeconds: seconds }));
   };
 
   const handleSetExerciseWeightIncrement = (exerciseId: string, increment: number | null) => {
-    startTransition(() => {
-      setExerciseWeightIncrement({ exerciseId, weightIncrement: increment });
-    });
+    run(() => setExerciseWeightIncrement({ exerciseId, weightIncrement: increment }));
   };
 
   const handleRepeatLast = (exerciseId: string) => {
-    startTransition(() => {
-      repeatLastForExercise({ exerciseId });
-    });
+    run(() => repeatLastForExercise({ exerciseId }));
   };
 
   const handleRemoveSet = (setLogId: string) => {
-    startTransition(() => {
-      removeSet({ setLogId });
-    });
+    run(() => removeSet({ setLogId }));
   };
 
   const handleMoveExercise = (exerciseId: string, direction: 'up' | 'down') => {
-    startTransition(() => {
-      reorderExercise({ exerciseId, direction });
-    });
+    run(() => reorderExercise({ exerciseId, direction }));
   };
 
   const handleComplete = async () => {
@@ -391,11 +372,7 @@ export function WorkoutView({
       }))
     )
       return;
-    // Async transition: awaiting keeps the rejection visible to React so a
-    // bug-class error still reaches the error boundary.
-    startTransition(async () => {
-      await completeActiveSession();
-    });
+    run(() => completeActiveSession());
   };
 
   const handleDiscard = async () => {
@@ -408,9 +385,7 @@ export function WorkoutView({
       }))
     )
       return;
-    startTransition(async () => {
-      await discardActiveSession();
-    });
+    run(() => discardActiveSession());
   };
 
   // Returns the action result so the picker's custom-add form can surface
@@ -435,9 +410,7 @@ export function WorkoutView({
 
   // ============ TEMPLATES ============
   const handleStartFromTemplate = (templateId: string) => {
-    startTransition(() => {
-      startFromTemplate({ templateId });
-    });
+    run(() => startFromTemplate({ templateId }));
   };
 
   const handleDeleteTemplate = async (templateId: string, name: string) => {
@@ -450,9 +423,7 @@ export function WorkoutView({
     ) {
       return;
     }
-    startTransition(() => {
-      deleteTemplate({ templateId });
-    });
+    run(() => deleteTemplate({ templateId }));
   };
 
   const handleHideTemplate = async (templateId: string, name: string) => {
@@ -466,9 +437,7 @@ export function WorkoutView({
     ) {
       return;
     }
-    startTransition(() => {
-      hideTemplate({ templateId });
-    });
+    run(() => hideTemplate({ templateId }));
   };
 
   /**
@@ -491,9 +460,7 @@ export function WorkoutView({
       }))
     )
       return;
-    startTransition(() => {
-      deleteCustomExercise({ exerciseId });
-    });
+    run(() => deleteCustomExercise({ exerciseId }));
   };
 
   // ============ RENDER ============
@@ -507,6 +474,15 @@ export function WorkoutView({
 
   return (
     <div className="pb-32">
+      {/* Action failures (offline mid-set, a second tab's "workout already in
+          progress", a server hiccup) surface here instead of vanishing. Pinned
+          so it's visible however far down the set list the user has scrolled. */}
+      <ActionError
+        message={error}
+        onDismiss={() => setError(null)}
+        className="fixed top-3 inset-x-3 z-[60] mx-auto max-w-md shadow-lg shadow-black/40"
+      />
+
       {/* Rest timer — appears at the top when active, sticky during scroll */}
       <RestTimerBar
         controls={restTimer}

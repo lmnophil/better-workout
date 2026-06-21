@@ -8,10 +8,11 @@
 // view. The reviewer can still see what they (and others) have proposed,
 // which keeps the surface honest: "the owner sees X."
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import { X } from 'lucide-react';
 import { postShareComment, deleteShareComment, deleteShareSuggestion } from '@/lib/actions';
 import type { ActionResult } from '@/lib/action-result';
+import { useAction } from '@/components/ui/use-action';
 import type { LibraryExercise } from './reviewer-picker';
 import { SuggestionDiffStrip, type SuggestionDiffResult } from './share-coverage';
 
@@ -69,20 +70,17 @@ export function TargetThread({
   diffForSuggestion,
 }: Props) {
   const [body, setBody] = useState('');
-  const [pending, startTransition] = useTransition();
+  const { run, isPending, error, setError } = useAction();
 
   const submit = () => {
-    if (!body.trim()) return;
     const text = body.trim();
-    startTransition(async () => {
-      try {
-        // Only clear on success — an expected failure (revoked share, expired
-        // reviewer cookie) resolves { ok: false } and must not eat the text.
-        const res = await postShareComment({ token, targetType, targetId, body: text });
-        if (res.ok) setBody('');
-      } catch {
-        /* silent */
-      }
+    // Guard pending so the Enter key can't double-post (the button disables,
+    // but Enter bypasses that). Clear on success only — an expected failure
+    // (revoked share, expired reviewer cookie) keeps the typed text and shows
+    // the reason inline.
+    if (!text || isPending) return;
+    run(() => postShareComment({ token, targetType, targetId, body: text }), {
+      onSuccess: () => setBody(''),
     });
   };
 
@@ -160,26 +158,32 @@ export function TargetThread({
         </ul>
       )}
       {allowComment && (
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit();
-            }}
-            placeholder="add a note…"
-            maxLength={2000}
-            className="flex-1 bg-ink-900 border border-ink-800 rounded-md px-2 py-1 text-xs text-ink-100 focus:outline-none focus:border-ink-600"
-          />
-          <button
-            type="button"
-            disabled={pending || !body.trim()}
-            onClick={submit}
-            className="px-2 py-1 text-xs bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md disabled:opacity-40"
-          >
-            send
-          </button>
+        <div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={body}
+              onChange={(e) => {
+                setBody(e.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit();
+              }}
+              placeholder="add a note…"
+              maxLength={2000}
+              className="flex-1 bg-ink-900 border border-ink-800 rounded-md px-2 py-1 text-xs text-ink-100 focus:outline-none focus:border-ink-600"
+            />
+            <button
+              type="button"
+              disabled={isPending || !body.trim()}
+              onClick={submit}
+              className="px-2 py-1 text-xs bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md disabled:opacity-40"
+            >
+              send
+            </button>
+          </div>
+          {error && <p className="text-[10px] text-rose-400 mt-1">{error}</p>}
         </div>
       )}
     </div>
@@ -256,22 +260,16 @@ function DeleteButton({
   label: string;
   onConfirm: () => Promise<ActionResult<unknown>>;
 }) {
-  const [pending, startTransition] = useTransition();
+  // The page revalidates on success; a failed delete (revoked share, expired
+  // cookie) just leaves the row as it was. isPending blocks a double-tap.
+  const { run, isPending } = useAction();
   return (
     <button
       type="button"
       aria-label={label}
       title={label}
-      disabled={pending}
-      onClick={() => {
-        startTransition(async () => {
-          try {
-            await onConfirm();
-          } catch {
-            /* silent — page revalidates on success */
-          }
-        });
-      }}
+      disabled={isPending}
+      onClick={() => run(onConfirm)}
       className="shrink-0 text-ink-500 hover:text-rose-300 transition disabled:opacity-40"
     >
       <X size={12} />

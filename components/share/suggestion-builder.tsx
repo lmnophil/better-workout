@@ -5,8 +5,9 @@
 // this component picks the right inner flow and dispatches the resulting
 // suggestion through `postShareSuggestion`.
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { postShareSuggestion } from '@/lib/actions';
+import { useAction } from '@/components/ui/use-action';
 import { ReviewerPicker, type LibraryExercise } from './reviewer-picker';
 import type { RoutineForShare } from './share-view';
 import { X } from 'lucide-react';
@@ -98,27 +99,42 @@ function SwapFlow({
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'specific' | 'anyof' | 'category'>('specific');
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
   const out = libraryById.get(state.outExerciseId);
 
-  const dispatch = (payload: Record<string, unknown>) => {
-    startTransition(async () => {
-      try {
-        // Close only on success — an expected failure (revoked share, expired
-        // reviewer cookie) resolves { ok: false } and the composed suggestion
-        // shouldn't silently vanish with the modal.
-        const res = await postShareSuggestion({
-          token,
-          targetType: 'routine_day',
-          targetId: state.dayId,
-          // The action's Zod schema validates the union; cast keeps TS calm.
-          payload: payload as never,
-        });
-        if (res.ok) onClose();
-      } catch {
-        /* silent */
+  // Returns the post promise so ReviewerPicker can await it (its submitting
+  // guard blocks a double-pick). Closes on success only — an expected failure
+  // (revoked share, expired reviewer cookie) keeps the modal open with the
+  // reason shown, so the composed suggestion never silently vanishes.
+  const dispatch = async (payload: Record<string, unknown>) => {
+    setPending(true);
+    setError(null);
+    try {
+      // The action's Zod schema validates the union; cast keeps TS calm.
+      const res = await postShareSuggestion({
+        token,
+        targetType: 'routine_day',
+        targetId: state.dayId,
+        payload: payload as never,
+      });
+      if (res.ok) {
+        onClose();
+        return;
       }
-    });
+      if (mountedRef.current) setError(res.error);
+    } catch {
+      if (mountedRef.current) setError('Could not send that suggestion. Try again?');
+    } finally {
+      if (mountedRef.current) setPending(false);
+    }
   };
 
   return (
@@ -132,6 +148,7 @@ function SwapFlow({
           { value: 'category', label: 'any in a category' },
         ]}
       />
+      {error && <p className="px-4 pt-2 text-xs text-rose-400">{error}</p>}
       {mode === 'specific' && (
         <ReviewerPicker
           library={library}
@@ -306,13 +323,13 @@ function CustomFlow({
   const [module, setModule] = useState('');
   const [notes, setNotes] = useState('');
   const [metric, setMetric] = useState<'reps' | 'time'>('reps');
-  const [pending, startTransition] = useTransition();
+  const { run, isPending, error } = useAction();
 
   const submit = () => {
-    if (!name.trim()) return;
-    startTransition(async () => {
-      try {
-        const res = await postShareSuggestion({
+    if (!name.trim() || isPending) return;
+    run(
+      () =>
+        postShareSuggestion({
           token,
           targetType: state.dayId ? 'routine_day' : 'routine',
           targetId: state.dayId, // null is OK for the routine target
@@ -328,12 +345,9 @@ function CustomFlow({
             metric,
             notes: notes.trim() || undefined,
           } as never,
-        });
-        if (res.ok) onClose();
-      } catch {
-        /* silent */
-      }
-    });
+        }),
+      { onSuccess: onClose },
+    );
   };
 
   return (
@@ -390,6 +404,7 @@ function CustomFlow({
           rows={3}
           className="w-full bg-ink-900 border border-ink-700 rounded-md px-2 py-1.5 text-sm text-ink-100 resize-none"
         />
+        {error && <p className="text-xs text-rose-400">{error}</p>}
         <div className="flex justify-end gap-2">
           <button
             type="button"
@@ -400,7 +415,7 @@ function CustomFlow({
           </button>
           <button
             type="button"
-            disabled={pending || !name.trim()}
+            disabled={isPending || !name.trim()}
             onClick={submit}
             className="px-3 py-1.5 bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md text-sm disabled:opacity-40"
           >
@@ -429,12 +444,16 @@ function ReorderFlow({
   const [order, setOrder] = useState<string[]>(
     () => day?.exercises.map((e) => e.templateExerciseId) ?? [],
   );
-  const [pending, startTransition] = useTransition();
+  const { run, isPending, error } = useAction();
 
-  if (!day) {
-    onClose();
-    return null;
-  }
+  // The day can vanish if the routine revalidates out from under the modal
+  // (owner deleted it). Close from an effect — calling onClose() during render
+  // is a "cannot update a component while rendering" violation.
+  useEffect(() => {
+    if (!day) onClose();
+  }, [day, onClose]);
+
+  if (!day) return null;
 
   const move = (idx: number, dir: -1 | 1) => {
     const target = idx + dir;
@@ -447,9 +466,10 @@ function ReorderFlow({
   const exerciseById = new Map(day.exercises.map((e) => [e.templateExerciseId, e]));
 
   const submit = () => {
-    startTransition(async () => {
-      try {
-        const res = await postShareSuggestion({
+    if (isPending) return;
+    run(
+      () =>
+        postShareSuggestion({
           token,
           targetType: 'routine_day',
           targetId: state.dayId,
@@ -457,12 +477,9 @@ function ReorderFlow({
             kind: 'reorder',
             orderedTemplateExerciseIds: order,
           } as never,
-        });
-        if (res.ok) onClose();
-      } catch {
-        /* silent */
-      }
-    });
+        }),
+      { onSuccess: onClose },
+    );
   };
 
   return (
@@ -505,6 +522,7 @@ function ReorderFlow({
             );
           })}
         </ol>
+        {error && <p className="text-xs text-rose-400">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="button"
@@ -515,7 +533,7 @@ function ReorderFlow({
           </button>
           <button
             type="button"
-            disabled={pending}
+            disabled={isPending}
             onClick={submit}
             className="px-3 py-1.5 bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md text-sm disabled:opacity-40"
           >
@@ -545,13 +563,13 @@ function HolisticFlow({
   const [description, setDescription] = useState('');
   const [showPicker, setShowPicker] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
-  const [pending, startTransition] = useTransition();
+  const { run, isPending, error } = useAction();
 
   const submit = () => {
-    if (!description.trim() && picked.length === 0) return;
-    startTransition(async () => {
-      try {
-        const res = await postShareSuggestion({
+    if ((!description.trim() && picked.length === 0) || isPending) return;
+    run(
+      () =>
+        postShareSuggestion({
           token,
           targetType: 'routine',
           targetId: _routine.id,
@@ -560,12 +578,9 @@ function HolisticFlow({
             description: description.trim() || undefined,
             exerciseIds: picked.length > 0 ? picked : undefined,
           } as never,
-        });
-        if (res.ok) onClose();
-      } catch {
-        /* silent */
-      }
-    });
+        }),
+      { onSuccess: onClose },
+    );
   };
 
   const pickedNames = picked
@@ -608,6 +623,7 @@ function HolisticFlow({
             </ul>
           )}
         </div>
+        {error && <p className="text-xs text-rose-400">{error}</p>}
         <div className="flex justify-end gap-2">
           <button
             type="button"
@@ -618,7 +634,7 @@ function HolisticFlow({
           </button>
           <button
             type="button"
-            disabled={pending || (!description.trim() && picked.length === 0)}
+            disabled={isPending || (!description.trim() && picked.length === 0)}
             onClick={submit}
             className="px-3 py-1.5 bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md text-sm disabled:opacity-40"
           >

@@ -5,7 +5,7 @@
 // reorders, inserts, removes, and custom-exercise proposals get an apply
 // button. Stickers and holistic suggestions get only resolve/reject.
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import {
   applyShareSwap,
   applyShareReorder,
@@ -16,7 +16,7 @@ import {
   resolveShareSuggestion,
   resolveShareComment,
 } from '@/lib/actions';
-import type { ActionResult } from '@/lib/action-result';
+import { useAction } from '@/components/ui/use-action';
 
 type Comment = {
   id: string;
@@ -192,25 +192,16 @@ function SuggestionCard({
   exerciseNameById: Record<string, string>;
   dayChoices: Array<{ id: string; name: string; position: number }>;
 }) {
-  const [pending, startTransition] = useTransition();
+  // run/isPending/error from useAction: an apply or reject failure (the
+  // suggestion already actioned in another tab, an exercise removed since) now
+  // surfaces in the card instead of being silently dropped.
+  const { run, isPending: pending, error } = useAction();
   const [pickedSwap, setPickedSwap] = useState<string | null>(null);
   const [pickedInserts, setPickedInserts] = useState<Record<string, boolean>>({});
   const [customDayId, setCustomDayId] = useState<string | null>(null);
 
   const targetLabel =
     s.targetType && s.targetId ? labelByTarget[`${s.targetType}:${s.targetId}`] : null;
-
-  // Expected failures ({ ok: false } results) are dropped here too — surfacing
-  // them on the owner side is Package 2 (client action discipline) territory.
-  // The ActionResult type keeps the contract greppable for that rework.
-  const run = (fn: () => Promise<ActionResult<unknown>>) =>
-    startTransition(async () => {
-      try {
-        await fn();
-      } catch {
-        /* silent — page revalidates on success; the action's withLogging records failures */
-      }
-    });
 
   const reject = () => run(() => rejectShareSuggestion({ suggestionId: s.id }));
   const resolve = () => run(() => resolveShareSuggestion({ suggestionId: s.id }));
@@ -369,6 +360,7 @@ function SuggestionCard({
           <RejectButton disabled={pending} onClick={reject} />
         </ActionRow>
       )}
+      {error && <p className="text-xs text-rose-400 mt-2">{error}</p>}
     </li>
   );
 }
@@ -495,17 +487,10 @@ function ResolveButton({ onClick, disabled }: { onClick: () => void; disabled?: 
 // ---------------- Comment card ----------------
 
 function CommentCard({ c, labelByTarget }: { c: Comment; labelByTarget: Record<string, string> }) {
-  const [pending, startTransition] = useTransition();
+  const { run, isPending: pending } = useAction();
   const targetLabel = labelByTarget[`${c.targetType}:${c.targetId}`];
 
-  const resolve = () =>
-    startTransition(async () => {
-      try {
-        await resolveShareComment({ commentId: c.id });
-      } catch {
-        /* silent */
-      }
-    });
+  const resolve = () => run(() => resolveShareComment({ commentId: c.id }));
 
   return (
     <li id={`comment-${c.id}`} className="bg-ink-900/40 border border-ink-800 rounded-lg p-3">

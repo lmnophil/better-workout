@@ -19,6 +19,7 @@ export function ReviewerGate({ token, ownerName, routineName }: Props) {
   const [pending, startTransition] = useTransition();
 
   const submit = () => {
+    if (pending) return; // Enter bypasses the button's disabled guard
     const trimmed = displayName.trim();
     if (!trimmed) {
       setError('Pick a name so the owner knows who said what.');

@@ -10,7 +10,7 @@
 // passed (i.e. the reviewer is picking a replacement for an existing
 // exercise), modules with matching primary-muscle exercises sort to the top.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, X, Check } from 'lucide-react';
 
 export type LibraryExercise = {
@@ -35,6 +35,10 @@ type Props = {
   // muscle surface first.
   primaryMuscleHint?: string;
   onCancel: () => void;
+  // The handler may be async; the picker wraps the call in Promise.resolve and
+  // awaits it so the commit button can show a submitting state and a double-tap
+  // can't file two suggestions. Typed `=> void` because an async function is
+  // assignable to it and the strict ruleset rejects a `void` union.
   onPick?: (exerciseId: string) => void;
   onPickMany?: (exerciseIds: string[]) => void;
   title: string;
@@ -52,6 +56,16 @@ export function ReviewerPicker({
 }: Props) {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
+  // Picking commits and the parent closes us on success; guard setState after
+  // that unmount.
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -112,9 +126,15 @@ export function ReviewerPicker({
     return entries.map(([module, exercises]) => ({ module, exercises }));
   }, [library, excludeIds, q, primaryMuscleHint]);
 
+  // Single-select commits instantly; await it so a double-tap (or tapping a
+  // second row before the first post lands) can't file two suggestions.
   const toggle = (id: string) => {
     if (mode === 'single') {
-      onPick?.(id);
+      if (submitting) return;
+      setSubmitting(true);
+      Promise.resolve(onPick?.(id)).finally(() => {
+        if (mountedRef.current) setSubmitting(false);
+      });
       return;
     }
     setSelected((prev) => {
@@ -126,9 +146,11 @@ export function ReviewerPicker({
   };
 
   const commit = () => {
-    if (mode !== 'multi') return;
-    if (selected.size === 0) return;
-    onPickMany?.(Array.from(selected));
+    if (mode !== 'multi' || selected.size === 0 || submitting) return;
+    setSubmitting(true);
+    Promise.resolve(onPickMany?.(Array.from(selected))).finally(() => {
+      if (mountedRef.current) setSubmitting(false);
+    });
   };
 
   return (
@@ -183,7 +205,8 @@ export function ReviewerPicker({
                       <button
                         type="button"
                         onClick={() => toggle(e.id)}
-                        className={`w-full text-left px-2 py-1.5 rounded-md border text-sm flex items-center justify-between transition ${
+                        disabled={submitting}
+                        className={`w-full text-left px-2 py-1.5 rounded-md border text-sm flex items-center justify-between transition disabled:opacity-50 ${
                           isSelected
                             ? 'border-amber-400/60 bg-amber-400/10 text-ink-100'
                             : 'border-ink-800 hover:border-ink-600 text-ink-200'
@@ -214,11 +237,12 @@ export function ReviewerPicker({
             <button
               type="button"
               onClick={commit}
-              disabled={selected.size === 0}
+              disabled={selected.size === 0 || submitting}
               className="px-3 py-1.5 bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md text-sm disabled:opacity-40"
             >
-              Use {selected.size > 0 ? `${selected.size} ` : ''}exercise
-              {selected.size === 1 ? '' : 's'}
+              {submitting
+                ? 'Sending…'
+                : `Use ${selected.size > 0 ? `${selected.size} ` : ''}exercise${selected.size === 1 ? '' : 's'}`}
             </button>
           </div>
         )}

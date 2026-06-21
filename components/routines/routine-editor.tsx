@@ -21,7 +21,7 @@
 // callbacks. In Draft mode the callbacks update local state; in Live mode
 // they call server actions. The card itself doesn't know the difference.
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   ArrowDownAZ,
@@ -105,6 +105,8 @@ import {
   type ExerciseUsageStatClient,
 } from '@/components/workout/workout-view';
 import { useConfirm } from '@/components/ui/use-confirm';
+import { useAction, ActionError, type UseAction } from '@/components/ui/use-action';
+import type { ActionResult } from '@/lib/action-result';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { estimatePlannedExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 import { VideoLink } from '@/components/ui/video-link';
@@ -452,11 +454,19 @@ function DraftEditor({
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [filtersHydrated, setFiltersHydrated] = useState(false);
 
-  // Hydrate the Custom draft from localStorage on mount. We only treat the
+  // availableExercises changes identity on every router.refresh(); hold it in a
+  // ref so the hydrate-once effect below can read the current set without
+  // listing it as a dependency. Re-running hydration would re-read localStorage
+  // and re-apply the validity filter, silently dropping draft days the user has
+  // since added (a freshly-added empty day fails the length check).
+  const availableExercisesRef = useRef(availableExercises);
+  availableExercisesRef.current = availableExercises;
+
+  // Hydrate the Custom draft from localStorage once on mount. We only treat the
   // result as valid if every exercise still resolves — exercises can be
-  // soft-deleted between sessions and a stale draft pointing at a missing
-  // one would be a footgun. Drop unresolved entries silently; if the draft
-  // is now empty, clear it.
+  // soft-deleted between sessions and a stale draft pointing at a missing one
+  // would be a footgun. Drop unresolved entries silently; if the draft is now
+  // empty, clear it. The validity filter runs on this first load only.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
@@ -464,7 +474,7 @@ function DraftEditor({
       if (raw) {
         const parsed = JSON.parse(raw) as DraftDay[];
         if (Array.isArray(parsed)) {
-          const validIds = new Set(availableExercises.map((e) => e.id));
+          const validIds = new Set(availableExercisesRef.current.map((e) => e.id));
           const cleaned = parsed
             .map((d) => ({
               ...d,
@@ -478,7 +488,7 @@ function DraftEditor({
       // Bad JSON or shape mismatch — start fresh, no need to surface it.
     }
     setDraftHydrated(true);
-  }, [availableExercises]);
+  }, []);
 
   // Persist Custom draft to localStorage on change. Skipped until hydration
   // completes so we never overwrite a saved draft with the initial empty
@@ -1013,8 +1023,16 @@ function DraftEditor({
               onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
-                  await deleteCustomExercise({ exerciseId });
-                  router.refresh();
+                  try {
+                    const res = await deleteCustomExercise({ exerciseId });
+                    if (!res.ok) {
+                      setSubmitError(res.error);
+                      return;
+                    }
+                    router.refresh();
+                  } catch {
+                    setSubmitError('Could not remove that exercise. Try again?');
+                  }
                 });
               }}
             />
@@ -1395,9 +1413,23 @@ function LiveEditor({
     if (res.ok) router.refresh();
     return res;
   };
-  const [isPending, startTransition] = useTransition();
+  const { run, isPending, error, setError } = useAction();
   const { confirm, Dialog: ConfirmDialog } = useConfirm();
   const { prefs } = usePrefs();
+
+  // Add/seed flows fire several actions in order. Run them as one sequence:
+  // stop at the first failure (surfaced via the banner), then refresh so a
+  // partial result still shows.
+  const runSeq = (actions: Array<() => Promise<ActionResult<unknown>>>) =>
+    run(async () => {
+      let last: ActionResult<unknown> = { ok: true, data: null };
+      for (const act of actions) {
+        last = await act();
+        if (!last.ok) break;
+      }
+      router.refresh();
+      return last;
+    });
 
   // Picker context — `poolId` set means picked exercises join that pool
   // instead of becoming fixed slots.
@@ -1472,7 +1504,9 @@ function LiveEditor({
 
   return (
     <>
-      <MetaPanel routine={routine} isPending={isPending} startTransition={startTransition} />
+      <ActionError message={error} onDismiss={() => setError(null)} className="mb-4" />
+
+      <MetaPanel routine={routine} isPending={isPending} run={run} />
 
       <DaysSection
         mode="live"
@@ -1486,40 +1520,26 @@ function LiveEditor({
         exerciseById={exerciseById}
         routineTotals={totals}
         onAddDay={(weekday) => {
-          startTransition(async () => {
-            try {
-              await addRoutineDay({
-                weekday: routine.scheduleStyle === 'weekday' ? weekday : null,
-              });
-            } catch {
-              /* surfaced to console; user-visible errors stay rare here */
-            }
-          });
+          run(() =>
+            addRoutineDay({
+              weekday: routine.scheduleStyle === 'weekday' ? weekday : null,
+            }),
+          );
         }}
         onRenameDay={(id, name) => {
-          startTransition(() => {
-            updateRoutineDay({ routineDayId: id, name }).catch(() => {});
-          });
+          run(() => updateRoutineDay({ routineDayId: id, name }));
         }}
         onSetWeekday={(id, weekday) => {
-          startTransition(() => {
-            updateRoutineDay({ routineDayId: id, weekday }).catch(() => {});
-          });
+          run(() => updateRoutineDay({ routineDayId: id, weekday }));
         }}
         onUpdateDayDescription={(id, description) => {
-          startTransition(() => {
-            updateRoutineDay({ routineDayId: id, description }).catch(() => {});
-          });
+          run(() => updateRoutineDay({ routineDayId: id, description }));
         }}
         onSortDayByModule={(id, exerciseIds) => {
-          startTransition(() => {
-            setRoutineDayExerciseOrder({ routineDayId: id, exerciseIds }).catch(() => {});
-          });
+          run(() => setRoutineDayExerciseOrder({ routineDayId: id, exerciseIds }));
         }}
         onDuplicateDay={(id) => {
-          startTransition(() => {
-            duplicateRoutineDay({ routineDayId: id }).catch(() => {});
-          });
+          run(() => duplicateRoutineDay({ routineDayId: id }));
         }}
         onRemoveDay={async (id) => {
           const day = editorDays.find((d) => d.id === id);
@@ -1531,19 +1551,13 @@ function LiveEditor({
             variant: 'danger',
           });
           if (!ok) return;
-          startTransition(() => {
-            removeRoutineDay({ routineDayId: id });
-          });
+          run(() => removeRoutineDay({ routineDayId: id }));
         }}
         onMoveDay={(id, direction) => {
-          startTransition(() => {
-            reorderRoutineDay({ routineDayId: id, direction });
-          });
+          run(() => reorderRoutineDay({ routineDayId: id, direction }));
         }}
         onSwapDayPositions={(id, targetId) => {
-          startTransition(() => {
-            swapRoutineDayPositions({ routineDayId: id, targetRoutineDayId: targetId });
-          });
+          run(() => swapRoutineDayPositions({ routineDayId: id, targetRoutineDayId: targetId }));
         }}
         onOpenExercisePicker={(dayId, poolId) => setPickerCtx({ dayId, poolId })}
         onSeedFromTemplate={(id, templateId) => {
@@ -1559,69 +1573,45 @@ function LiveEditor({
           const ids = tpl.exerciseNames
             .map((n) => nameToId.get(n))
             .filter((eid): eid is string => eid !== undefined);
-          startTransition(async () => {
-            for (const eid of ids) {
-              await addExerciseToRoutineDay({ routineDayId: id, exerciseId: eid });
-            }
-            router.refresh();
-          });
+          runSeq(ids.map((eid) => () => addExerciseToRoutineDay({ routineDayId: id, exerciseId: eid })));
         }}
         onRemoveExercise={(id, exerciseId) => {
-          startTransition(() => {
-            removeExerciseFromRoutineDay({ routineDayId: id, exerciseId });
-          });
+          run(() => removeExerciseFromRoutineDay({ routineDayId: id, exerciseId }));
         }}
         onReorderExercise={(id, exerciseId, direction) => {
-          startTransition(() => {
-            reorderRoutineDayExercise({ routineDayId: id, exerciseId, direction });
-          });
+          run(() => reorderRoutineDayExercise({ routineDayId: id, exerciseId, direction }));
         }}
         onUpdateExercisePlanned={(id, exerciseId, planned) => {
-          startTransition(() => {
+          run(() =>
             updateRoutineDayExercise({
               routineDayId: id,
               exerciseId,
               ...planned,
-            }).catch(() => {});
-          });
+            }),
+          );
         }}
         onSwapExercise={(id, exerciseId) => setSwapForDay({ dayId: id, outExerciseId: exerciseId })}
         onCreatePool={(dayId, exerciseIds, pickCount) => {
-          startTransition(async () => {
-            await createTemplatePool({ routineDayId: dayId, exerciseIds, pickCount }).catch(
-              () => {},
-            );
-            router.refresh();
+          run(() => createTemplatePool({ routineDayId: dayId, exerciseIds, pickCount }), {
+            onSuccess: () => router.refresh(),
           });
         }}
         onUpdatePool={(poolId, patch) => {
-          startTransition(async () => {
-            await updateTemplatePool({ poolId, ...patch }).catch(() => {});
-            router.refresh();
-          });
+          run(() => updateTemplatePool({ poolId, ...patch }), { onSuccess: () => router.refresh() });
         }}
         onDeletePool={(poolId) => {
-          startTransition(async () => {
-            await deleteTemplatePool({ poolId }).catch(() => {});
-            router.refresh();
-          });
+          run(() => deleteTemplatePool({ poolId }), { onSuccess: () => router.refresh() });
         }}
         onRemoveFromPool={(poolId, exerciseId) => {
-          startTransition(async () => {
-            await removeExerciseFromPool({ poolId, exerciseId }).catch(() => {});
-            router.refresh();
+          run(() => removeExerciseFromPool({ poolId, exerciseId }), {
+            onSuccess: () => router.refresh(),
           });
         }}
       />
 
       <CoveragePanel totals={totals} anyEstimated={anyEstimated} muscleGroups={muscleGroups} />
 
-      <DangerZone
-        routineName={routine.name}
-        isPending={isPending}
-        startTransition={startTransition}
-        confirm={confirm}
-      />
+      <DangerZone routineName={routine.name} isPending={isPending} run={run} confirm={confirm} />
 
       {pickerCtx &&
         (() => {
@@ -1637,16 +1627,16 @@ function LiveEditor({
               usageStats={usageStatsMap}
               onPickMany={(exerciseIds) => {
                 setPickerCtx(null);
-                startTransition(async () => {
-                  for (const exerciseId of exerciseIds) {
-                    await addExerciseToRoutineDay({
-                      routineDayId: day.id,
-                      exerciseId,
-                      poolId: targetPoolId,
-                    });
-                  }
-                  router.refresh();
-                });
+                runSeq(
+                  exerciseIds.map(
+                    (exerciseId) => () =>
+                      addExerciseToRoutineDay({
+                        routineDayId: day.id,
+                        exerciseId,
+                        poolId: targetPoolId,
+                      }),
+                  ),
+                );
               }}
               onPickAsPool={
                 // Only offer "add as a new pool" when we're adding fresh slots
@@ -1657,27 +1647,27 @@ function LiveEditor({
                   ? undefined
                   : (exerciseIds) => {
                       setPickerCtx(null);
-                      startTransition(async () => {
-                        for (const exerciseId of exerciseIds) {
-                          await addExerciseToRoutineDay({ routineDayId: day.id, exerciseId });
-                        }
-                        // New pools default to picking 1 of N; the user adjusts
-                        // from the pool afterward.
-                        await createTemplatePool({
-                          routineDayId: day.id,
-                          exerciseIds,
-                          pickCount: 1,
-                        }).catch(() => {});
-                        router.refresh();
-                      });
+                      // Add the slots, then group them into a new pool (default
+                      // pick 1 of N; the user adjusts from the pool afterward).
+                      runSeq([
+                        ...exerciseIds.map(
+                          (exerciseId) => () =>
+                            addExerciseToRoutineDay({ routineDayId: day.id, exerciseId }),
+                        ),
+                        () =>
+                          createTemplatePool({
+                            routineDayId: day.id,
+                            exerciseIds,
+                            pickCount: 1,
+                          }),
+                      ]);
                     }
               }
               onClose={() => setPickerCtx(null)}
               onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
-                startTransition(async () => {
-                  await deleteCustomExercise({ exerciseId });
-                  router.refresh();
+                run(() => deleteCustomExercise({ exerciseId }), {
+                  onSuccess: () => router.refresh(),
                 });
               }}
             />
@@ -1700,21 +1690,21 @@ function LiveEditor({
                 const target = swapForDay;
                 setSwapForDay(null);
                 if (!inExerciseId) return;
-                startTransition(async () => {
-                  await swapInRoutineTemplate({
-                    routineDayId: target.dayId,
-                    outExerciseId: target.outExerciseId,
-                    inExerciseId,
-                  });
-                  router.refresh();
-                });
+                run(
+                  () =>
+                    swapInRoutineTemplate({
+                      routineDayId: target.dayId,
+                      outExerciseId: target.outExerciseId,
+                      inExerciseId,
+                    }),
+                  { onSuccess: () => router.refresh() },
+                );
               }}
               onClose={() => setSwapForDay(null)}
               onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
-                startTransition(async () => {
-                  await deleteCustomExercise({ exerciseId });
-                  router.refresh();
+                run(() => deleteCustomExercise({ exerciseId }), {
+                  onSuccess: () => router.refresh(),
                 });
               }}
             />
@@ -1731,23 +1721,28 @@ function LiveEditor({
 function MetaPanel({
   routine,
   isPending,
-  startTransition,
+  run,
 }: {
   routine: RoutineClient;
   isPending: boolean;
-  startTransition: React.TransitionStartFunction;
+  run: UseAction['run'];
 }) {
   const [name, setName] = useState(routine.name);
   const [description, setDescription] = useState(routine.description ?? '');
+  const nameRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
 
-  // Sync local state with server-revalidated props if they change while
-  // the inputs aren't focused. This keeps stale text from snapping back
-  // mid-typing but still picks up upstream changes.
+  // Sync local state with server-revalidated props — but only when the field
+  // isn't focused, so a revalidation landing mid-edit doesn't yank the text out
+  // from under the user (the SetRow pattern). Without the guard the comment was
+  // aspirational; the code synced unconditionally.
   useEffect(() => {
-    setName(routine.name);
+    if (document.activeElement !== nameRef.current) setName(routine.name);
   }, [routine.name]);
   useEffect(() => {
-    setDescription(routine.description ?? '');
+    if (document.activeElement !== descriptionRef.current) {
+      setDescription(routine.description ?? '');
+    }
   }, [routine.description]);
 
   function commitName() {
@@ -1757,27 +1752,26 @@ function MetaPanel({
       return;
     }
     if (trimmed === routine.name) return;
-    startTransition(() => {
-      updateRoutine({ name: trimmed }).catch(() => setName(routine.name));
-    });
+    // Roll the field back on failure (the banner says why) — local state never
+    // re-syncs from props while the server still holds the old name.
+    run(() => updateRoutine({ name: trimmed }), { onError: () => setName(routine.name) });
   }
 
   function commitDescription() {
     const next = description.trim() || null;
     if (next === routine.description) return;
-    startTransition(() => {
-      updateRoutine({ description: next }).catch(() => setDescription(routine.description ?? ''));
+    run(() => updateRoutine({ description: next }), {
+      onError: () => setDescription(routine.description ?? ''),
     });
   }
 
   function setSchedule(next: ScheduleStyle) {
     if (next === routine.scheduleStyle) return;
-    // Optimistic note: the action clears weekday pins server-side; we don't
-    // need a confirm dialog because the inline hint above the toggle
-    // already explains it, and the change is reversible (one click back).
-    startTransition(() => {
-      updateRoutine({ scheduleStyle: next });
-    });
+    // The action clears weekday pins server-side; no confirm dialog because the
+    // inline hint above the toggle already explains it and the change is
+    // reversible (one click back). The toggle reflects routine.scheduleStyle,
+    // so a failed write just leaves it where it was — plus the banner.
+    run(() => updateRoutine({ scheduleStyle: next }));
   }
 
   return (
@@ -1787,6 +1781,7 @@ function MetaPanel({
           Name
         </label>
         <input
+          ref={nameRef}
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -1808,6 +1803,7 @@ function MetaPanel({
           What&apos;s it for? <span className="text-ink-600">(optional)</span>
         </label>
         <input
+          ref={descriptionRef}
           type="text"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -2234,10 +2230,11 @@ function DayCard({
   }
   const poolById = useMemo(() => new Map(day.pools.map((p) => [p.id, p])), [day.pools]);
   // Keep the local input in sync with upstream changes (e.g. seed-from-template
-  // updating the day's name).
+  // updating the day's name) — but not while the user is renaming, so a
+  // revalidation mid-edit doesn't clobber their typing.
   useEffect(() => {
-    setName(day.name);
-  }, [day.name]);
+    if (!renaming) setName(day.name);
+  }, [day.name, renaming]);
 
   // Day-level description editor. Collapsed by default; click-to-expand. Same
   // commit-on-blur pattern as the per-exercise note. Local string state while
@@ -3272,12 +3269,19 @@ function PlannedInputs({
 
   const [setsText, setSetsText] = useState(plannedSets?.toString() ?? '');
   const [secondaryText, setSecondaryText] = useState(secondaryValue?.toString() ?? '');
+  const setsRef = useRef<HTMLInputElement>(null);
+  const secondaryRef = useRef<HTMLInputElement>(null);
 
+  // Sync from props only when the field isn't focused — a revalidation landing
+  // mid-edit must not yank the value out from under a typing user (the SetRow
+  // pattern). Earlier copies of this dropped the focus check.
   useEffect(() => {
-    setSetsText(plannedSets?.toString() ?? '');
+    if (document.activeElement !== setsRef.current) setSetsText(plannedSets?.toString() ?? '');
   }, [plannedSets]);
   useEffect(() => {
-    setSecondaryText(secondaryValue?.toString() ?? '');
+    if (document.activeElement !== secondaryRef.current) {
+      setSecondaryText(secondaryValue?.toString() ?? '');
+    }
   }, [secondaryValue]);
 
   function commit(field: 'sets' | 'secondary', text: string) {
@@ -3314,6 +3318,7 @@ function PlannedInputs({
   return (
     <div className="flex items-center gap-1 shrink-0 text-ink-500 text-[10px] font-mono">
       <input
+        ref={setsRef}
         type="text"
         inputMode="numeric"
         value={setsText}
@@ -3333,6 +3338,7 @@ function PlannedInputs({
       />
       <span aria-hidden="true">×</span>
       <input
+        ref={secondaryRef}
         type="text"
         inputMode="numeric"
         value={secondaryText}
@@ -3830,12 +3836,12 @@ type ConfirmFn = ReturnType<typeof useConfirm>['confirm'];
 function DangerZone({
   routineName,
   isPending,
-  startTransition,
+  run,
   confirm,
 }: {
   routineName: string;
   isPending: boolean;
-  startTransition: React.TransitionStartFunction;
+  run: UseAction['run'];
   confirm: ConfirmFn;
 }) {
   async function handleDelete() {
@@ -3847,9 +3853,7 @@ function DangerZone({
       variant: 'danger',
     });
     if (!ok) return;
-    startTransition(() => {
-      deleteRoutine();
-    });
+    run(() => deleteRoutine());
   }
 
   return (

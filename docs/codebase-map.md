@@ -311,7 +311,7 @@ Read these when working in the matching directory.
 - **`lib/area-filter.ts`** — region (Upper/Lower/Full/Mobility) and muscle chip taxonomy + `balanceHint()`. Used by picker filters and empty-state suggestions.
 - **`lib/db.ts`** — Prisma client singleton with `@prisma/adapter-pg` (PrismaPg) adapter. Slow-query logging (>100ms hits stderr). Histogram observation per query.
 - **`lib/env.ts`** — boot-time env validation, called from `instrumentation.ts`.
-- **Hooks**: `useRestTimer()` (absolute-deadline), `usePrefs()` (context read/update in `components/ui/prefs-context.tsx`), `useReportError()` (`components/ui/use-report-error.tsx`).
+- **Hooks**: `useRestTimer()` (absolute-deadline), `usePrefs()` (context read/update in `components/ui/prefs-context.tsx`), `useReportError()` (`components/ui/use-report-error.tsx`), `useAction()` (`components/ui/use-action.tsx` — the client driver for the `ActionResult` contract: `run` + `isPending` + `error`; recovers rejections inline, see api.md).
 
 Zod schemas live inline in `lib/actions.ts` next to the action that uses them.
 

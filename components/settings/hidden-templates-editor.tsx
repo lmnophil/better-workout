@@ -5,9 +5,9 @@
 // that calls unhideTemplate. When nothing is hidden, renders a small empty
 // state instead of an empty card so the section reads cleanly.
 
-import { useTransition } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { unhideTemplate } from '@/lib/actions';
+import { useAction } from '@/components/ui/use-action';
 
 type HiddenTemplate = {
   templateId: string;
@@ -35,12 +35,10 @@ export function HiddenTemplatesEditor({ templates }: { templates: HiddenTemplate
 }
 
 function Row({ template }: { template: HiddenTemplate }) {
-  const [isPending, startTransition] = useTransition();
+  const { run, isPending } = useAction();
 
   function handleUnhide() {
-    startTransition(() => {
-      unhideTemplate({ templateId: template.templateId });
-    });
+    run(() => unhideTemplate({ templateId: template.templateId }));
   }
 
   return (

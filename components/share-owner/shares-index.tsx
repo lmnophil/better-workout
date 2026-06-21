@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Copy, Check, Trash2 } from 'lucide-react';
 import { mintRoutineShare, revokeRoutineShare } from '@/lib/actions';
+import { useAction, ActionError } from '@/components/ui/use-action';
 
 type Share = {
   id: string;
@@ -20,45 +21,37 @@ type Share = {
 };
 
 export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: string }) {
+  const { run, isPending, error, setError } = useAction();
   const [label, setLabel] = useState('');
-  const [pending, startTransition] = useTransition();
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [justMintedCopied, setJustMintedCopied] = useState(false);
 
   const mint = () => {
-    startTransition(async () => {
-      try {
-        const result = await mintRoutineShare({ label: label.trim() || undefined });
-        if (!result.ok) return;
+    // Guard isPending so Enter can't mint two links before the first lands.
+    if (isPending) return;
+    run(() => mintRoutineShare({ label: label.trim() || undefined }), {
+      onSuccess: (data) => {
         setLabel('');
-        // Optimistically copy the new URL so the user doesn't have to hunt
-        // for the row that just appeared and tap the per-row copy button.
-        // Clipboard writes after an await can fail silently in some browsers
-        // when they decide the user gesture has ended; the explicit per-row
-        // button remains as the manual fallback.
-        const url = `${baseUrl}/share/${result.data.token}`;
-        try {
-          await navigator.clipboard.writeText(url);
-          setJustMintedCopied(true);
-          setTimeout(() => setJustMintedCopied(false), 2000);
-        } catch {
-          /* silent — user can use the per-row copy button */
-        }
-      } catch {
-        /* silent */
-      }
+        // Optimistically copy the new URL so the user doesn't have to hunt for
+        // the row that just appeared and tap the per-row copy button. Clipboard
+        // writes after an await can fail silently in some browsers when they
+        // decide the user gesture has ended; the per-row button is the fallback.
+        navigator.clipboard.writeText(`${baseUrl}/share/${data.token}`).then(
+          () => {
+            setJustMintedCopied(true);
+            setTimeout(() => setJustMintedCopied(false), 2000);
+          },
+          () => {
+            /* silent — user can use the per-row copy button */
+          },
+        );
+      },
     });
   };
 
   const revoke = (shareId: string) => {
     if (!confirm('Revoke this share link? Anyone with the URL will lose access.')) return;
-    startTransition(async () => {
-      try {
-        await revokeRoutineShare({ shareId });
-      } catch {
-        /* silent */
-      }
-    });
+    run(() => revokeRoutineShare({ shareId }));
   };
 
   const copy = (token: string, id: string) => {
@@ -79,7 +72,10 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
           <input
             type="text"
             value={label}
-            onChange={(e) => setLabel(e.target.value)}
+            onChange={(e) => {
+              setLabel(e.target.value);
+              if (error) setError(null);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') mint();
             }}
@@ -89,13 +85,14 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
           />
           <button
             type="button"
-            disabled={pending}
+            disabled={isPending}
             onClick={mint}
             className="px-3 py-1.5 bg-amber-400/90 hover:bg-amber-400 text-ink-950 font-medium rounded-md text-sm disabled:opacity-40"
           >
             Mint link
           </button>
         </div>
+        <ActionError message={error} onDismiss={() => setError(null)} className="mt-2" />
         <p className="text-xs text-ink-400 mt-2">
           Anyone with the URL can view your routine and comment. Revoke any time.
         </p>
@@ -138,7 +135,7 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
                   <button
                     type="button"
                     onClick={() => revoke(s.id)}
-                    disabled={pending}
+                    disabled={isPending}
                     aria-label="Revoke"
                     className="p-1.5 text-ink-400 hover:text-rose-300"
                   >

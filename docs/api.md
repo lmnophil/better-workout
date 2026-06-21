@@ -16,33 +16,29 @@ The app has three distinct ways of being called, and they answer different quest
 
 ## How to call a server action from the React side
 
-Every action returns `ActionResult<T>` (`lib/action-result.ts`): `{ ok: true, data }` on success, `{ ok: false, error }` for an expected failure whose `error` string is UI copy. The canonical pattern:
+Every action returns `ActionResult<T>` (`lib/action-result.ts`): `{ ok: true, data }` on success, `{ ok: false, error }` for an expected failure whose `error` string is UI copy. Drive that contract with the `useAction` hook (`components/ui/use-action.tsx`) — don't hand-roll a transition per call site:
 
 ```tsx
 'use client';
-import { useState, useTransition } from 'react';
 import { addSet } from '@/lib/actions';
+import { useAction, ActionError } from '@/components/ui/use-action';
 
 function AddSetButton({ exerciseId }: { exerciseId: string }) {
-  const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const { run, isPending, error, setError } = useAction();
   return (
-    <button
-      disabled={isPending}
-      onClick={() =>
-        startTransition(async () => {
-          const res = await addSet({ exerciseId });
-          if (!res.ok) setError(res.error);
-        })
-      }
-    >
-      Add set
-    </button>
+    <>
+      <button disabled={isPending} onClick={() => run(() => addSet({ exerciseId }))}>
+        Add set
+      </button>
+      <ActionError message={error} onDismiss={() => setError(null)} />
+    </>
   );
 }
 ```
 
-`useTransition` gives you `isPending` to disable the button during the call (preventing double-submits) and lets the action run without blocking the UI thread. Check `res.ok` and render `res.error` — that string survives production builds, which a thrown error's `message` does not. A genuine bug still _throws_; `await`ing the action inside the transition (as above) lets that rejection reach the nearest `error.tsx` boundary, so don't discard the promise (`void addSet(...)`) and don't add a `try/catch` unless you're rendering a local fallback.
+`run` awaits the action inside a `useTransition`, so `isPending` spans the real request — the bare `startTransition(() => { action() })` form flips pending back almost immediately (React 19 only entangles awaited work) and never actually engages the disabled guard. An expected `{ ok: false }` lands in `error`; render it where the user acted (a banner, an inline line). Pass `{ onSuccess }` for success-only work (close a dialog, clear an input) and `{ onError }` for a side effect like rolling back an optimistic edit — the message still surfaces via `error`. A rejected promise (offline, or a server-side bug `withLogging` already logged) becomes a friendly inline message too: `useAction` recovers in place rather than crashing the page to the `error.tsx` boundary, which is the wrong response to one failed mutation in an offline-capable PWA. See `docs/decisions.md` for that ADR.
+
+**When _not_ to use `useAction`:** a form that must await-and-decide for itself — close-on-success-only dialogs like `SaveTemplateDialog`, the exercise picker's custom-add tab — calls the action directly and reads `res.ok`, because it needs the result in hand to decide whether to close and must keep the user's input on failure. Those keep their own `submitting`/`error` state. `useAction` is for the fire-and-surface handlers, which is most of them.
 
 ## How to read a server action
 

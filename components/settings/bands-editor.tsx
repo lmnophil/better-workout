@@ -13,30 +13,26 @@
 import { useState, useTransition } from 'react';
 import { ChevronUp, ChevronDown, Plus, Trash2 } from 'lucide-react';
 import { createBand, renameBand, deleteBand, reorderBand } from '@/lib/actions';
+import { useAction, ActionError } from '@/components/ui/use-action';
 
 type Band = { id: string; name: string; position: number };
 
 export function BandsEditor({ bands }: { bands: Band[] }) {
-  const [isPending, startTransition] = useTransition();
+  const { run, isPending, error, setError } = useAction();
   const [newName, setNewName] = useState('');
 
   const add = () => {
     const trimmed = newName.trim();
-    if (!trimmed) return;
-    startTransition(async () => {
-      try {
-        // Only clear on success — a duplicate name resolves { ok: false } and
-        // the typed name should survive for the user to adjust.
-        const res = await createBand({ name: trimmed });
-        if (res.ok) setNewName('');
-      } catch {
-        /* surfaced via revalidation */
-      }
-    });
+    // Guard isPending so the Enter key can't file a second band before the
+    // first lands. Clear on success only — a duplicate name keeps the typed
+    // text and shows the reason in the banner.
+    if (!trimmed || isPending) return;
+    run(() => createBand({ name: trimmed }), { onSuccess: () => setNewName('') });
   };
 
   return (
     <div className="space-y-2">
+      <ActionError message={error} onDismiss={() => setError(null)} />
       <ul className="space-y-1.5">
         {bands.map((b, i) => (
           <li
@@ -45,11 +41,7 @@ export function BandsEditor({ bands }: { bands: Band[] }) {
           >
             <div className="flex flex-col gap-0.5 shrink-0">
               <button
-                onClick={() =>
-                  startTransition(() => {
-                    reorderBand({ bandId: b.id, direction: 'up' }).catch(() => {});
-                  })
-                }
+                onClick={() => run(() => reorderBand({ bandId: b.id, direction: 'up' }))}
                 disabled={isPending || i === 0}
                 className="text-ink-500 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
                 aria-label={`Move ${b.name} up`}
@@ -57,11 +49,7 @@ export function BandsEditor({ bands }: { bands: Band[] }) {
                 <ChevronUp size={12} />
               </button>
               <button
-                onClick={() =>
-                  startTransition(() => {
-                    reorderBand({ bandId: b.id, direction: 'down' }).catch(() => {});
-                  })
-                }
+                onClick={() => run(() => reorderBand({ bandId: b.id, direction: 'down' }))}
                 disabled={isPending || i === bands.length - 1}
                 className="text-ink-500 hover:text-ink-100 disabled:opacity-30 disabled:cursor-not-allowed transition"
                 aria-label={`Move ${b.name} down`}
@@ -71,11 +59,7 @@ export function BandsEditor({ bands }: { bands: Band[] }) {
             </div>
             <BandNameInput band={b} disabled={isPending} />
             <button
-              onClick={() =>
-                startTransition(() => {
-                  deleteBand({ bandId: b.id }).catch(() => {});
-                })
-              }
+              onClick={() => run(() => deleteBand({ bandId: b.id }))}
               disabled={isPending}
               aria-label={`Delete ${b.name}`}
               className="text-ink-500 hover:text-bad transition disabled:opacity-50 shrink-0"
@@ -94,7 +78,10 @@ export function BandsEditor({ bands }: { bands: Band[] }) {
         <input
           type="text"
           value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          onChange={(e) => {
+            setNewName(e.target.value);
+            if (error) setError(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') add();
           }}

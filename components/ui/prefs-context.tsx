@@ -16,11 +16,12 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
-  useTransition,
   type ReactNode,
 } from 'react';
 import { updateUserPreferences } from '@/lib/actions';
+import { useAction } from './use-action';
 import type { UserPrefs } from '@/lib/prefs';
 
 type PrefsContextShape = {
@@ -33,16 +34,30 @@ const PrefsContext = createContext<PrefsContextShape | null>(null);
 
 export function PrefsProvider({ initial, children }: { initial: UserPrefs; children: ReactNode }) {
   const [prefs, setPrefs] = useState(initial);
-  const [, startTransition] = useTransition();
+  // Mirror the latest prefs in a ref so updatePrefs can snapshot the pre-patch
+  // value for rollback without depending on `prefs` — which would break the
+  // stable identity below.
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  const { run } = useAction();
 
   // Stable identity so consumers that depend on `updatePrefs` in an effect
   // don't re-fire whenever this provider re-renders.
-  const updatePrefs = useCallback((patch: Partial<UserPrefs>) => {
-    setPrefs((p) => ({ ...p, ...patch }));
-    startTransition(() => {
-      updateUserPreferences(patch);
-    });
-  }, []);
+  const updatePrefs = useCallback(
+    (patch: Partial<UserPrefs>) => {
+      // Optimistic: patch locally now, persist in the background. On failure
+      // roll back to the snapshot so a toggle reflects what's actually in the
+      // DB instead of silently desyncing until the next reload. The provider
+      // has no error surface of its own, so the snap-back is the feedback — a
+      // failed pref write is offline/bug-class, not a user-facing message.
+      const prev = prefsRef.current;
+      setPrefs((p) => ({ ...p, ...patch }));
+      run(() => updateUserPreferences(patch), {
+        onError: () => setPrefs(prev),
+      });
+    },
+    [run],
+  );
 
   // Memo the context value so unchanged prefs don't churn the object identity.
   const value = useMemo(() => ({ prefs, updatePrefs }), [prefs, updatePrefs]);
