@@ -104,6 +104,8 @@ These are calls where the alternatives are genuinely worth remembering, in case 
 
 ### One active session per user, app-enforced not DB-enforced
 
+> **Superseded (2026-06-21)** by "Active-session uniqueness is now DB-enforced" near the end of this file. Kept for the reasoning trail. The decision below was reversed once the audit showed the dedup hid a real cross-tab bug rather than absorbing it harmlessly.
+
 **Context.** The app convention is "at most one `WorkoutSession` per user with `completedAt: null`." We could enforce this in the schema with a partial unique index (Postgres supports `CREATE UNIQUE INDEX ... WHERE completedAt IS NULL`).
 
 **Decision.** Don't. Enforce in the app: `findActiveSession()` always orders by date desc and takes the first. `getOrCreateActiveSession()` is the only path that creates one; it checks first.
@@ -339,3 +341,25 @@ Forms that must await-and-decide for themselves keep their own state and do **no
 - _Defer all day math to the client._ Would eliminate the server zone need entirely, but the routine timeline is server-shaped (page pre-selects today's day) and moving selection to the client is a bigger refactor than the cookie. The label _is_ effectively client-sourced (the cookie is the browser's report); we just resolve it server-side to avoid a hydration flash.
 
 **Reverse if.** See the per-alternative triggers above; the most likely is genuine multi-device use wanting a persisted, override-able zone — at which point promote the cookie to a `UserPreference` column and keep `getRequestTimeZone` as the single read point.
+
+### Active-session uniqueness is now DB-enforced (reverses "app-enforced not DB-enforced" above)
+
+**Context.** The earlier decision (“One active session per user, app-enforced not DB-enforced”) declined a partial unique index, reasoning that (a) Prisma’s partial-unique support is awkward and (b) the failure mode under contention — a user-visible constraint-violation error — is worse than just deduping with `findActiveSession()` ordered by date. The pre-testing audit (package 5) re-examined this and found the “just dedupe, it’s harmless” premise doesn’t hold. Two tabs (or PWA + browser) racing “start workout” create two active sessions; `findActiveSession` returns the most recent by date, so the other becomes invisible, and `startFromTemplate`/`startFromRoutineDay` then refuse to start anything (“you already have a workout in progress”) pointing at a session the user can’t see. The dedup hid the bug rather than resolving it. The ADR’s own “reverse if” trigger — evidence the dedup isn’t harmless — was met.
+
+**Decision.** Add a partial unique index `WHERE "completedAt" IS NULL` on `WorkoutSession(userId)`. Both original objections dissolve under the implementation the audit specified:
+
+- _(a) Prisma awkwardness_ — sidestepped by writing the index as raw SQL hand-edited into the init migration (`Exercise(ownerId, name)` got the same treatment for soft-deleted customs). Prisma never has to express the `WHERE`; it just has to not clobber it on regen, which the prisma/CLAUDE.md recipe now guards with a loud manual step.
+- _(b) ugly user-facing error_ — the three find-then-create paths (`getOrCreateActiveSession`, `startFromTemplate`, `startFromRoutineDay`) catch the P2002 via `isUniqueViolation` and convert it: the explicit-start paths throw the same friendly “already have a workout in progress” `ExpectedError` they already throw on the pre-check, and `getOrCreateActiveSession` adopts the winner’s session (idempotent get-or-create). No raw constraint violation ever reaches the client.
+
+The app-level pre-check and `findActiveSession`’s date ordering both stay — the pre-check gives the friendly message on the common (non-racing) path, and the ordering keeps reads deterministic if a legacy duplicate somehow predates the index. The index is the backstop the pre-check structurally can’t be (cross-process).
+
+**Why it stays.** The fix is cheap (one raw index + a shared catch helper) and closes a bug a first tester would plausibly hit, with no UX regression — the racing tab sees exactly the message it would have seen anyway. The same raw-partial-index machinery also fixes the soft-deleted-custom-name collision, so the maintenance cost (the manual regen step) is shared across two fixes.
+
+**Reverse if.** Prisma gains first-class partial-unique support (then the index moves into the schema and the manual regen step goes away), or the single-active-session model itself changes (e.g. supporting parallel draft sessions), which would be a much larger rethink.
+
+### Small schema-integrity backstops added alongside the active-session index
+
+Two lower-stakes calls from the same audit package, recorded so they aren’t re-litigated:
+
+- **`SetLog (sessionId, exerciseId, setNumber)` unique + `addSet` retry, rather than accepting the duplicate.** A double-fire `addSet` used to mint two rows with the same `setNumber` (self-healing on the next renumber, but confusing). The contiguity invariant was already documented as app-enforced; promoting it to a DB unique was in-theme, and `addSet` now retries against the new max on P2002 so each tap reliably appends a contiguous set. The renumber paths are safe because they only ever shift numbers downward in ascending order. The sibling case — duplicate `position` values from `addExercisesToActiveSession` — was *accepted*, not constrained: positions are display-order, non-unique by design, and self-heal on the next reorder. _Reverse if_ the retry proves hot enough to matter (it won't at single-user scale).
+- **Idempotent cleanup over delete-by-id for emptied sessions and toggled reactions.** `removeSet`/`removeExerciseFromActiveSession`/`completeActiveSession` use `deleteMany` for the empty-session cleanup (a concurrent cleanup is a no-op, not a P2025), and `toggleShareReaction` uses `createMany({ skipDuplicates })` + `deleteMany` so a double-tap can't throw P2002/P2025 — with the owner notified only when a row was actually inserted. A reviewer who deliberately un-reacts then re-reacts will re-notify; that's accepted (reactions are the intentionally quiet notification tier and the share link is revocable) rather than persisting per-(reviewer, target) notification history across un-reacts.

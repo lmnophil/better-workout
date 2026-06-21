@@ -59,6 +59,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model AuthSession {
@@ -162,6 +163,11 @@ model Exercise {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // DB-level this is a PARTIAL unique index — `WHERE "deletedAt" IS NULL` — so a
+  // soft-deleted custom doesn't block recreating a live one with the same name
+  // (delete-then-recreate is a natural first-test flow). Prisma can't express the
+  // partial clause, so the init migration hand-edits this index. See
+  // prisma/CLAUDE.md → "Raw partial indexes".
   @@unique([ownerId, name])
   @@index([ownerId])
   @@index([module])
@@ -216,6 +222,12 @@ model WorkoutSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // A PARTIAL unique index — `(userId) WHERE "completedAt" IS NULL` — enforces
+  // "at most one in-progress session per user" at the DB level so two tabs (or
+  // PWA + browser) can't each create one. Prisma can't express partial uniques,
+  // so it's raw SQL in the init migration; the find-then-create paths catch its
+  // violation and surface the friendly "already have a workout in progress"
+  // error. See prisma/CLAUDE.md → "Raw partial indexes" and docs/decisions.md.
   @@index([userId, date])
   @@index([userId, completedAt])
   @@index([startedFromRoutineDayId])
@@ -445,6 +457,12 @@ model SetLog {
   session  WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   exercise Exercise       @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
 
+  // setNumber is contiguous from 1 within (session, exercise); this unique makes
+  // that DB-enforced. A double-fire addSet that would otherwise mint a duplicate
+  // setNumber now hits a P2002 the action retries against the new max. Safe for
+  // the renumber paths (removeSet, completeActiveSession): they only ever shift
+  // setNumbers downward in ascending order, which never transiently collides.
+  @@unique([sessionId, exerciseId, setNumber])
   @@index([sessionId])
   @@index([sessionId, position])
   @@index([exerciseId])
@@ -550,6 +568,9 @@ model RoutineDay {
   @@unique([routineId, position])
   @@unique([routineId, weekday])
   @@index([routineId])
+  // Anti-join probes in getTemplates ("templates not used by a routine day") and
+  // the FK cascade both look RoutineDay up by templateId.
+  @@index([templateId])
 }
 
 // A one-time exercise substitution staged on a RoutineDay. Applied (and then
@@ -660,6 +681,8 @@ model ShareComment {
   updatedAt DateTime @updatedAt
 
   @@index([shareId, targetType, targetId])
+  // Un-indexed FK otherwise — needed for the ShareReviewer cascade delete.
+  @@index([reviewerId])
 }
 
 // Polymorphic structured suggestion. `kind` discriminates the payload JSON:
@@ -703,6 +726,8 @@ model ShareSuggestion {
 
   @@index([shareId, state])
   @@index([shareId, targetType, targetId])
+  // Un-indexed FK otherwise — needed for the ShareReviewer cascade delete.
+  @@index([reviewerId])
 }
 
 // Lightweight thumbs-up-style reaction. Currently only `kind: 'good'` exists,

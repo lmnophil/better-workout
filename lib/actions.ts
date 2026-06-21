@@ -14,6 +14,7 @@
 
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
+import { Prisma } from '@/prisma/generated/prisma/client';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -26,6 +27,17 @@ import { MAX_ROUTINE_DAYS } from './routine';
 import { PREFS_DEFAULTS } from './prefs';
 import { parsePrescriptionSetCount } from './prescription';
 import { getLastSetsForExerciseIds } from './queries';
+
+/**
+ * True when a write failed a unique constraint (Postgres unique violation,
+ * Prisma P2002). Used to turn find-then-create races into either an idempotent
+ * recovery or the existing friendly error, instead of a raw crash logged as a
+ * bug. Several of these guard partial unique indexes the schema can't declare
+ * (active session, live custom-exercise name) — see prisma/CLAUDE.md.
+ */
+function isUniqueViolation(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
+}
 
 async function requireUser() {
   const session = await auth();
@@ -71,9 +83,40 @@ async function requireAvailableExercise(userId: string, exerciseId: string) {
 async function getOrCreateActiveSession(userId: string) {
   const existing = await findActiveSession(userId);
   if (existing) return existing;
-  return db.workoutSession.create({
-    data: { userId, date: new Date() },
-  });
+  try {
+    return await db.workoutSession.create({
+      data: { userId, date: new Date() },
+    });
+  } catch (e) {
+    // Lost a race with a concurrent first-touch: the partial unique index on
+    // (userId) WHERE completedAt IS NULL rejected the second create. The other
+    // request already made the session — adopt it instead of failing.
+    if (isUniqueViolation(e)) {
+      const session = await findActiveSession(userId);
+      if (session) return session;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Create a fresh in-progress session for an explicit "start a workout" action
+ * (template / routine-day). Callers pre-check findActiveSession for the common
+ * non-racing case; this closes the cross-tab window the pre-check can't, turning
+ * the partial-unique-index violation into the same friendly error rather than a
+ * raw P2002 crash.
+ */
+async function createActiveSession(data: Prisma.WorkoutSessionUncheckedCreateInput) {
+  try {
+    return await db.workoutSession.create({ data });
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      throw new ExpectedError(
+        'You already have a workout in progress. Complete or discard it first.',
+      );
+    }
+    throw e;
+  }
 }
 
 /**
@@ -272,10 +315,11 @@ export const removeExerciseFromActiveSession = withLogging(
 
     // If that was the last exercise in the session, delete the session itself.
     // Otherwise an empty session would persist and confuse "active" detection
-    // on later visits.
+    // on later visits. deleteMany (not delete) so a concurrent cleanup that
+    // already removed it is a no-op rather than a P2025 crash.
     const remaining = await db.setLog.count({ where: { sessionId: session.id } });
     if (remaining === 0) {
-      await db.workoutSession.delete({ where: { id: session.id } });
+      await db.workoutSession.deleteMany({ where: { id: session.id } });
     }
 
     revalidatePath('/');
@@ -300,34 +344,48 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
   const session = await findActiveSession(userId);
   if (!session) throw new ExpectedError('No active session');
 
-  // Find the highest setNumber for this exercise in this session. The exercise
-  // MUST already be in the session — addSet is for adding more sets to an
-  // existing exercise, not for adding new exercises. Without this guard, a
-  // stale client (or a race with removeExerciseFromActiveSession) could create
-  // an orphan SetLog at position 0 that breaks ordering elsewhere.
-  const lastSet = await db.setLog.findFirst({
-    where: { sessionId: session.id, exerciseId },
-    orderBy: { setNumber: 'desc' },
-  });
-  if (!lastSet) {
-    throw new ExpectedError('Exercise not in active session');
+  // Find the highest setNumber for this exercise in this session, then append
+  // one past it. The exercise MUST already be in the session — addSet is for
+  // adding more sets to an existing exercise, not for adding new exercises.
+  // Without this guard, a stale client (or a race with
+  // removeExerciseFromActiveSession) could create an orphan SetLog at position 0
+  // that breaks ordering elsewhere.
+  //
+  // Read-max-then-create races a double-fire: two requests both read the same
+  // lastSet and aim for the same setNumber. The (sessionId, exerciseId, setNumber)
+  // unique index rejects the loser with P2002; retry against the now-higher max
+  // so each tap lands a contiguous set instead of a silent duplicate. Bounded so
+  // a genuine bug can't spin forever.
+  for (let attempt = 0; ; attempt++) {
+    const lastSet = await db.setLog.findFirst({
+      where: { sessionId: session.id, exerciseId },
+      orderBy: { setNumber: 'desc' },
+    });
+    if (!lastSet) {
+      throw new ExpectedError('Exercise not in active session');
+    }
+    try {
+      await db.setLog.create({
+        data: {
+          sessionId: session.id,
+          exerciseId,
+          setNumber: lastSet.setNumber + 1,
+          // Inherit the exercise's existing position so all sets stay grouped
+          position: lastSet.position,
+          // Pre-fill from the previous set so progressive overload is one tap
+          // away. For time-metric exercises, seconds carries forward; for
+          // reps-metric, reps + weight. Whichever isn't relevant stays null.
+          reps: lastSet.reps,
+          weight: lastSet.weight,
+          seconds: lastSet.seconds,
+        },
+      });
+      break;
+    } catch (e) {
+      if (isUniqueViolation(e) && attempt < 4) continue;
+      throw e;
+    }
   }
-
-  await db.setLog.create({
-    data: {
-      sessionId: session.id,
-      exerciseId,
-      setNumber: lastSet.setNumber + 1,
-      // Inherit the exercise's existing position so all sets stay grouped
-      position: lastSet.position,
-      // Pre-fill from the previous set so progressive overload is one tap away.
-      // For time-metric exercises, seconds carries forward; for reps-metric,
-      // reps + weight. Whichever isn't relevant just stays null on both rows.
-      reps: lastSet.reps,
-      weight: lastSet.weight,
-      seconds: lastSet.seconds,
-    },
-  });
 
   metrics.setsLogged.inc();
   revalidatePath('/');
@@ -335,9 +393,10 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
 
 // Each field is optional + nullable: callers send only the fields they actually
 // edited. The UI dispatches reps/weight for metric='reps' exercises and seconds
-// (plus optional weight, e.g. weighted carries) for metric='time' exercises. We
-// don't mutex at the action level — the worst case is a stale client writes
-// both, which is harmless since the metric dictates which field is read.
+// (plus optional weight, e.g. weighted carries) for metric='time' exercises.
+// weight and bandId are mutually exclusive (Exercise.loadType picks one); the
+// action enforces that below, clearing whichever the caller didn't just set, so
+// a stale client can't leave a row with both populated.
 const UpdateSetSchema = z.object({
   setLogId: z.string().min(1),
   reps: z.number().int().min(0).max(1000).nullable().optional(),
@@ -366,8 +425,7 @@ export const updateSet = withLogging(
       throw new ExpectedError('Cannot edit a completed session');
     }
 
-    // If the caller is setting a band, verify it belongs to the user and clear
-    // weight implicitly (mutually exclusive in the UI).
+    // If the caller is setting a band, verify it belongs to the user.
     if (bandId !== undefined && bandId !== null) {
       const band = await db.band.findFirst({
         where: { id: bandId, userId },
@@ -376,19 +434,23 @@ export const updateSet = withLogging(
       if (!band) throw new ExpectedError('Band not found');
     }
 
-    await db.setLog.update({
-      where: { id: setLogId },
-      data: {
-        ...(reps !== undefined ? { reps } : {}),
-        ...(weight !== undefined ? { weight } : {}),
-        ...(seconds !== undefined ? { seconds } : {}),
-        ...(bandId !== undefined
-          ? bandId === null
-            ? { bandId: null }
-            : { bandId, weight: null }
-          : {}),
-      },
-    });
+    // Write the fields the caller sent, then enforce weight/band mutual
+    // exclusion: setting a real band clears weight, and setting a real weight
+    // clears any band. If a stale client sends both as non-null, band wins —
+    // band exercises are the ones where weight is meaningless. An explicit null
+    // only clears its own field and leaves the other untouched.
+    const data: Prisma.SetLogUncheckedUpdateInput = {};
+    if (reps !== undefined) data.reps = reps;
+    if (seconds !== undefined) data.seconds = seconds;
+    if (weight !== undefined) data.weight = weight;
+    if (bandId !== undefined) data.bandId = bandId;
+    if (bandId !== undefined && bandId !== null) {
+      data.weight = null;
+    } else if (weight !== undefined && weight !== null) {
+      data.bandId = null;
+    }
+
+    await db.setLog.update({ where: { id: setLogId }, data });
 
     revalidatePath('/');
   },
@@ -486,9 +548,12 @@ export const removeSet = withLogging(
     }
 
     // Delete + renumber in one transaction. Either both happen or neither does;
-    // a partial failure mid-renumber would leave gaps in setNumber.
+    // a partial failure mid-renumber would leave gaps in setNumber. deleteMany
+    // (not delete) so a concurrent removeSet that already pulled this same row is
+    // a no-op here — the renumber below still reconciles whatever remains —
+    // rather than aborting the whole transaction with a P2025.
     await db.$transaction(async (tx) => {
-      await tx.setLog.delete({ where: { id: setLogId } });
+      await tx.setLog.deleteMany({ where: { id: setLogId } });
 
       const remaining = await tx.setLog.findMany({
         where: { sessionId: setLog.sessionId, exerciseId: setLog.exerciseId },
@@ -507,12 +572,14 @@ export const removeSet = withLogging(
 
     // If the session has no sets left at all, clean it up — same reason as
     // removeExerciseFromActiveSession. Outside the transaction so the renumber
-    // is durable even if this cleanup fails.
+    // is durable even if this cleanup fails. deleteMany so two concurrent
+    // removeSets that both empty the session don't race to delete it (the loser
+    // would otherwise hit P2025).
     const remainingInSession = await db.setLog.count({
       where: { sessionId: setLog.sessionId },
     });
     if (remainingInSession === 0) {
-      await db.workoutSession.delete({ where: { id: setLog.sessionId } });
+      await db.workoutSession.deleteMany({ where: { id: setLog.sessionId } });
     }
 
     revalidatePath('/');
@@ -563,7 +630,9 @@ export const completeActiveSession = withLogging('completeActiveSession', async 
   // for a day the user didn't really do).
   const setCount = await db.setLog.count({ where: { sessionId: session.id } });
   if (setCount === 0) {
-    await db.workoutSession.delete({ where: { id: session.id } });
+    // deleteMany: a concurrent removeSet may have already cleaned up the emptied
+    // session, and a no-op beats a P2025 here.
+    await db.workoutSession.deleteMany({ where: { id: session.id } });
     revalidatePath('/');
     return;
   }
@@ -765,7 +834,10 @@ export const createCustomExercise = withLogging(
       equipment,
     } = CreateCustomExerciseSchema.parse(input);
 
-    // Check for collision with the user's existing customs
+    // Check for collision with the user's existing *live* customs. This matches
+    // the partial unique index (ownerId, name) WHERE deletedAt IS NULL, so a
+    // name freed by soft-deleting an old custom recreates cleanly instead of
+    // tripping the constraint.
     const existing = await db.exercise.findFirst({
       where: { ownerId: userId, name, deletedAt: null },
     });
@@ -774,29 +846,38 @@ export const createCustomExercise = withLogging(
     }
 
     // Create exercise + (optionally) per-exercise settings in one transaction so
-    // a settings write failure doesn't leave the exercise without its rest override.
-    await db.$transaction(async (tx) => {
-      const created = await tx.exercise.create({
-        data: {
-          name,
-          module: 'Custom',
-          prescription: prescription || null,
-          primaryMuscles,
-          secondaryMuscles: secondaryMuscles ?? [],
-          videoUrl: videoUrl ?? null,
-          isCustom: true,
-          ownerId: userId,
-          metric: metric ?? 'reps',
-          equipment: equipment ?? [],
-        },
-      });
-
-      if (restTimerSeconds !== undefined) {
-        await tx.exerciseUserSettings.create({
-          data: { userId, exerciseId: created.id, restTimerSeconds },
+    // a settings write failure doesn't leave the exercise without its rest
+    // override. The pre-check above handles the common case; the catch covers the
+    // rare concurrent-create race the partial unique index turns into a P2002.
+    try {
+      await db.$transaction(async (tx) => {
+        const created = await tx.exercise.create({
+          data: {
+            name,
+            module: 'Custom',
+            prescription: prescription || null,
+            primaryMuscles,
+            secondaryMuscles: secondaryMuscles ?? [],
+            videoUrl: videoUrl ?? null,
+            isCustom: true,
+            ownerId: userId,
+            metric: metric ?? 'reps',
+            equipment: equipment ?? [],
+          },
         });
+
+        if (restTimerSeconds !== undefined) {
+          await tx.exerciseUserSettings.create({
+            data: { userId, exerciseId: created.id, restTimerSeconds },
+          });
+        }
+      });
+    } catch (e) {
+      if (isUniqueViolation(e)) {
+        throw new ExpectedError('You already have an exercise with that name');
       }
-    });
+      throw e;
+    }
 
     revalidatePath('/');
   },
@@ -1310,9 +1391,7 @@ export const startFromTemplate = withLogging(
     // see this brand-new in-progress one — the excludeSessionId param guards it,
     // but separating the writes also keeps the read-then-write logic outside the
     // transaction, where the additional queries don't extend transaction time.)
-    const newSession = await db.workoutSession.create({
-      data: { userId, date: new Date() },
-    });
+    const newSession = await createActiveSession({ userId, date: new Date() });
     const hints = new Map(
       usable.map((te) => [
         te.exerciseId,
@@ -1446,16 +1525,28 @@ const ScheduleStyleSchema = z.enum(['sequence', 'weekday']);
 type Tx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 
 /**
- * Pick a name for a new template that won't collide with the user's existing
- * templates. Tries `base` first, then `base (2)`, `base (3)`, etc. We rely on
- * a single SELECT and resolve in JS — fine at the small scales involved.
+ * Pick a name for a template that won't collide with the user's *other*
+ * templates. Tries `base` first, then `base (2)`, `base (3)`, etc. Pass
+ * `excludeTemplateId` when renaming an existing template so its own current name
+ * doesn't read as a collision — otherwise re-submitting the unchanged name would
+ * silently bump it to "Name (2)". We rely on a single SELECT and resolve in JS —
+ * fine at the small scales involved.
  */
-async function uniqueTemplateName(tx: Tx, userId: string, base: string): Promise<string> {
+async function uniqueTemplateName(
+  tx: Tx,
+  userId: string,
+  base: string,
+  excludeTemplateId?: string,
+): Promise<string> {
   const trimmed = base.trim() || 'Day';
   const taken = new Set(
     (
       await tx.workoutTemplate.findMany({
-        where: { userId, name: { startsWith: trimmed } },
+        where: {
+          userId,
+          name: { startsWith: trimmed },
+          ...(excludeTemplateId ? { NOT: { id: excludeTemplateId } } : {}),
+        },
         select: { name: true },
       })
     ).map((t) => t.name),
@@ -1470,20 +1561,21 @@ async function uniqueTemplateName(tx: Tx, userId: string, base: string): Promise
 
 /**
  * Pick a name for an owner-applied custom-exercise suggestion that won't trip
- * the @@unique([ownerId, name]) constraint. Soft-deleted rows still hold their
- * name (the unique index ignores deletedAt), so we check against *all* of the
- * owner's exercises, not just live ones. Tries the bare name first, then
- * "<name> (suggested)", then numbered variants — mirrors uniqueTemplateName.
- * Unlike createCustomExercise (which rejects a duplicate outright), the apply
- * path auto-resolves: the owner is accepting someone else's suggestion and
- * shouldn't have to rename it by hand before it lands.
+ * the partial unique index on (ownerId, name) WHERE deletedAt IS NULL. Only live
+ * customs participate in that index, so we check against the owner's live
+ * exercises — a soft-deleted row holding the same name is free to reuse. Tries
+ * the bare name first, then "<name> (suggested)", then numbered variants —
+ * mirrors uniqueTemplateName. Unlike createCustomExercise (which rejects a
+ * duplicate outright), the apply path auto-resolves: the owner is accepting
+ * someone else's suggestion and shouldn't have to rename it by hand before it
+ * lands.
  */
 async function uniqueOwnedExerciseName(tx: Tx, userId: string, base: string): Promise<string> {
   const trimmed = base.trim();
   const taken = new Set(
     (
       await tx.exercise.findMany({
-        where: { ownerId: userId, name: { startsWith: trimmed } },
+        where: { ownerId: userId, deletedAt: null, name: { startsWith: trimmed } },
         select: { name: true },
       })
     ).map((e) => e.name),
@@ -1679,12 +1771,18 @@ export const updateRoutine = withLogging(
     const routine = await db.routine.findUnique({ where: { userId } });
     if (!routine) throw new ExpectedError('No routine to update');
 
+    // Only an actual mode change clears mode-specific state. A stale client that
+    // re-sends the current scheduleStyle must not nuke the sequence cursor — the
+    // weekday-clear already guarded on change, the cursor reset did not (finding
+    // 8). Gate both on the same flag so they stay symmetric.
+    const styleChanged =
+      data.scheduleStyle !== undefined && data.scheduleStyle !== routine.scheduleStyle;
+
     await db.$transaction(async (tx) => {
-      if (data.scheduleStyle && data.scheduleStyle !== routine.scheduleStyle) {
-        // Mode change: clear weekday pins; cursor reset is handled below in the
-        // routine update. Switching from weekday → sequence keeps days in their
-        // current `position` order; sequence → weekday leaves them unpinned for
-        // the user to assign.
+      if (styleChanged) {
+        // Mode change: clear weekday pins. Switching from weekday → sequence keeps
+        // days in their current `position` order; sequence → weekday leaves them
+        // unpinned for the user to assign.
         await tx.routineDay.updateMany({
           where: { routineId: routine.id },
           data: { weekday: null },
@@ -1695,12 +1793,8 @@ export const updateRoutine = withLogging(
         data: {
           ...(data.name !== undefined ? { name: data.name } : {}),
           ...(data.description !== undefined ? { description: data.description || null } : {}),
-          ...(data.scheduleStyle !== undefined
-            ? {
-                scheduleStyle: data.scheduleStyle,
-                lastCompletedPosition: null,
-              }
-            : {}),
+          ...(data.scheduleStyle !== undefined ? { scheduleStyle: data.scheduleStyle } : {}),
+          ...(styleChanged ? { lastCompletedPosition: null } : {}),
         },
       });
     });
@@ -1906,7 +2000,9 @@ export const updateRoutineDay = withLogging(
 
     await db.$transaction(async (tx) => {
       if (name !== undefined) {
-        const resolved = await uniqueTemplateName(tx, userId, name);
+        // Exclude this day's own template so re-submitting its current name is a
+        // no-op rename, not a bump to "Name (2)".
+        const resolved = await uniqueTemplateName(tx, userId, name, day.templateId);
         await tx.workoutTemplate.update({
           where: { id: day.templateId },
           data: { name: resolved },
@@ -3282,12 +3378,10 @@ export const startFromRoutineDay = withLogging(
     // Create the session, then seed SetLogs from history + planned + prefs.
     // Same shape as startFromTemplate — split the create from the seed so the
     // exclude-self guard works cleanly.
-    const newSession = await db.workoutSession.create({
-      data: {
-        userId,
-        date: new Date(),
-        startedFromRoutineDayId: day.id,
-      },
+    const newSession = await createActiveSession({
+      userId,
+      date: new Date(),
+      startedFromRoutineDayId: day.id,
     });
     const hints = new Map(
       lineup.map((l) => [
@@ -3919,8 +4013,8 @@ export const applyShareCustomExercise = withLogging(
     // version could fail after the create and leave the suggestion open, so a
     // re-apply would duplicate the exercise; here a mid-way failure rolls the
     // whole thing back and the suggestion stays cleanly open. uniqueOwnedExerciseName
-    // resolves any name collision (including against soft-deleted rows) so the
-    // create can't throw a raw P2002.
+    // resolves any collision against the owner's live customs so the create can't
+    // throw a raw P2002 (soft-deleted names don't collide under the partial index).
     await db.$transaction(async (tx) => {
       const created = await tx.exercise.create({
         data: {
@@ -4226,18 +4320,32 @@ export const toggleShareReaction = withLogging(
     });
 
     if (existing) {
-      await db.shareReaction.delete({ where: { id: existing.id } });
+      // Toggle off. deleteMany by the unique tuple so a double-tap (both reads
+      // saw the row) is idempotent instead of a P2025 on the loser.
+      await db.shareReaction.deleteMany({
+        where: { reviewerId: reviewer.id, targetType, targetId, kind },
+      });
     } else {
-      await db.shareReaction.create({
-        data: { shareId: share.id, reviewerId: reviewer.id, targetType, targetId, kind },
+      // Toggle on. createMany + skipDuplicates resolves the find-then-create race
+      // at the DB level (ON CONFLICT DO NOTHING), so a concurrent double-tap-on
+      // can't throw P2002. Notify only when a row was actually inserted, so the
+      // racing tap doesn't double-notify the owner. A reviewer who deliberately
+      // un-reacts then re-reacts will re-notify — reactions are the intentionally
+      // quiet tier and the link is revocable, so we accept that rather than
+      // persisting per-(reviewer, target) notification history across un-reacts.
+      const { count } = await db.shareReaction.createMany({
+        data: [{ shareId: share.id, reviewerId: reviewer.id, targetType, targetId, kind }],
+        skipDuplicates: true,
       });
-      await notifyRoutineOwner(share.routine.userId, {
-        kind: 'share_reaction',
-        title: `${reviewer.displayName} liked an exercise`,
-        url: `/routine/shares/${share.id}`,
-        sourceType: 'share_reaction',
-        sourceId: targetId,
-      });
+      if (count > 0) {
+        await notifyRoutineOwner(share.routine.userId, {
+          kind: 'share_reaction',
+          title: `${reviewer.displayName} liked an exercise`,
+          url: `/routine/shares/${share.id}`,
+          sourceType: 'share_reaction',
+          sourceId: targetId,
+        });
+      }
     }
 
     revalidatePath(`/share/${token}`);

@@ -10,12 +10,35 @@ After editing `schema.prisma`, regenerate the init (both `prisma migrate` comman
 
 ```bash
 rm -rf prisma/migrations/*_init
-npx prisma migrate reset --force          # drops DB, runs migrations (none), runs seed
-npx prisma migrate dev --name init        # creates fresh init from current schema
-npm run db:seed                            # re-seed (reset ran seed against an empty schema, so re-run after init)
+npx prisma migrate reset --force          # drops DB + migration history
+npx prisma migrate dev --name init        # generates a fresh init from the schema and applies it
+
+# MANUAL STEP — re-apply the two partial unique indexes Prisma can't express (see
+# "Raw partial indexes" below). Hand-edit the new prisma/migrations/*_init/migration.sql:
+#   1. append `WHERE "deletedAt" IS NULL` to the Exercise_ownerId_name_key index
+#   2. add the WorkoutSession_userId_active_key partial unique index
+npx prisma migrate reset --force          # re-applies the hand-edited migration, runs seed
+npm run db:seed                            # idempotent belt (the reset above already seeds)
 ```
 
 `migration_lock.toml` stays put across resets.
+
+**Don't skip the manual step.** `migrate dev --name init` regenerates `migration.sql` purely from the schema, which can't carry the `WHERE` clauses — so a regen that omits the hand-edit silently downgrades both indexes to full (or drops the active-session one entirely), reviving the delete-then-recreate crash and the two-tabs double-active-session bug. Diff the generated `migration.sql` against the partial-index block below before resetting.
+
+## Raw partial indexes
+
+Two unique constraints are **partial** — they only apply to a subset of rows via a `WHERE` clause. Prisma's `@@unique` can't express `WHERE`, so they live as hand-edited raw SQL in the init migration (the schema keeps a comment at each site pointing here). After any schema regen, re-apply them by hand (see the recipe above):
+
+```sql
+-- Exercise: only LIVE customs are unique per owner, so a soft-deleted custom
+-- doesn't block recreating a live one with the same name.
+CREATE UNIQUE INDEX "Exercise_ownerId_name_key" ON "Exercise"("ownerId", "name") WHERE "deletedAt" IS NULL;
+
+-- WorkoutSession: at most one in-progress session per user.
+CREATE UNIQUE INDEX "WorkoutSession_userId_active_key" ON "WorkoutSession"("userId") WHERE "completedAt" IS NULL;
+```
+
+Both are caught in `lib/actions.ts` via `isUniqueViolation` (P2002): the active-session create paths surface the friendly "already have a workout in progress" error (or, in `getOrCreateActiveSession`, adopt the winner's session); `createCustomExercise` surfaces the duplicate-name error. They're a backstop for races the app-level pre-checks can't close (two tabs), not the primary guard.
 
 The seed (`seed.ts`) is idempotent — re-running it is safe and necessary after a reset.
 
@@ -31,6 +54,8 @@ The structural split (`ownerId=null` / `userId=null` vs. the user's id) is in [`
 ## Soft-delete
 
 `Exercise.deletedAt` is set when a user removes a custom exercise; the row stays so referencing `SetLog`s aren't orphaned. `SetLog.exercise` uses `Restrict` (not `Cascade`) — a hard delete would be blocked at the DB level.
+
+The `(ownerId, name)` unique index is **partial** — `WHERE "deletedAt" IS NULL` (see "Raw partial indexes") — so only live customs collide. Deleting a custom and recreating one with the same name works; the old soft-deleted row keeps its name in history.
 
 If you write a query that lists exercises, **include `deletedAt: null` in the where clause**. A soft-deleted exercise reappearing in the picker is a bug.
 
@@ -59,20 +84,21 @@ To run the seed against a running compose stack, use `docker compose exec app no
 
 ## Indexes worth knowing about
 
-- `WorkoutSession`: indexed on `(userId, date)` and `(userId, completedAt)`. The first powers history queries; the second powers the "find active session" lookup.
-- `SetLog`: indexed on `(sessionId, position)` for ordered fetches when rendering the active session.
-- `Exercise`: indexed on `ownerId` and `module`. The `(ownerId, name)` unique constraint enforces "users can't have two customs with the same name."
+- `WorkoutSession`: indexed on `(userId, date)` and `(userId, completedAt)`, plus the `(userId) WHERE "completedAt" IS NULL` partial unique (see "Raw partial indexes"). The first powers history queries; the second/third power the "find active session" lookup.
+- `SetLog`: indexed on `(sessionId, position)` for ordered fetches when rendering the active session, and a `(sessionId, exerciseId, setNumber)` unique that enforces contiguous set numbering.
+- `Exercise`: indexed on `ownerId` and `module`. The `(ownerId, name)` unique is **partial** (`WHERE "deletedAt" IS NULL`) — only live customs collide.
 - `TemplateExercise`: indexed on `(templateId, position)` and on `poolId`. `TemplatePool`: indexed on `templateId`.
+- FK indexes for cascade deletes / anti-joins: `RoutineDay.templateId`, `ShareComment.reviewerId`, `ShareSuggestion.reviewerId`, `Account.userId`. `ShareReaction.reviewerId` is intentionally *not* separately indexed — it's the leftmost column of the `(reviewerId, targetType, targetId, kind)` unique, which already serves reviewer-scoped lookups.
 
 If you add a query that doesn't fit one of these indexes and runs frequently (`getCoverageData` etc), check the slow-query log (anything > 100ms hits stderr) before adding a new index.
 
 ## Schema invariants the app relies on
 
-- At most one `WorkoutSession` per user with `completedAt: null`. App-enforced — see `docs/decisions.md` for why not DB-enforced.
+- At most one `WorkoutSession` per user with `completedAt: null`. DB-enforced by the `WorkoutSession_userId_active_key` partial unique index (see "Raw partial indexes"); the find-then-create paths catch the violation as a friendly error and `findActiveSession` still orders by date desc. This reverses the original app-only decision — see `docs/decisions.md`.
 - Every `SetLog` for the same exercise within a session shares the same `position` value. `addSet` inherits position from the existing setLogs.
-- `setNumber` within `(sessionId, exerciseId)` is contiguous starting from 1. `removeSet` renumbers atomically; `addSet` always uses `lastSet.setNumber + 1`.
+- `setNumber` within `(sessionId, exerciseId)` is contiguous starting from 1, with a unique index on `(sessionId, exerciseId, setNumber)` backstopping it. `removeSet` renumbers atomically (only ever shifting numbers downward in ascending order, which never transiently collides); `addSet` uses `lastSet.setNumber + 1` and retries against the new max if a concurrent double-fire took that number (P2002).
 - `Exercise.primaryMuscles` has at least one entry. Validated in `createCustomExercise` Zod schema.
-- `SetLog.weight` and `SetLog.bandId` are mutually exclusive in normal use. The exercise's `loadType` dictates which is meaningful — `'weight'` populates `weight`, `'band'` populates `bandId`, `'none'` leaves both null. `updateSet` clears `weight` whenever `bandId` is being set.
+- `SetLog.weight` and `SetLog.bandId` are mutually exclusive in normal use. The exercise's `loadType` dictates which is meaningful — `'weight'` populates `weight`, `'band'` populates `bandId`, `'none'` leaves both null. `updateSet` enforces this both ways: setting a real `bandId` clears `weight`, and setting a real `weight` clears `bandId` (band wins if a stale client sends both).
 - `Band.position` is contiguous starting from 0 within a user. `deleteBand` compacts after a delete so the picker doesn't render with gaps.
 - **Every `RoutineDay` points at a template that the user owns** (`WorkoutTemplate.userId = the routine's user`, not a built-in). `createRoutineFromDraft` clones built-ins into user-owned copies before linking, and `swapInRoutineTemplate`/the share-apply actions mutate the day's template directly on the strength of this invariant. If you ever build a path that points a `RoutineDay` at a built-in template, the apply paths in `lib/actions.ts → applyShareSwap` and friends will corrupt the shared built-in for every user.
 - **A `TemplatePool`'s members occupy a contiguous run of `TemplateExercise.position` values.** App-enforced via `gatherPoolMembers` + `normalizeTemplatePositions` in `lib/actions.ts`, called by every template-mutating action. Also: `TemplatePool.pickCount` is always in `1..members.length` — `removeExerciseFromRoutineDay` clamps it (and dissolves a pool that drops below 2 members), `updateTemplatePool`/`createTemplatePool` clamp on write, and `removeExerciseFromPool` (ungroup one member, keeping it in the day) likewise dissolves a pool that would fall below 2. Contiguity is for display/seed-order; `startFromRoutineDay` filters by `poolId` so a non-contiguous state degrades cosmetically, not functionally. The share-apply remove/insert paths don't re-normalize — acceptable for the niche "share suggestion on a pooled day" case; the next pool-aware action self-heals it.
@@ -82,7 +108,7 @@ If you add an action that writes `SetLog` or `WorkoutSession`, check you preserv
 
 ## Things you might want to do that would be wrong
 
-- **Adding a unique partial index on `(userId)` where `completedAt is null`.** Tempting but Prisma's support is awkward and the app-level check is sufficient. See `docs/decisions.md`.
+- **Dropping the `WorkoutSession_userId_active_key` partial unique index and trusting the app check alone.** It used to be app-only; it's now DB-enforced (see "Raw partial indexes" and the reversal ADR in `docs/decisions.md`). The `findFirst`-ordered-by-date check only papers over duplicates after the fact — it doesn't stop two tabs from creating them. Keep both.
 - **Adding `dayFocus` or `type` to `WorkoutSession`.** Sessions are records, not plans. The plan lives on the routine via `RoutineDay`; `WorkoutSession.startedFromRoutineDayId` is the only acknowledgment a session has of any plan, and even that's nullable. See root CLAUDE.md.
 - **Hard-deleting `Exercise` rows.** Use soft-delete. The Restrict on `SetLog.exercise` will block hard-deletes anyway — that's by design.
 - **Changing muscle IDs from strings to an enum.** They're user-extensible (custom exercises pick from `MUSCLE_GROUPS` but the schema doesn't constrain) and the spaces/casing are deliberate. See `docs/decisions.md`.

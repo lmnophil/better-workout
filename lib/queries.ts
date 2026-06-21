@@ -421,15 +421,18 @@ export async function getUserBands(userId: string) {
     select: { id: true, name: true, position: true },
   });
   if (existing.length > 0) return existing;
-  // First touch — seed the default set. createMany is safe against the
-  // unique(userId,name) and unique(userId,position) constraints because we
-  // know there are no existing rows.
+  // First touch — seed the default set. skipDuplicates makes the insert an
+  // ON CONFLICT DO NOTHING, so two concurrent first-touch renders (this seeds
+  // during a Server Component render) can't both insert and crash the loser with
+  // a P2002 on unique(userId,name)/unique(userId,position) — the second just
+  // inserts nothing and both refetch the same three rows below.
   await db.band.createMany({
     data: [
       { userId, name: 'Light', position: 0 },
       { userId, name: 'Medium', position: 1 },
       { userId, name: 'Heavy', position: 2 },
     ],
+    skipDuplicates: true,
   });
   return db.band.findMany({
     where: { userId },

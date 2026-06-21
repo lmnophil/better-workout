@@ -144,7 +144,7 @@ A user's training session — a date plus a `completedAt`. **Sessions are record
 Key behaviors:
 
 - **`completedAt` is the lifecycle bit.** Null means in-progress (active). Set means done.
-- **At most one active session per user.** App-enforced, not DB-enforced — see [`docs/decisions.md`](./decisions.md) for why.
+- **At most one active session per user.** DB-enforced by a partial unique index (`(userId) WHERE "completedAt" IS NULL`); the find-then-create paths catch the violation as the friendly "already have a workout in progress" error. `findActiveSession()` still orders by date desc so reads stay deterministic. See [`docs/decisions.md`](./decisions.md).
 - **Auto-cleanup when emptied.** If `removeSet` or `removeExerciseFromActiveSession` empties the session, the session itself gets deleted. Avoids the "phantom in-progress workout" UX.
 
 ### `SetLog`
@@ -153,9 +153,9 @@ The log entry for one set of one exercise inside one session. Most-frequently-wr
 
 Key behaviors:
 
-- **Two ordering fields with different scopes.** `setNumber` is contiguous from 1 within `(sessionId, exerciseId)` — used for "set 1, set 2, set 3 of the deadlift." `position` is the order of the _exercise_ within the session, shared by every SetLog of that exercise. Don't mix them.
+- **Two ordering fields with different scopes.** `setNumber` is contiguous from 1 within `(sessionId, exerciseId)` — used for "set 1, set 2, set 3 of the deadlift" — and a unique index on `(sessionId, exerciseId, setNumber)` backstops it, so a double-fire `addSet` retries against the new max instead of minting a duplicate. `position` is the order of the _exercise_ within the session, shared by every SetLog of that exercise. Don't mix them.
 - **`Restrict` on the Exercise relation, not Cascade.** A user can soft-delete a custom exercise even when historical SetLogs reference it; the soft-delete preserves history. A literal hard-delete would be blocked at the DB level.
-- **`weight` and `bandId` are mutually exclusive.** The exercise's `loadType` dictates which is meaningful: `'weight'` → numeric weight, `'band'` → bandId, `'none'` → both null. `updateSet` clears `weight` when `bandId` is set so the two never both populate. `SetLog.bandId` is `SetNull` on Band delete so history survives.
+- **`weight` and `bandId` are mutually exclusive.** The exercise's `loadType` dictates which is meaningful: `'weight'` → numeric weight, `'band'` → bandId, `'none'` → both null. `updateSet` enforces the exclusion both ways — setting a real band clears `weight`, setting a real weight clears `bandId` — so the two never both populate. `SetLog.bandId` is `SetNull` on Band delete so history survives.
 - **`notes` is per-set freeform text.** Surfaced in the "last time" reference next session. Empty stored as null.
 
 ## The customization layer
@@ -302,7 +302,7 @@ A few patterns show up across multiple models. Recognizing them on sight saves t
 
 **`muscleId` is a string, not a foreign key.** Muscles are application data (`lib/exercises-data.ts`), not a database table. `Exercise.primaryMuscles[]`, `Exercise.secondaryMuscles[]`, and `UserVolumeTarget.muscleId` all use string keys that the app code knows how to interpret. Custom exercises can in principle reference any string — the picker UI constrains the choices, but the schema doesn't.
 
-**The "active session" convention.** The most user-visible invariant: at most one `WorkoutSession` per user with `completedAt: null` at any time. App-enforced via `findActiveSession()` ordered by date desc. See [`docs/decisions.md`](./decisions.md) for why we don't enforce it via a partial unique index.
+**The "active session" convention.** The most user-visible invariant: at most one `WorkoutSession` per user with `completedAt: null` at any time. Enforced by a partial unique index (`(userId) WHERE "completedAt" IS NULL`, raw SQL in the init migration) _and_ by `findActiveSession()` ordered by date desc — the index stops two tabs creating duplicates, the ordering keeps reads deterministic if a legacy duplicate predates the index. See [`docs/decisions.md`](./decisions.md) for the reversal of the original app-only decision.
 
 ## When this doc goes stale
 

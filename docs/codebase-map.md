@@ -29,14 +29,14 @@ Self-hosted workout tracker. Next.js 15 App Router + React 19 + TypeScript stric
   - `ownerId` (nullable FK→User Cascade) + `isCustom`: built-ins are `ownerId=null, isCustom=false`; user customs are `ownerId=userId, isCustom=true`.
   - **Soft-delete** via `deletedAt` (nullable). Used for user customs so existing SetLog history isn't orphaned.
   - `loadType` decides what the set row renders for load: `'weight'` shows the numeric stepper (default), `'band'` swaps to a chip picker of the user's Bands, `'none'` drops the load column entirely. Drives SMR / mobility / banded activation work logging the right thing.
-  - Indices: (ownerId), (module). Unique (ownerId, name) — Postgres NULL semantics let two `null` owners coexist with same name.
+  - Indices: (ownerId), (module). **Partial** unique (ownerId, name) `WHERE "deletedAt" IS NULL` (raw SQL in the init migration) — only live customs collide, so a deleted custom's name is free to reuse; Postgres NULL semantics also let two `null` owners coexist with the same name.
 - **ExerciseUserSettings** — per-user per-exercise overrides for `restTimerSeconds` and `weightIncrement`. Unique (userId, exerciseId), both Cascade.
 
 ### Sessions and sets
 
-- **WorkoutSession** — `userId` Cascade, `date`, `completedAt` (nullable). Optional `startedFromRoutineDayId` (FK→RoutineDay, **SetNull** so deleting the day doesn't lose history). Indices on (userId, date), (userId, completedAt), (startedFromRoutineDayId).
-  - **Invariant: at most one active (`completedAt = null`) session per user.** Enforced by app, not DB.
-- **SetLog** — `sessionId` Cascade, `exerciseId` **Restrict** (deliberate — protects history when an exercise soft-deletes), `setNumber` (contiguous per exercise within session), `position` (orders exercises within session), `reps`, `weight`, `seconds`, `bandId` (nullable FK→Band, SetNull), `notes`.
+- **WorkoutSession** — `userId` Cascade, `date`, `completedAt` (nullable). Optional `startedFromRoutineDayId` (FK→RoutineDay, **SetNull** so deleting the day doesn't lose history). Indices on (userId, date), (userId, completedAt), (startedFromRoutineDayId), plus a **partial unique** `(userId) WHERE "completedAt" IS NULL` (raw SQL in the init migration).
+  - **Invariant: at most one active (`completedAt = null`) session per user.** DB-enforced by that partial unique index; the find-then-create paths catch the violation as a friendly error (and `findActiveSession` still orders by date desc).
+- **SetLog** — `sessionId` Cascade, `exerciseId` **Restrict** (deliberate — protects history when an exercise soft-deletes), `setNumber` (contiguous per exercise within session; unique on `(sessionId, exerciseId, setNumber)` — `addSet` retries on the rare double-fire collision), `position` (orders exercises within session), `reps`, `weight`, `seconds`, `bandId` (nullable FK→Band, SetNull), `notes`.
   - `weight` and `bandId` are mutually exclusive in normal use, gated by the source exercise's `loadType`. `updateSet` clears `weight` when a `bandId` is set so the two never both populate.
 
 ### Volume and prefs
@@ -321,7 +321,7 @@ Zod schemas live inline in `lib/actions.ts` next to the action that uses them.
 ## 14. Surprises worth flagging
 
 1. **JWT sessions, 1-year lifetime.** Appropriate for a fitness tracker — see [decisions.md](decisions.md). Don't shorten without a reason.
-2. **At-most-one active session per user is app-enforced, not DB-enforced.** Pragma. Don't add a partial unique index unless there's a reason.
+2. **At-most-one active session per user is now DB-enforced** by a partial unique index `(userId) WHERE "completedAt" IS NULL` (raw SQL — reverses the original app-only call; see [decisions.md](decisions.md)). The app pre-check and `findActiveSession` date-ordering stay as the friendly-message path and deterministic read.
 3. **`SetLog.exerciseId` uses `Restrict`, not `Cascade`.** Deliberate — soft-deleting an Exercise must not orphan its history.
 4. **Muscle IDs are strings, not an enum, no FK.** Lets custom exercises reference anything; coverage fails open on unknowns.
 5. **Templates in a routine don't cascade with the routine.** The template can outlive a routine day reference.

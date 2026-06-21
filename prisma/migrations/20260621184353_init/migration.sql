@@ -330,6 +330,9 @@ CREATE TABLE "Notification" (
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
+CREATE INDEX "Account_userId_idx" ON "Account"("userId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Account_provider_providerAccountId_key" ON "Account"("provider", "providerAccountId");
 
 -- CreateIndex
@@ -348,7 +351,11 @@ CREATE INDEX "Exercise_ownerId_idx" ON "Exercise"("ownerId");
 CREATE INDEX "Exercise_module_idx" ON "Exercise"("module");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Exercise_ownerId_name_key" ON "Exercise"("ownerId", "name");
+-- PARTIAL unique index, hand-edited after generation — Prisma can't express the
+-- WHERE clause (see prisma/CLAUDE.md → "Raw partial indexes"). Excluding
+-- soft-deleted rows (deletedAt set) lets a user delete a custom exercise and
+-- recreate one with the same name; only live customs must be unique per owner.
+CREATE UNIQUE INDEX "Exercise_ownerId_name_key" ON "Exercise"("ownerId", "name") WHERE "deletedAt" IS NULL;
 
 -- CreateIndex
 CREATE INDEX "ExerciseUserSettings_userId_idx" ON "ExerciseUserSettings"("userId");
@@ -364,6 +371,14 @@ CREATE INDEX "WorkoutSession_userId_completedAt_idx" ON "WorkoutSession"("userId
 
 -- CreateIndex
 CREATE INDEX "WorkoutSession_startedFromRoutineDayId_idx" ON "WorkoutSession"("startedFromRoutineDayId");
+
+-- CreateIndex
+-- PARTIAL unique index, hand-edited after generation — Prisma can't express the
+-- WHERE clause (see prisma/CLAUDE.md → "Raw partial indexes"). Enforces the
+-- "at most one in-progress session per user" invariant at the DB level: only one
+-- row per userId may have completedAt IS NULL. The find-then-create paths in
+-- lib/actions.ts catch its violation as a friendly error.
+CREATE UNIQUE INDEX "WorkoutSession_userId_active_key" ON "WorkoutSession"("userId") WHERE "completedAt" IS NULL;
 
 -- CreateIndex
 CREATE INDEX "UserVolumeTarget_userId_idx" ON "UserVolumeTarget"("userId");
@@ -411,6 +426,9 @@ CREATE INDEX "SetLog_exerciseId_idx" ON "SetLog"("exerciseId");
 CREATE INDEX "SetLog_bandId_idx" ON "SetLog"("bandId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "SetLog_sessionId_exerciseId_setNumber_key" ON "SetLog"("sessionId", "exerciseId", "setNumber");
+
+-- CreateIndex
 CREATE INDEX "Band_userId_idx" ON "Band"("userId");
 
 -- CreateIndex
@@ -424,6 +442,9 @@ CREATE UNIQUE INDEX "Routine_userId_key" ON "Routine"("userId");
 
 -- CreateIndex
 CREATE INDEX "RoutineDay_routineId_idx" ON "RoutineDay"("routineId");
+
+-- CreateIndex
+CREATE INDEX "RoutineDay_templateId_idx" ON "RoutineDay"("templateId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "RoutineDay_routineId_position_key" ON "RoutineDay"("routineId", "position");
@@ -453,10 +474,16 @@ CREATE UNIQUE INDEX "ShareReviewer_shareId_reviewerKey_key" ON "ShareReviewer"("
 CREATE INDEX "ShareComment_shareId_targetType_targetId_idx" ON "ShareComment"("shareId", "targetType", "targetId");
 
 -- CreateIndex
+CREATE INDEX "ShareComment_reviewerId_idx" ON "ShareComment"("reviewerId");
+
+-- CreateIndex
 CREATE INDEX "ShareSuggestion_shareId_state_idx" ON "ShareSuggestion"("shareId", "state");
 
 -- CreateIndex
 CREATE INDEX "ShareSuggestion_shareId_targetType_targetId_idx" ON "ShareSuggestion"("shareId", "targetType", "targetId");
+
+-- CreateIndex
+CREATE INDEX "ShareSuggestion_reviewerId_idx" ON "ShareSuggestion"("reviewerId");
 
 -- CreateIndex
 CREATE INDEX "ShareReaction_shareId_targetType_targetId_idx" ON "ShareReaction"("shareId", "targetType", "targetId");
