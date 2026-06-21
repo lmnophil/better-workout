@@ -14,6 +14,18 @@ export const metadata = {
   title: 'Sign in — Workout Tracker',
 };
 
+// Build a `/signin?error=…` URL that carries the original `callbackUrl` forward,
+// so a failed attempt (bad email, rate limit, OAuth error) retries toward the
+// destination the user was bounced from instead of dumping them on `/`. Omit the
+// param when it's just the default root — no point round-tripping `callbackUrl=/`.
+function signinErrorUrl(code: string, callbackUrl: string): string {
+  const params = new URLSearchParams({ error: code });
+  if (callbackUrl && callbackUrl !== '/') {
+    params.set('callbackUrl', callbackUrl);
+  }
+  return `/signin?${params.toString()}`;
+}
+
 export default function SignInPage({
   searchParams,
 }: {
@@ -42,7 +54,7 @@ async function SignInForm({
     } catch (err) {
       // Auth.js throws a redirect on success — re-throw so Next.js handles it
       if (err instanceof AuthError) {
-        redirect(`/signin?error=${err.type}`);
+        redirect(signinErrorUrl(err.type, callbackUrl));
       }
       throw err;
     }
@@ -52,7 +64,7 @@ async function SignInForm({
     'use server';
     const email = formData.get('email');
     if (typeof email !== 'string' || !email.includes('@')) {
-      redirect('/signin?error=InvalidEmail');
+      redirect(signinErrorUrl('InvalidEmail', callbackUrl));
     }
 
     // Rate limit: gate magic-link sends so a bad actor can't spam Resend or
@@ -63,7 +75,7 @@ async function SignInForm({
     const emailCheck = magicLinkPerEmail.check(`magiclink:email:${email.toLowerCase()}`);
 
     if (!ipCheck.allowed || !emailCheck.allowed) {
-      redirect('/signin?error=RateLimited');
+      redirect(signinErrorUrl('RateLimited', callbackUrl));
     }
 
     try {
@@ -73,7 +85,7 @@ async function SignInForm({
       });
     } catch (err) {
       if (err instanceof AuthError) {
-        redirect(`/signin?error=${err.type}`);
+        redirect(signinErrorUrl(err.type, callbackUrl));
       }
       throw err;
     }

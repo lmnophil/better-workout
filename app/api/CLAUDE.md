@@ -22,7 +22,12 @@ Currently excluded:
 - `api/log/*` — error-reporting endpoints must work for unauthenticated clients
 - Static assets, manifest, service worker
 
-There's also one **public app page** that bypasses auth — `/share/[token]`. It's handled via `PUBLIC_PATHS` inside `middleware.ts` (the middleware still runs so `req.auth` is populated for the owner previewing their own link, but unauthenticated visitors aren't redirected). The token plus a per-share reviewer cookie are the trust boundary. The public _server actions_ that mutate share state (`registerShareReviewer`, `postShareComment`, `postShareSuggestion`, `toggleShareReaction`) are the only mutations in `lib/actions.ts` that skip `requireUser()`. See [docs/decisions.md](../../docs/decisions.md) (`Routine sharing — anonymous public reviewers`). Don't model new public app routes on this casually — the use case is specifically "anonymous reviewer with link from owner."
+There are also **public app pages** that bypass auth, handled via `PUBLIC_PATHS` inside `middleware.ts` (the middleware still runs so `req.auth` is populated, but unauthenticated visitors aren't redirected):
+
+- `/share/[token]` — the anonymous-reviewer route. The token plus a per-share reviewer cookie are the trust boundary. The public _server actions_ that mutate share state (`registerShareReviewer`, `postShareComment`, `postShareSuggestion`, `toggleShareReaction`) are the only mutations in `lib/actions.ts` that skip `requireUser()`. Don't model new public app routes on this casually — the use case is specifically "anonymous reviewer with link from owner."
+- `/offline` — the PWA offline fallback. Must be public because the service worker precaches it at install time, and a signed-out install would otherwise capture the sign-in 302's HTML as the offline page. See [docs/decisions.md](../../docs/decisions.md) (`Offline fallback is precached and public`).
+
+See [docs/decisions.md](../../docs/decisions.md) (`Routine sharing — anonymous public reviewers`).
 
 **If you add a public-or-system endpoint, update the matcher in `middleware.ts`.** Forgetting this means Docker's healthcheck (or Prometheus, or the client-error sink) gets redirected to `/signin`, returns a 307 instead of a 200, and the container is restarted in a loop. Verify any new public endpoint by hitting it with `curl -i` and confirming the status code, not just the body.
 

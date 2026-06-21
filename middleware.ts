@@ -10,11 +10,15 @@ import authConfig from './auth.config';
 const { auth } = NextAuth(authConfig);
 
 // Public app paths — the middleware runs (so `req.auth` is populated for any
-// signed-in viewer), but unauthenticated users are not redirected away. The
-// share route is the only authenticated-or-anonymous app route in the app;
-// access control inside lives on the per-share token + reviewer cookie. See
-// docs/decisions.md (`Routine sharing — anonymous public reviewers`).
-const PUBLIC_PATHS = ['/signin', '/verify-request', '/share/'];
+// signed-in viewer), but unauthenticated users are not redirected away.
+//
+// `/share/` is the anonymous-reviewer route; access control inside lives on the
+// per-share token + reviewer cookie (see docs/decisions.md, `Routine sharing —
+// anonymous public reviewers`). `/offline` is the PWA fallback the service
+// worker precaches at install time — it must resolve without auth, or a
+// signed-out install would precache the sign-in 302's HTML as the offline page
+// (see docs/decisions.md, `Offline fallback is precached and public`).
+const PUBLIC_PATHS = ['/signin', '/verify-request', '/share/', '/offline'];
 
 export default auth((req) => {
   const { nextUrl } = req;
@@ -23,9 +27,13 @@ export default auth((req) => {
 
   if (!isLoggedIn && !isPublicPath) {
     const url = new URL('/signin', nextUrl);
-    // Preserve where the user was trying to go so we can return them after login
-    if (nextUrl.pathname !== '/') {
-      url.searchParams.set('callbackUrl', nextUrl.pathname);
+    // Preserve where the user was trying to go so we can return them after login,
+    // including the query string — a deep link like /routine?tab=x should round-trip
+    // intact. `pathname + search` stays a same-origin relative path (no host), so
+    // it can't be turned into an open redirect.
+    const target = nextUrl.pathname + nextUrl.search;
+    if (target !== '/') {
+      url.searchParams.set('callbackUrl', target);
     }
     return Response.redirect(url);
   }

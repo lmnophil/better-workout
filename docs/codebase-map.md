@@ -146,19 +146,19 @@ For canonical signatures, read `lib/queries.ts` directly — they're terse and t
 
 ### `app/share/[token]/` — public reviewer surface (no auth)
 
-- `page.tsx` — anonymous reviewer view of a shared routine. The only public app route besides `/signin` and `/verify-request`; bypassed in middleware via `PUBLIC_PATHS`. See [decisions.md](decisions.md) (`Routine sharing — anonymous public reviewers`).
+- `page.tsx` — anonymous reviewer view of a shared routine. The only _interactive_ public app route besides `/signin`, `/verify-request`, and the static `/offline` fallback; bypassed in middleware via `PUBLIC_PATHS`. See [decisions.md](decisions.md) (`Routine sharing — anonymous public reviewers`).
 
 ### `app/api/` — see [`app/api/CLAUDE.md`](../app/api/CLAUDE.md)
 
 - `auth/[...nextauth]/route.ts` — Auth.js handler. Don't add things here.
-- `auth/recover/route.ts` — clears the stale session-token cookie and 302s to `/signin`. See [decisions.md](decisions.md) (`Stale-cookie recovery`).
+- `auth/recover/route.ts` — expires every stale session-token cookie variant the request carries (base, `__Secure-` prefixed, chunked) with Auth.js-matching options and 302s to `/signin`. See [decisions.md](decisions.md) (`Stale-cookie recovery`).
 - `healthz/route.ts` — `SELECT 1` check; 200 or 503. Used by Docker HEALTHCHECK.
 - `metrics/route.ts` — Prometheus scrape; gated by `METRICS_TOKEN` Bearer header.
 - `log/client-error/route.ts` — browser error sink; rate-limited per IP.
 
 ### Service worker / PWA
 
-- `app/manifest.ts`, `app/sw.ts` (Serwist-compiled), `app/offline/page.tsx` — offline fallback. `app/offline/auto-reload.tsx` is a client island that reloads the user's intended destination once `navigator` reports `online` again.
+- `app/manifest.ts`, `app/sw.ts` (Serwist-compiled), `app/offline/page.tsx` — offline fallback. `app/offline/auto-reload.tsx` is a client island that reloads the user's intended destination once `navigator` reports `online` again. The fallback only works because `/offline` is force-precached (`additionalPrecacheEntries` in `next.config.mjs`) and made public (`PUBLIC_PATHS`) — see [decisions.md](decisions.md) (`Offline fallback is precached and public`).
 - **SW message protocol.** The SW handles two client-sent messages: `{ type: 'SKIP_WAITING' }` (drives the prompt-and-reload update flow — see [decisions.md](decisions.md) `Service-worker updates use prompt-and-reload`) and `{ type: 'CLEAR_USER_CACHES' }` (drops caches matching `pages|rsc|apis|cross-origin|others` on signout; static-asset caches stay). Mounted client components: `components/ui/sw-update-prompt.tsx` (root-layout-mounted, listens for `updatefound`) and `components/auth/sw-signout-cleanup.tsx` (signin-page-mounted when `?cleanup=1`, posted by both the signout button and `/api/auth/recover`).
 - **Touch input zoom.** Pinch-zoom is intentionally enabled at the viewport level; iOS Safari's focus-zoom is suppressed by a 16px floor on form inputs under `@media (pointer: coarse)` in `app/globals.css`. See [decisions.md](decisions.md) `Touch inputs use a 16px font-size floor`.
 
@@ -250,6 +250,8 @@ Runs `SELECT 1`. Returns 200 or 503. Docker HEALTHCHECK polls every 30s; 3 conse
 - `app/global-error.tsx` — root layout failures.
 
 All boundaries call `useReportError(error, source)` to ship to `/api/log/client-error`. No others by design — boundaries that just `console.error` are not added.
+
+Not an error boundary, but the same neighborhood: `app/not-found.tsx` is the root 404 (unmatched URLs and uncaught `notFound()` calls), styled to match. `app/share/[token]/not-found.tsx` overrides it for revoked/bogus share tokens.
 
 ### `withLogging` (`lib/observability.ts`)
 
