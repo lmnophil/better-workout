@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { X, Search, Trash2, Check, ChevronDown } from 'lucide-react';
 import { VideoLink } from '@/components/ui/video-link';
 import { relativeDay } from '@/lib/utils';
+import type { ActionResult } from '@/lib/action-result';
 import type { ExerciseUsageStat } from '@/lib/queries';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
 import { MuscleChips } from '@/components/ui/muscle-chips';
@@ -81,14 +82,18 @@ type Props = {
   // pool button appears there. Shown only when 2+ exercises are selected.
   onPickAsPool?: (exerciseIds: string[]) => void;
   onClose: () => void;
-  onCreateCustom: (
+  // Returns the action result so the custom-add form can show expected
+  // failures (duplicate name) inline instead of silently dropping them.
+  // Optional: surfaces that don't support creating customs (e.g. the
+  // timeline's swap picker) omit it and the "Add custom" tab never renders.
+  onCreateCustom?: (
     name: string,
     primaryMuscles: string[],
     secondaryMuscles: string[],
     prescription: string | undefined,
     videoUrl: string | undefined,
     restTimerSeconds: number | undefined,
-  ) => void;
+  ) => Promise<ActionResult<unknown>>;
   onDeleteCustom: (exerciseId: string) => void;
   // When set, the picker is in swap mode: single-select with instant commit,
   // a different title, and the "Add custom" tab is hidden (creating a new
@@ -156,10 +161,11 @@ export function ExercisePicker({
           </button>
         </div>
 
-        {/* Tabs are only meaningful in add mode. During a swap the user is
-            replacing a known slot; creating a brand-new custom mid-swap is a
-            workflow we deliberately don't support — finish the swap first. */}
-        {!isSwap && (
+        {/* Tabs are only meaningful in add mode with a create handler. During
+            a swap the user is replacing a known slot; creating a brand-new
+            custom mid-swap is a workflow we deliberately don't support —
+            finish the swap first. */}
+        {!isSwap && onCreateCustom && (
           <div className="flex border-b border-ink-800 px-5">
             <TabButton active={tab === 'browse'} onClick={() => setTab('browse')}>
               Browse
@@ -170,7 +176,7 @@ export function ExercisePicker({
           </div>
         )}
 
-        {isSwap || tab === 'browse' ? (
+        {isSwap || tab === 'browse' || !onCreateCustom ? (
           <BrowseTab
             availableExercises={availableExercises}
             excludeIds={excludeIds}
@@ -208,9 +214,24 @@ export function ExercisePicker({
         ) : (
           <div className="flex-1 overflow-y-auto">
             <CustomTab
-              onCreate={(name, primary, secondary, prescription, videoUrl, restTimerSeconds) => {
-                onCreateCustom(name, primary, secondary, prescription, videoUrl, restTimerSeconds);
-                setTab('browse');
+              onCreate={async (
+                name,
+                primary,
+                secondary,
+                prescription,
+                videoUrl,
+                restTimerSeconds,
+              ) => {
+                const res = await onCreateCustom(
+                  name,
+                  primary,
+                  secondary,
+                  prescription,
+                  videoUrl,
+                  restTimerSeconds,
+                );
+                if (res.ok) setTab('browse');
+                return res;
               }}
             />
           </div>
@@ -305,9 +326,7 @@ function BrowseTab({
     setRegionIds((prev) => prev.filter((r) => r !== 'full'));
   }
   function toggleEquipment(id: string) {
-    setEquipmentIds((prev) =>
-      prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id],
-    );
+    setEquipmentIds((prev) => (prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]));
   }
   function toggleModule(id: string) {
     setModuleIds((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
@@ -566,9 +585,7 @@ function BrowseTab({
               className="text-[11px] text-ink-500 hover:text-ink-200 transition inline-flex items-center gap-1"
             >
               <span>Filter by module</span>
-              {moduleIds.length > 0 && (
-                <span className="accent-text">· {moduleIds.length}</span>
-              )}
+              {moduleIds.length > 0 && <span className="accent-text">· {moduleIds.length}</span>}
               <ChevronDown
                 size={12}
                 className={`transition ${showModuleFilter ? 'rotate-180' : ''}`}
@@ -741,11 +758,7 @@ function BrowseTab({
                           </button>
                           {ex.videoUrl && (
                             <div className="flex items-center px-2">
-                              <VideoLink
-                                url={ex.videoUrl}
-                                exerciseName={ex.name}
-                                size={14}
-                              />
+                              <VideoLink url={ex.videoUrl} exerciseName={ex.name} size={14} />
                             </div>
                           )}
                           {ex.isCustom && (
@@ -1008,7 +1021,7 @@ function CustomTab({
     prescription: string | undefined,
     videoUrl: string | undefined,
     restTimerSeconds: number | undefined,
-  ) => void;
+  ) => Promise<ActionResult<unknown>>;
 }) {
   const [name, setName] = useState('');
   const [primary, setPrimary] = useState<string[]>([]);
@@ -1017,6 +1030,8 @@ function CustomTab({
   const [videoUrl, setVideoUrl] = useState('');
   const [videoError, setVideoError] = useState<string | null>(null);
   const [restSeconds, setRestSeconds] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   function togglePrimary(id: string) {
     setPrimary((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
@@ -1037,32 +1052,46 @@ function CustomTab({
     }
   }
 
-  function submit() {
-    if (!name.trim() || primary.length === 0) return;
+  async function submit() {
+    if (!name.trim() || primary.length === 0 || submitting) return;
     const trimmedUrl = videoUrl.trim();
     const urlError = validateUrl(trimmedUrl);
     if (urlError) {
       setVideoError(urlError);
       return;
     }
-    onCreate(
-      name.trim(),
-      primary,
-      secondary,
-      prescription.trim() || undefined,
-      trimmedUrl || undefined,
-      restSeconds ?? undefined,
-    );
-    setName('');
-    setPrimary([]);
-    setSecondary([]);
-    setPrescription('');
-    setVideoUrl('');
-    setVideoError(null);
-    setRestSeconds(null);
+    setSubmitting(true);
+    setServerError(null);
+    try {
+      const res = await onCreate(
+        name.trim(),
+        primary,
+        secondary,
+        prescription.trim() || undefined,
+        trimmedUrl || undefined,
+        restSeconds ?? undefined,
+      );
+      if (!res.ok) {
+        // Expected failure — most likely "You already have an exercise with
+        // that name". Keep the form populated so the user can adjust.
+        setServerError(res.error);
+        return;
+      }
+      setName('');
+      setPrimary([]);
+      setSecondary([]);
+      setPrescription('');
+      setVideoUrl('');
+      setVideoError(null);
+      setRestSeconds(null);
+    } catch {
+      setServerError('Could not add the exercise. Try again?');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  const canSubmit = name.trim().length > 0 && primary.length > 0;
+  const canSubmit = name.trim().length > 0 && primary.length > 0 && !submitting;
 
   return (
     <div className="px-5 py-4">
@@ -1199,12 +1228,13 @@ function CustomTab({
         ))}
       </div>
 
+      {serverError && <p className="text-xs text-bad mb-3">{serverError}</p>}
       <button
         onClick={submit}
         disabled={!canSubmit}
         className="w-full accent-bg text-ink-950 py-3 rounded-lg font-semibold tracking-wide disabled:opacity-30 disabled:cursor-not-allowed hover:brightness-110 transition"
       >
-        Add to my list
+        {submitting ? 'Adding…' : 'Add to my list'}
       </button>
     </div>
   );

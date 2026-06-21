@@ -67,7 +67,12 @@ function Row({ muscle }: { muscle: MuscleSetting }) {
     }
     if (n === muscle.currentTarget) return;
     startTransition(async () => {
-      await setVolumeTarget({ muscleId: muscle.id, target: Math.round(n) });
+      // Only flash the saved check when the write actually landed.
+      const res = await setVolumeTarget({ muscleId: muscle.id, target: Math.round(n) });
+      if (!res.ok) {
+        setValue(muscle.currentTarget.toString());
+        return;
+      }
       setJustSaved(true);
       setTimeout(() => setJustSaved(false), 1200);
     });
@@ -76,8 +81,8 @@ function Row({ muscle }: { muscle: MuscleSetting }) {
   function handleReset() {
     if (!muscle.isOverridden) return;
     startTransition(async () => {
-      await resetVolumeTarget({ muscleId: muscle.id });
-      setValue(muscle.defaultTarget.toString());
+      const res = await resetVolumeTarget({ muscleId: muscle.id });
+      if (res.ok) setValue(muscle.defaultTarget.toString());
     });
   }
 

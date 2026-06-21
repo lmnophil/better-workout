@@ -7,13 +7,19 @@
 //   - Every mutation that touches a session/exercise verifies ownership
 //   - Every action calls revalidatePath('/') so the page re-renders with fresh data
 //   - Inputs are validated with Zod where they cross the trust boundary
+//   - Expected user-facing failures are thrown as ExpectedError — withLogging
+//     converts them into { ok: false, error } results that survive the prod
+//     build's error-message redaction. Plain `throw new Error` is reserved for
+//     genuine invariant violations (and flagged by ESLint in this file).
 
 import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
+import { ExpectedError } from './action-result';
 import { withLogging } from './observability';
 import { metrics } from './metrics';
 import { MAX_ROUTINE_DAYS } from './routine';
@@ -23,7 +29,10 @@ import { getLastSetsForExerciseIds } from './queries';
 
 async function requireUser() {
   const session = await auth();
-  if (!session?.user?.id) throw new Error('Unauthorized');
+  // A dead session mid-action (expired JWT, db reset) has no error message
+  // worth showing — prod redacts thrown messages anyway — so bounce straight
+  // to sign-in. withLogging rethrows the redirect untouched.
+  if (!session?.user?.id) redirect('/signin');
   return session.user.id;
 }
 
@@ -51,7 +60,7 @@ async function requireAvailableExercise(userId: string, exerciseId: string) {
       deletedAt: null,
     },
   });
-  if (!exercise) throw new Error('Exercise not available');
+  if (!exercise) throw new ExpectedError('Exercise not available');
   return exercise;
 }
 
@@ -205,7 +214,7 @@ export const addExercisesToActiveSession = withLogging(
     const accessibleIds = new Set(accessible.map((e) => e.id));
     for (const id of exerciseIds) {
       if (!accessibleIds.has(id)) {
-        throw new Error('Exercise not available');
+        throw new ExpectedError('Exercise not available');
       }
     }
 
@@ -289,7 +298,7 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
   await requireAvailableExercise(userId, exerciseId);
 
   const session = await findActiveSession(userId);
-  if (!session) throw new Error('No active session');
+  if (!session) throw new ExpectedError('No active session');
 
   // Find the highest setNumber for this exercise in this session. The exercise
   // MUST already be in the session — addSet is for adding more sets to an
@@ -301,7 +310,7 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
     orderBy: { setNumber: 'desc' },
   });
   if (!lastSet) {
-    throw new Error('Exercise not in active session');
+    throw new ExpectedError('Exercise not in active session');
   }
 
   await db.setLog.create({
@@ -351,10 +360,10 @@ export const updateSet = withLogging(
       include: { session: true },
     });
     if (!setLog || setLog.session.userId !== userId) {
-      throw new Error('Set not found');
+      throw new ExpectedError('Set not found');
     }
     if (setLog.session.completedAt) {
-      throw new Error('Cannot edit a completed session');
+      throw new ExpectedError('Cannot edit a completed session');
     }
 
     // If the caller is setting a band, verify it belongs to the user and clear
@@ -364,7 +373,7 @@ export const updateSet = withLogging(
         where: { id: bandId, userId },
         select: { id: true },
       });
-      if (!band) throw new Error('Band not found');
+      if (!band) throw new ExpectedError('Band not found');
     }
 
     await db.setLog.update({
@@ -404,7 +413,7 @@ export const repeatLastForExercise = withLogging(
 
     await requireAvailableExercise(userId, exerciseId);
     const session = await findActiveSession(userId);
-    if (!session) throw new Error('No active session');
+    if (!session) throw new ExpectedError('No active session');
 
     const lastByExercise = await getLastSetsForExerciseIds(userId, [exerciseId], session.id);
     const last = lastByExercise.get(exerciseId);
@@ -414,7 +423,7 @@ export const repeatLastForExercise = withLogging(
       where: { sessionId: session.id, exerciseId },
       orderBy: { setNumber: 'asc' },
     });
-    if (current.length === 0) throw new Error('Exercise not in active session');
+    if (current.length === 0) throw new ExpectedError('Exercise not in active session');
 
     // All current sets share the same position — preserve it for new rows.
     const position = current[0].position;
@@ -470,10 +479,10 @@ export const removeSet = withLogging(
       include: { session: true },
     });
     if (!setLog || setLog.session.userId !== userId) {
-      throw new Error('Set not found');
+      throw new ExpectedError('Set not found');
     }
     if (setLog.session.completedAt) {
-      throw new Error('Cannot edit a completed session');
+      throw new ExpectedError('Cannot edit a completed session');
     }
 
     // Delete + renumber in one transaction. Either both happen or neither does;
@@ -587,7 +596,7 @@ export const swapExerciseInActiveSession = withLogging(
     await requireAvailableExercise(userId, newExerciseId);
 
     const session = await findActiveSession(userId);
-    if (!session) throw new Error('No active session');
+    if (!session) throw new ExpectedError('No active session');
 
     // Find the outgoing exercise's position. Any of its sets has the position
     // (they're all equal — position is per-exercise-in-session).
@@ -595,7 +604,7 @@ export const swapExerciseInActiveSession = withLogging(
       where: { sessionId: session.id, exerciseId: oldExerciseId },
       select: { position: true },
     });
-    if (!sample) throw new Error('Exercise not in active session');
+    if (!sample) throw new ExpectedError('Exercise not in active session');
 
     // Refuse to swap to an exercise the session already has. Letting it
     // through would either create a duplicate at this position or leave the
@@ -604,7 +613,7 @@ export const swapExerciseInActiveSession = withLogging(
       where: { sessionId: session.id, exerciseId: newExerciseId },
     });
     if (collision > 0) {
-      throw new Error('That exercise is already in this session');
+      throw new ExpectedError('That exercise is already in this session');
     }
 
     // Atomic: drop old sets, create the new exercise's seed set at the same
@@ -729,7 +738,7 @@ export const createCustomExercise = withLogging(
       where: { ownerId: userId, name, deletedAt: null },
     });
     if (existing) {
-      throw new Error('You already have an exercise with that name');
+      throw new ExpectedError('You already have an exercise with that name');
     }
 
     // Create exercise + (optionally) per-exercise settings in one transaction so
@@ -773,7 +782,7 @@ export const deleteCustomExercise = withLogging(
     const exercise = await db.exercise.findFirst({
       where: { id: exerciseId, ownerId: userId },
     });
-    if (!exercise) throw new Error('Exercise not found');
+    if (!exercise) throw new ExpectedError('Exercise not found');
 
     await db.exercise.update({
       where: { id: exerciseId },
@@ -880,7 +889,7 @@ export const createBand = withLogging(
       where: { userId_name: { userId, name } },
       select: { id: true },
     });
-    if (existing) throw new Error('Band name already in use');
+    if (existing) throw new ExpectedError('Band name already in use');
     const last = await db.band.findFirst({
       where: { userId },
       orderBy: { position: 'desc' },
@@ -906,12 +915,12 @@ export const renameBand = withLogging(
       where: { id: bandId, userId },
       select: { id: true },
     });
-    if (!band) throw new Error('Band not found');
+    if (!band) throw new ExpectedError('Band not found');
     const conflict = await db.band.findUnique({
       where: { userId_name: { userId, name } },
       select: { id: true },
     });
-    if (conflict && conflict.id !== bandId) throw new Error('Band name already in use');
+    if (conflict && conflict.id !== bandId) throw new ExpectedError('Band name already in use');
     await db.band.update({ where: { id: bandId }, data: { name } });
     revalidatePath('/');
     revalidatePath('/settings');
@@ -928,7 +937,7 @@ export const deleteBand = withLogging(
       where: { id: bandId, userId },
       select: { id: true, position: true },
     });
-    if (!band) throw new Error('Band not found');
+    if (!band) throw new ExpectedError('Band not found');
     // SetLog.bandId is SetNull on delete, so historical sets become "(deleted
     // band)" rather than disappearing — same trade-off as deleted custom
     // exercises.
@@ -942,7 +951,9 @@ export const deleteBand = withLogging(
     });
     await db.$transaction(
       remaining
-        .map((b, i) => (b.position === i ? null : db.band.update({ where: { id: b.id }, data: { position: i } })))
+        .map((b, i) =>
+          b.position === i ? null : db.band.update({ where: { id: b.id }, data: { position: i } }),
+        )
         .filter((x): x is ReturnType<typeof db.band.update> => x !== null),
     );
     revalidatePath('/');
@@ -965,7 +976,7 @@ export const reorderBand = withLogging(
       select: { id: true, position: true },
     });
     const i = bands.findIndex((b) => b.id === bandId);
-    if (i < 0) throw new Error('Band not found');
+    if (i < 0) throw new ExpectedError('Band not found');
     const target = direction === 'up' ? i - 1 : i + 1;
     if (target < 0 || target >= bands.length) return;
     const me = bands[i];
@@ -1011,7 +1022,7 @@ export const setExerciseRestOverride = withLogging(
       },
       select: { id: true },
     });
-    if (!exercise) throw new Error('Exercise not found');
+    if (!exercise) throw new ExpectedError('Exercise not found');
 
     if (restTimerSeconds === null) {
       // Clearing — but only this field. If a weight-increment override exists
@@ -1066,7 +1077,7 @@ export const setExerciseWeightIncrement = withLogging(
       },
       select: { id: true },
     });
-    if (!exercise) throw new Error('Exercise not found');
+    if (!exercise) throw new ExpectedError('Exercise not found');
 
     if (weightIncrement === null) {
       const existing = await db.exerciseUserSettings.findUnique({
@@ -1120,7 +1131,7 @@ export const updateSetNotes = withLogging(
       where: { id: setLogId, session: { userId } },
       select: { id: true },
     });
-    if (!setLog) throw new Error('Set not found');
+    if (!setLog) throw new ExpectedError('Set not found');
 
     const trimmed = notes.trim();
     await db.setLog.update({
@@ -1154,7 +1165,7 @@ export const saveActiveAsTemplate = withLogging(
     const { name, description } = SaveActiveAsTemplateSchema.parse(input);
 
     const session = await findActiveSession(userId);
-    if (!session) throw new Error('No active session to save');
+    if (!session) throw new ExpectedError('No active session to save');
 
     // Distinct exercises in order (same logic as workout view)
     const sets = await db.setLog.findMany({
@@ -1164,7 +1175,7 @@ export const saveActiveAsTemplate = withLogging(
       orderBy: { position: 'asc' },
     });
     if (sets.length === 0) {
-      throw new Error('Add at least one exercise before saving as a template');
+      throw new ExpectedError('Add at least one exercise before saving as a template');
     }
 
     // Friendly error on name collision against the user's own templates. We
@@ -1177,7 +1188,7 @@ export const saveActiveAsTemplate = withLogging(
       select: { id: true },
     });
     if (collision) {
-      throw new Error('You already have a template by that name');
+      throw new ExpectedError('You already have a template by that name');
     }
 
     await db.workoutTemplate.create({
@@ -1219,7 +1230,9 @@ export const startFromTemplate = withLogging(
     // Block if there's already an active session
     const existing = await findActiveSession(userId);
     if (existing) {
-      throw new Error('You already have a workout in progress. Complete or discard it first.');
+      throw new ExpectedError(
+        'You already have a workout in progress. Complete or discard it first.',
+      );
     }
 
     // Load the template — either the user's own, or a built-in that they
@@ -1246,7 +1259,7 @@ export const startFromTemplate = withLogging(
         },
       },
     });
-    if (!template) throw new Error('Template not found');
+    if (!template) throw new ExpectedError('Template not found');
 
     // Filter to exercises the user can still use
     const usable = template.exercises.filter((te) => {
@@ -1256,7 +1269,7 @@ export const startFromTemplate = withLogging(
       return true;
     });
     if (usable.length === 0) {
-      throw new Error('This template no longer has any usable exercises');
+      throw new ExpectedError('This template no longer has any usable exercises');
     }
 
     // Create the session, then seed SetLogs from history + prefs. The seed step
@@ -1315,7 +1328,7 @@ export const deleteTemplate = withLogging(
       select: { userId: true, isBuiltin: true },
     });
     if (template?.isBuiltin) {
-      throw new Error('Built-in templates can be hidden but not deleted');
+      throw new ExpectedError('Built-in templates can be hidden but not deleted');
     }
 
     // Refuse if the template is referenced by a routine day. Cascade would
@@ -1325,7 +1338,9 @@ export const deleteTemplate = withLogging(
       where: { templateId, routine: { userId } },
     });
     if (routineUse > 0) {
-      throw new Error('This template is used in your routine. Remove it from the routine first.');
+      throw new ExpectedError(
+        'This template is used in your routine. Remove it from the routine first.',
+      );
     }
 
     await db.workoutTemplate.deleteMany({ where: { id: templateId, userId } });
@@ -1352,7 +1367,7 @@ export const hideTemplate = withLogging(
       select: { isBuiltin: true },
     });
     if (!template?.isBuiltin) {
-      throw new Error('Only built-in templates can be hidden');
+      throw new ExpectedError('Only built-in templates can be hidden');
     }
 
     // upsert pattern via createMany skipDuplicates — cleanly idempotent without
@@ -1418,7 +1433,7 @@ async function uniqueTemplateName(tx: Tx, userId: string, base: string): Promise
     const candidate = `${trimmed} (${i})`;
     if (!taken.has(candidate)) return candidate;
   }
-  throw new Error('Too many similarly-named templates — pick a different base name.');
+  throw new ExpectedError('Too many similarly-named templates — pick a different base name.');
 }
 
 /**
@@ -1444,7 +1459,7 @@ async function cloneTemplateForUser(
       },
     },
   });
-  if (!source) throw new Error('Template not found');
+  if (!source) throw new ExpectedError('Template not found');
 
   const lineup = source.exercises.filter(
     (te) =>
@@ -1502,7 +1517,7 @@ async function freshTemplateForUser(
 ): Promise<string> {
   const exerciseIds = exercises.map((e) => e.exerciseId);
   if (new Set(exerciseIds).size !== exerciseIds.length) {
-    throw new Error("A day can't list the same exercise twice.");
+    throw new ExpectedError("A day can't list the same exercise twice.");
   }
   if (exerciseIds.length > 0) {
     const accessible = await tx.exercise.findMany({
@@ -1515,7 +1530,7 @@ async function freshTemplateForUser(
     });
     const accessibleIds = new Set(accessible.map((e) => e.id));
     for (const id of exerciseIds) {
-      if (!accessibleIds.has(id)) throw new Error('Exercise not available');
+      if (!accessibleIds.has(id)) throw new ExpectedError('Exercise not available');
     }
   }
   const name = await uniqueTemplateName(tx, userId, desiredName);
@@ -1559,7 +1574,7 @@ export const createRoutine = withLogging(
 
     const existing = await db.routine.findUnique({ where: { userId } });
     if (existing) {
-      throw new Error('You already have a routine. Edit it instead of creating a new one.');
+      throw new ExpectedError('You already have a routine. Edit it instead of creating a new one.');
     }
 
     await db.routine.create({
@@ -1599,7 +1614,7 @@ export const updateRoutine = withLogging(
     const data = UpdateRoutineSchema.parse(input);
 
     const routine = await db.routine.findUnique({ where: { userId } });
-    if (!routine) throw new Error('No routine to update');
+    if (!routine) throw new ExpectedError('No routine to update');
 
     await db.$transaction(async (tx) => {
       if (data.scheduleStyle && data.scheduleStyle !== routine.scheduleStyle) {
@@ -1697,10 +1712,10 @@ export const addRoutineDay = withLogging(
       where: { userId },
       include: { _count: { select: { days: true } } },
     });
-    if (!routine) throw new Error('No routine — create one first');
+    if (!routine) throw new ExpectedError('No routine — create one first');
 
     if (routine._count.days >= MAX_ROUTINE_DAYS) {
-      throw new Error(`A routine can have at most ${MAX_ROUTINE_DAYS} days.`);
+      throw new ExpectedError(`A routine can have at most ${MAX_ROUTINE_DAYS} days.`);
     }
 
     const effectiveWeekday =
@@ -1711,7 +1726,7 @@ export const addRoutineDay = withLogging(
         select: { id: true },
       });
       if (collision) {
-        throw new Error('That weekday is already taken in your routine.');
+        throw new ExpectedError('That weekday is already taken in your routine.');
       }
     }
 
@@ -1800,7 +1815,7 @@ export const updateRoutineDay = withLogging(
       where: { id: routineDayId, routine: { userId } },
       include: { routine: { select: { id: true, scheduleStyle: true } } },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     // Weekday update only meaningful in weekday mode; ignore in sequence mode
     // so a stale client can't introduce inconsistent state.
@@ -1818,7 +1833,7 @@ export const updateRoutineDay = withLogging(
           select: { id: true },
         });
         if (collision) {
-          throw new Error('That weekday is already taken in your routine.');
+          throw new ExpectedError('That weekday is already taken in your routine.');
         }
         effectiveWeekday = weekday;
       } else {
@@ -1876,7 +1891,7 @@ export const removeRoutineDay = withLogging(
         routine: { select: { id: true, lastCompletedPosition: true } },
       },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     await db.$transaction(async (tx) => {
       await tx.routineDay.delete({ where: { id: routineDayId } });
@@ -1969,7 +1984,7 @@ export const addExerciseToRoutineDay = withLogging(
       where: { id: routineDayId, routine: { userId } },
       select: { templateId: true },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     await requireAvailableExercise(userId, exerciseId);
 
@@ -1977,14 +1992,14 @@ export const addExerciseToRoutineDay = withLogging(
       where: { templateId: day.templateId, exerciseId },
       select: { id: true },
     });
-    if (collision) throw new Error('That exercise is already in this day.');
+    if (collision) throw new ExpectedError('That exercise is already in this day.');
 
     if (poolId) {
       const pool = await db.templatePool.findFirst({
         where: { id: poolId, templateId: day.templateId },
         select: { id: true },
       });
-      if (!pool) throw new Error('Pool not found');
+      if (!pool) throw new ExpectedError('Pool not found');
     }
 
     const last = await db.templateExercise.findFirst({
@@ -2042,13 +2057,13 @@ export const updateRoutineDayExercise = withLogging(
       where: { id: routineDayId, routine: { userId } },
       select: { templateId: true },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     const target = await db.templateExercise.findFirst({
       where: { templateId: day.templateId, exerciseId },
       select: { id: true },
     });
-    if (!target) throw new Error("That exercise isn't in this day.");
+    if (!target) throw new ExpectedError("That exercise isn't in this day.");
 
     await db.templateExercise.update({
       where: { id: target.id },
@@ -2080,7 +2095,7 @@ export const removeExerciseFromRoutineDay = withLogging(
       where: { id: routineDayId, routine: { userId } },
       select: { templateId: true },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     await db.$transaction(async (tx) => {
       const target = await tx.templateExercise.findFirst({
@@ -2150,7 +2165,7 @@ export const reorderRoutineDayExercise = withLogging(
       where: { id: routineDayId, routine: { userId } },
       select: { templateId: true },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     await db.$transaction(async (tx) => {
       const rows = await tx.templateExercise.findMany({
@@ -2239,7 +2254,7 @@ export const setRoutineDayExerciseOrder = withLogging(
       where: { id: routineDayId, routine: { userId } },
       select: { templateId: true },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     const entries = await db.templateExercise.findMany({
       where: { templateId: day.templateId },
@@ -2247,15 +2262,15 @@ export const setRoutineDayExerciseOrder = withLogging(
     });
 
     if (entries.length !== exerciseIds.length) {
-      throw new Error("Reorder list doesn't match the day's exercises.");
+      throw new ExpectedError("Reorder list doesn't match the day's exercises.");
     }
     const idByExercise = new Map(entries.map((e) => [e.exerciseId, e.id] as const));
     if (new Set(exerciseIds).size !== exerciseIds.length) {
-      throw new Error('Reorder list has duplicate exercises.');
+      throw new ExpectedError('Reorder list has duplicate exercises.');
     }
     const placements = exerciseIds.map((exerciseId, position) => {
       const id = idByExercise.get(exerciseId);
-      if (!id) throw new Error("Reorder list doesn't match the day's exercises.");
+      if (!id) throw new ExpectedError("Reorder list doesn't match the day's exercises.");
       return { id, position };
     });
 
@@ -2425,14 +2440,14 @@ export const createTemplatePool = withLogging(
     const { routineDayId, exerciseIds, pickCount, label } = CreateTemplatePoolSchema.parse(input);
 
     if (new Set(exerciseIds).size !== exerciseIds.length) {
-      throw new Error('Some of those exercises are listed twice.');
+      throw new ExpectedError('Some of those exercises are listed twice.');
     }
 
     const day = await db.routineDay.findFirst({
       where: { id: routineDayId, routine: { userId } },
       select: { templateId: true },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     const rows = await db.templateExercise.findMany({
       where: { templateId: day.templateId, exerciseId: { in: exerciseIds } },
@@ -2440,7 +2455,7 @@ export const createTemplatePool = withLogging(
     });
     // Every id must be a fixed slot in this day — not missing, not already pooled.
     if (rows.length !== exerciseIds.length || rows.some((r) => r.poolId !== null)) {
-      throw new Error('Some of those exercises are no longer available to group.');
+      throw new ExpectedError('Some of those exercises are no longer available to group.');
     }
 
     const effectivePickCount = Math.min(pickCount, exerciseIds.length);
@@ -2481,7 +2496,7 @@ export const updateTemplatePool = withLogging(
       where: { id: poolId, template: { userId } },
       select: { id: true, _count: { select: { members: true } } },
     });
-    if (!pool) throw new Error('Pool not found');
+    if (!pool) throw new ExpectedError('Pool not found');
 
     await db.templatePool.update({
       where: { id: pool.id },
@@ -2515,7 +2530,7 @@ export const deleteTemplatePool = withLogging(
       where: { id: poolId, template: { userId } },
       select: { id: true },
     });
-    if (!pool) throw new Error('Pool not found');
+    if (!pool) throw new ExpectedError('Pool not found');
 
     await db.templatePool.delete({ where: { id: pool.id } });
 
@@ -2546,7 +2561,7 @@ export const removeExerciseFromPool = withLogging(
       where: { id: poolId, template: { userId } },
       select: { id: true, templateId: true, pickCount: true },
     });
-    if (!pool) throw new Error('Pool not found');
+    if (!pool) throw new ExpectedError('Pool not found');
 
     await db.$transaction(async (tx) => {
       // Ungroup the named member. updateMany (not update) so a stale id that no
@@ -2601,7 +2616,7 @@ export const reorderRoutineDay = withLogging(
     const day = await db.routineDay.findFirst({
       where: { id: routineDayId, routine: { userId } },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     const days = await db.routineDay.findMany({
       where: { routineId: day.routineId },
@@ -2666,8 +2681,8 @@ export const swapRoutineDayPositions = withLogging(
         select: { id: true, position: true, routineId: true },
       }),
     ]);
-    if (!me || !target) throw new Error('Routine day not found');
-    if (me.routineId !== target.routineId) throw new Error('Routine day not found');
+    if (!me || !target) throw new ExpectedError('Routine day not found');
+    if (me.routineId !== target.routineId) throw new ExpectedError('Routine day not found');
 
     const sentinel = -1;
     await db.$transaction([
@@ -2712,10 +2727,10 @@ export const duplicateRoutineDay = withLogging(
         routine: { select: { id: true, _count: { select: { days: true } } } },
       },
     });
-    if (!source) throw new Error('Routine day not found');
+    if (!source) throw new ExpectedError('Routine day not found');
 
     if (source.routine._count.days >= MAX_ROUTINE_DAYS) {
-      throw new Error(`Routine is already at the ${MAX_ROUTINE_DAYS}-day cap.`);
+      throw new ExpectedError(`Routine is already at the ${MAX_ROUTINE_DAYS}-day cap.`);
     }
 
     const nextPosition = source.routine._count.days;
@@ -2808,14 +2823,14 @@ export const setPendingSwap = withLogging(
         },
       },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     const templateExerciseIds = new Set(day.template.exercises.map((te) => te.exerciseId));
     if (!templateExerciseIds.has(outExerciseId)) {
-      throw new Error("That exercise isn't in this day's template.");
+      throw new ExpectedError("That exercise isn't in this day's template.");
     }
     if (templateExerciseIds.has(inExerciseId)) {
-      throw new Error('That exercise is already in this day.');
+      throw new ExpectedError('That exercise is already in this day.');
     }
 
     await requireAvailableExercise(userId, inExerciseId);
@@ -2879,7 +2894,7 @@ export const swapInRoutineTemplate = withLogging(
       where: { id: routineDayId, routine: { userId } },
       include: { template: { select: { id: true } } },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     await requireAvailableExercise(userId, inExerciseId);
 
@@ -2887,7 +2902,7 @@ export const swapInRoutineTemplate = withLogging(
       where: { templateId: day.template.id, exerciseId: outExerciseId },
     });
     if (!targetEntry) {
-      throw new Error("That exercise isn't in the template anymore.");
+      throw new ExpectedError("That exercise isn't in the template anymore.");
     }
 
     // Refuse if the new exercise is already in the template — would violate
@@ -2897,7 +2912,7 @@ export const swapInRoutineTemplate = withLogging(
       select: { id: true },
     });
     if (collision) {
-      throw new Error('That exercise is already in the template.');
+      throw new ExpectedError('That exercise is already in the template.');
     }
 
     await db.$transaction([
@@ -2979,7 +2994,7 @@ export const createRoutineFromDraft = withLogging(
 
     const existingRoutine = await db.routine.findUnique({ where: { userId } });
     if (existingRoutine) {
-      throw new Error('You already have a routine. Edit it instead of creating a new one.');
+      throw new ExpectedError('You already have a routine. Edit it instead of creating a new one.');
     }
 
     // In weekday mode, each pinned weekday must be unique within the draft.
@@ -2989,7 +3004,7 @@ export const createRoutineFromDraft = withLogging(
       for (const day of days) {
         if (day.weekday == null) continue;
         if (seen.has(day.weekday)) {
-          throw new Error("Two days can't share the same weekday.");
+          throw new ExpectedError("Two days can't share the same weekday.");
         }
         seen.add(day.weekday);
       }
@@ -3095,7 +3110,9 @@ export const startFromRoutineDay = withLogging(
 
     const existing = await findActiveSession(userId);
     if (existing) {
-      throw new Error('You already have a workout in progress. Complete or discard it first.');
+      throw new ExpectedError(
+        'You already have a workout in progress. Complete or discard it first.',
+      );
     }
 
     const day = await db.routineDay.findFirst({
@@ -3123,7 +3140,7 @@ export const startFromRoutineDay = withLogging(
         },
       },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     // Resolve pools: every pool on the day must have a pick, each picked id
     // must be one of that pool's members, and no more than pickCount.
@@ -3139,7 +3156,7 @@ export const startFromRoutineDay = withLogging(
         pick.size > pool.pickCount ||
         [...pick].some((id) => !memberIds.has(id));
       if (invalid) {
-        throw new Error('Pick your pool exercises before starting this workout.');
+        throw new ExpectedError('Pick your pool exercises before starting this workout.');
       }
     }
 
@@ -3188,7 +3205,7 @@ export const startFromRoutineDay = withLogging(
     }
 
     if (lineup.length === 0) {
-      throw new Error('This day has no usable exercises right now.');
+      throw new ExpectedError('This day has no usable exercises right now.');
     }
 
     // Create the session, then seed SetLogs from history + planned + prefs.
@@ -3272,8 +3289,8 @@ async function requireActiveShare(token: string) {
     where: { token },
     include: { routine: { select: { id: true, userId: true } } },
   });
-  if (!share) throw new Error('Share link not found');
-  if (share.revokedAt) throw new Error('Share link revoked');
+  if (!share) throw new ExpectedError('Share link not found');
+  if (share.revokedAt) throw new ExpectedError('Share link revoked');
   return share;
 }
 
@@ -3288,7 +3305,7 @@ async function getReviewerFromCookie(shareId: string) {
 
 async function requireReviewer(shareId: string) {
   const reviewer = await getReviewerFromCookie(shareId);
-  if (!reviewer) throw new Error('Reviewer not registered');
+  if (!reviewer) throw new ExpectedError('Reviewer not registered');
   return reviewer;
 }
 
@@ -3334,7 +3351,7 @@ export const mintRoutineShare = withLogging(
     const { label } = MintShareSchema.parse(input);
 
     const routine = await db.routine.findUnique({ where: { userId }, select: { id: true } });
-    if (!routine) throw new Error('No routine to share yet.');
+    if (!routine) throw new ExpectedError('No routine to share yet.');
 
     const token = urlsafeRandom(SHARE_TOKEN_BYTES);
     await db.routineShare.create({
@@ -3364,7 +3381,7 @@ export const revokeRoutineShare = withLogging(
       where: { id: shareId, routine: { userId } },
       select: { id: true },
     });
-    if (!share) throw new Error('Share link not found');
+    if (!share) throw new ExpectedError('Share link not found');
 
     await db.routineShare.update({
       where: { id: shareId },
@@ -3420,7 +3437,7 @@ export const resolveShareComment = withLogging(
       where: { id: commentId, share: { routine: { userId } } },
       select: { id: true, shareId: true },
     });
-    if (!comment) throw new Error('Comment not found');
+    if (!comment) throw new ExpectedError('Comment not found');
 
     await db.shareComment.update({
       where: { id: comment.id },
@@ -3443,8 +3460,8 @@ export const rejectShareSuggestion = withLogging(
       where: { id: suggestionId, share: { routine: { userId } } },
       select: { id: true, state: true, shareId: true },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
 
     await db.shareSuggestion.update({
       where: { id: s.id },
@@ -3467,8 +3484,8 @@ export const resolveShareSuggestion = withLogging(
       where: { id: suggestionId, share: { routine: { userId } } },
       select: { id: true, state: true, shareId: true },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
 
     await db.shareSuggestion.update({
       where: { id: s.id },
@@ -3501,11 +3518,11 @@ export const applyShareSwap = withLogging(
     const s = await db.shareSuggestion.findFirst({
       where: { id: suggestionId, share: { routine: { userId } } },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
-    if (!s.kind.startsWith('swap_')) throw new Error('Not a swap suggestion');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    if (!s.kind.startsWith('swap_')) throw new ExpectedError('Not a swap suggestion');
     if (s.targetType !== 'routine_day' || !s.targetId) {
-      throw new Error('Cannot apply: target missing');
+      throw new ExpectedError('Cannot apply: target missing');
     }
 
     const payload = s.payload as {
@@ -3514,19 +3531,19 @@ export const applyShareSwap = withLogging(
       candidateIds?: string[];
     };
     const outExerciseId = payload.outExerciseId;
-    if (!outExerciseId) throw new Error('Cannot apply: out exercise missing');
+    if (!outExerciseId) throw new ExpectedError('Cannot apply: out exercise missing');
 
     let inExerciseId: string | undefined = pickedInId;
     if (!inExerciseId && s.kind === 'swap_specific') {
       inExerciseId = payload.inExerciseId;
     }
-    if (!inExerciseId) throw new Error('Cannot apply: pick which exercise to swap in');
+    if (!inExerciseId) throw new ExpectedError('Cannot apply: pick which exercise to swap in');
     if (
       s.kind === 'swap_anyof' &&
       payload.candidateIds &&
       !payload.candidateIds.includes(inExerciseId)
     ) {
-      throw new Error('Cannot apply: picked exercise was not suggested');
+      throw new ExpectedError('Cannot apply: picked exercise was not suggested');
     }
 
     if (outExerciseId === inExerciseId) {
@@ -3541,20 +3558,20 @@ export const applyShareSwap = withLogging(
       where: { id: s.targetId, routine: { userId } },
       include: { template: { select: { id: true } } },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     await requireAvailableExercise(userId, inExerciseId);
 
     const targetEntry = await db.templateExercise.findFirst({
       where: { templateId: day.template.id, exerciseId: outExerciseId },
     });
-    if (!targetEntry) throw new Error("That exercise isn't in the template anymore.");
+    if (!targetEntry) throw new ExpectedError("That exercise isn't in the template anymore.");
 
     const collision = await db.templateExercise.findFirst({
       where: { templateId: day.template.id, exerciseId: inExerciseId },
       select: { id: true },
     });
-    if (collision) throw new Error('That exercise is already in the template.');
+    if (collision) throw new ExpectedError('That exercise is already in the template.');
 
     await db.$transaction([
       db.templateExercise.update({
@@ -3587,12 +3604,12 @@ export const applyShareRemove = withLogging(
     const s = await db.shareSuggestion.findFirst({
       where: { id: suggestionId, share: { routine: { userId } } },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
-    if (s.kind !== 'remove') throw new Error('Cannot apply: not a remove suggestion');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    if (s.kind !== 'remove') throw new ExpectedError('Cannot apply: not a remove suggestion');
 
     const payload = s.payload as { templateExerciseId?: string };
-    if (!payload.templateExerciseId) throw new Error('Cannot apply: target missing');
+    if (!payload.templateExerciseId) throw new ExpectedError('Cannot apply: target missing');
 
     const te = await db.templateExercise.findFirst({
       where: {
@@ -3601,7 +3618,7 @@ export const applyShareRemove = withLogging(
       },
       select: { id: true, templateId: true, position: true },
     });
-    if (!te) throw new Error("That exercise isn't in the template anymore.");
+    if (!te) throw new ExpectedError("That exercise isn't in the template anymore.");
 
     await db.$transaction(async (tx) => {
       await tx.templateExercise.delete({ where: { id: te.id } });
@@ -3639,28 +3656,28 @@ export const applyShareReorder = withLogging(
     const s = await db.shareSuggestion.findFirst({
       where: { id: suggestionId, share: { routine: { userId } } },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
-    if (s.kind !== 'reorder') throw new Error('Cannot apply: not a reorder suggestion');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    if (s.kind !== 'reorder') throw new ExpectedError('Cannot apply: not a reorder suggestion');
     if (s.targetType !== 'routine_day' || !s.targetId) {
-      throw new Error('Cannot apply: target missing');
+      throw new ExpectedError('Cannot apply: target missing');
     }
 
     const payload = s.payload as { orderedTemplateExerciseIds?: string[] };
     if (!payload.orderedTemplateExerciseIds || payload.orderedTemplateExerciseIds.length === 0) {
-      throw new Error('Cannot apply: order missing');
+      throw new ExpectedError('Cannot apply: order missing');
     }
 
     const day = await db.routineDay.findFirst({
       where: { id: s.targetId, routine: { userId } },
       include: { template: { include: { exercises: { select: { id: true } } } } },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     const currentIds = new Set(day.template.exercises.map((e) => e.id));
     const orderIds = payload.orderedTemplateExerciseIds;
     if (orderIds.length !== currentIds.size || !orderIds.every((id) => currentIds.has(id))) {
-      throw new Error('Cannot apply: lineup has changed since the suggestion');
+      throw new ExpectedError('Cannot apply: lineup has changed since the suggestion');
     }
 
     await db.$transaction(async (tx) => {
@@ -3696,11 +3713,11 @@ export const applyShareInsert = withLogging(
     const s = await db.shareSuggestion.findFirst({
       where: { id: suggestionId, share: { routine: { userId } } },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
-    if (s.kind !== 'insert') throw new Error('Not an insert suggestion');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    if (s.kind !== 'insert') throw new ExpectedError('Not an insert suggestion');
     if (s.targetType !== 'routine_day' || !s.targetId) {
-      throw new Error('Cannot apply: target missing');
+      throw new ExpectedError('Cannot apply: target missing');
     }
 
     const payload = s.payload as { atPosition?: number; exerciseIds?: string[] };
@@ -3708,7 +3725,7 @@ export const applyShareInsert = withLogging(
     const toInsert = (picked && picked.length > 0 ? picked : suggested).filter((id) =>
       suggested.includes(id),
     );
-    if (toInsert.length === 0) throw new Error('Cannot apply: pick at least one exercise');
+    if (toInsert.length === 0) throw new ExpectedError('Cannot apply: pick at least one exercise');
 
     const day = await db.routineDay.findFirst({
       where: { id: s.targetId, routine: { userId } },
@@ -3718,7 +3735,7 @@ export const applyShareInsert = withLogging(
         },
       },
     });
-    if (!day) throw new Error('Routine day not found');
+    if (!day) throw new ExpectedError('Routine day not found');
 
     const existingIds = new Set(day.template.exercises.map((e) => e.exerciseId));
     const fresh = toInsert.filter((id) => !existingIds.has(id));
@@ -3785,10 +3802,10 @@ export const applyShareCustomExercise = withLogging(
     const s = await db.shareSuggestion.findFirst({
       where: { id: suggestionId, share: { routine: { userId } } },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
     if (s.kind !== 'custom_exercise')
-      throw new Error('Cannot apply: not a custom-exercise suggestion');
+      throw new ExpectedError('Cannot apply: not a custom-exercise suggestion');
 
     const payload = s.payload as {
       name?: string;
@@ -3798,7 +3815,7 @@ export const applyShareCustomExercise = withLogging(
       metric?: 'reps' | 'time';
     };
     const name = payload.name?.trim();
-    if (!name) throw new Error('Cannot apply: custom exercise has no name');
+    if (!name) throw new ExpectedError('Cannot apply: custom exercise has no name');
 
     let resolvedName = name;
     const collision = await db.exercise.findFirst({
@@ -3862,7 +3879,7 @@ export const registerShareReviewer = withLogging(
   async (input: z.infer<typeof RegisterReviewerSchema>) => {
     const { token, displayName } = RegisterReviewerSchema.parse(input);
     const cleaned = displayName.trim();
-    if (cleaned.length === 0) throw new Error('Display name cannot be empty');
+    if (cleaned.length === 0) throw new ExpectedError('Display name cannot be empty');
 
     const share = await requireActiveShare(token);
 
@@ -3912,7 +3929,7 @@ export const postShareComment = withLogging(
   'postShareComment',
   async (input: z.infer<typeof PostCommentSchema>) => {
     const { token, targetType, targetId, body } = PostCommentSchema.parse(input);
-    if (body.trim().length === 0) throw new Error('Comment body cannot be empty');
+    if (body.trim().length === 0) throw new ExpectedError('Comment body cannot be empty');
 
     const share = await requireActiveShare(token);
     const reviewer = await requireReviewer(share.id);
@@ -4149,8 +4166,8 @@ export const deleteShareSuggestion = withLogging(
       where: { id: suggestionId, shareId: share.id, reviewerId: reviewer.id },
       select: { id: true, state: true },
     });
-    if (!s) throw new Error('Suggestion not found');
-    if (s.state !== 'open') throw new Error('Suggestion already resolved');
+    if (!s) throw new ExpectedError('Suggestion not found');
+    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
 
     await db.shareSuggestion.delete({ where: { id: s.id } });
     revalidatePath(`/share/${token}`);
@@ -4173,8 +4190,8 @@ export const deleteShareComment = withLogging(
       where: { id: commentId, shareId: share.id, reviewerId: reviewer.id },
       select: { id: true, resolvedAt: true },
     });
-    if (!c) throw new Error('Comment not found');
-    if (c.resolvedAt) throw new Error('Comment already resolved');
+    if (!c) throw new ExpectedError('Comment not found');
+    if (c.resolvedAt) throw new ExpectedError('Comment already resolved');
 
     await db.shareComment.delete({ where: { id: c.id } });
     revalidatePath(`/share/${token}`);

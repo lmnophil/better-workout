@@ -40,6 +40,7 @@ import { RestTimerBar, useRestTimer } from './rest-timer';
 import { useConfirm } from '@/components/ui/use-confirm';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { groupBy, relativeDay } from '@/lib/utils';
+import type { ActionResult } from '@/lib/action-result';
 import { muscleIdsToChipIds } from '@/lib/area-filter';
 import { moduleDescription } from '@/lib/exercises-data';
 import { RoutineTimeline, type RoutineTimelineProps } from '@/components/routines/routine-timeline';
@@ -390,7 +391,11 @@ export function WorkoutView({
       }))
     )
       return;
-    startTransition(() => completeActiveSession());
+    // Async transition: awaiting keeps the rejection visible to React so a
+    // bug-class error still reaches the error boundary.
+    startTransition(async () => {
+      await completeActiveSession();
+    });
   };
 
   const handleDiscard = async () => {
@@ -403,9 +408,14 @@ export function WorkoutView({
       }))
     )
       return;
-    startTransition(() => discardActiveSession());
+    startTransition(async () => {
+      await discardActiveSession();
+    });
   };
 
+  // Returns the action result so the picker's custom-add form can surface
+  // expected failures (duplicate name) inline. No startTransition — the form
+  // tracks its own submitting state.
   const handleCreateCustom = (
     name: string,
     primaryMuscles: string[],
@@ -413,18 +423,15 @@ export function WorkoutView({
     prescription: string | undefined,
     videoUrl: string | undefined,
     restTimerSeconds: number | undefined,
-  ) => {
-    startTransition(() => {
-      createCustomExercise({
-        name,
-        primaryMuscles,
-        secondaryMuscles,
-        prescription,
-        videoUrl,
-        restTimerSeconds,
-      });
+  ) =>
+    createCustomExercise({
+      name,
+      primaryMuscles,
+      secondaryMuscles,
+      prescription,
+      videoUrl,
+      restTimerSeconds,
     });
-  };
 
   // ============ TEMPLATES ============
   const handleStartFromTemplate = (templateId: string) => {
@@ -465,13 +472,13 @@ export function WorkoutView({
   };
 
   /**
-   * Save the active session as a named template. Returns true on success,
-   * throws on failure. The dialog awaits this and only closes when it resolves
-   * — preserves user input if the save fails.
+   * Save the active session as a named template. The dialog awaits the result
+   * and only closes on success — preserves user input if the save fails.
    */
   const handleSaveAsTemplate = async (name: string, description: string | undefined) => {
-    await saveActiveAsTemplate({ name, description });
-    setSaveTemplateOpen(false);
+    const res = await saveActiveAsTemplate({ name, description });
+    if (res.ok) setSaveTemplateOpen(false);
+    return res;
   };
 
   const handleDeleteCustom = async (exerciseId: string) => {
@@ -924,8 +931,9 @@ function SaveTemplateDialog({
   onClose,
   existingNames,
 }: {
-  // Async — dialog awaits and closes itself on success, surfaces errors inline.
-  onSave: (name: string, description: string | undefined) => Promise<void>;
+  // Async — dialog awaits the result, closes via parent on success, surfaces
+  // expected failures inline.
+  onSave: (name: string, description: string | undefined) => Promise<ActionResult<unknown>>;
   onClose: () => void;
   existingNames: Set<string>;
 }) {
@@ -953,15 +961,17 @@ function SaveTemplateDialog({
     setSubmitting(true);
     setServerError(null);
     try {
-      await onSave(trimmedName, description.trim() || undefined);
-      // Dialog closes via parent state change; no setSubmitting(false) needed.
-    } catch (err) {
-      // Surface the error inline rather than letting it bubble. Most likely
-      // cause is a name-collision race (someone added a template in another
-      // tab between this dialog opening and submit).
-      setServerError(
-        err instanceof Error ? err.message : 'Could not save the template. Try again?',
-      );
+      const res = await onSave(trimmedName, description.trim() || undefined);
+      if (!res.ok) {
+        // Expected failure — most likely a name-collision race (someone added
+        // a template in another tab between this dialog opening and submit).
+        setServerError(res.error);
+        setSubmitting(false);
+      }
+      // On success the dialog closes via parent state change; no
+      // setSubmitting(false) needed.
+    } catch {
+      setServerError('Could not save the template. Try again?');
       setSubmitting(false);
     }
   }

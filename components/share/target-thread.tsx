@@ -11,6 +11,7 @@
 import { useState, useTransition } from 'react';
 import { X } from 'lucide-react';
 import { postShareComment, deleteShareComment, deleteShareSuggestion } from '@/lib/actions';
+import type { ActionResult } from '@/lib/action-result';
 import type { LibraryExercise } from './reviewer-picker';
 import { SuggestionDiffStrip, type SuggestionDiffResult } from './share-coverage';
 
@@ -75,8 +76,10 @@ export function TargetThread({
     const text = body.trim();
     startTransition(async () => {
       try {
-        await postShareComment({ token, targetType, targetId, body: text });
-        setBody('');
+        // Only clear on success — an expected failure (revoked share, expired
+        // reviewer cookie) resolves { ok: false } and must not eat the text.
+        const res = await postShareComment({ token, targetType, targetId, body: text });
+        if (res.ok) setBody('');
       } catch {
         /* silent */
       }
@@ -246,7 +249,13 @@ function SuggestionInline({
   }
 }
 
-function DeleteButton({ label, onConfirm }: { label: string; onConfirm: () => Promise<void> }) {
+function DeleteButton({
+  label,
+  onConfirm,
+}: {
+  label: string;
+  onConfirm: () => Promise<ActionResult<unknown>>;
+}) {
   const [pending, startTransition] = useTransition();
   return (
     <button

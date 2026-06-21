@@ -25,11 +25,7 @@ import {
   formatEstimateCompact,
 } from '@/lib/time-estimate';
 import type { ExerciseMuscleShape, MuscleVolumes, VolumeTier } from '@/lib/coverage';
-import {
-  ShareCoveragePanel,
-  computeSuggestionDiff,
-  type ShareMuscleGroup,
-} from './share-coverage';
+import { ShareCoveragePanel, computeSuggestionDiff, type ShareMuscleGroup } from './share-coverage';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
 import { MuscleChips } from '@/components/ui/muscle-chips';
@@ -157,7 +153,8 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
   // same shape that lib/coverage.ts produces.
   const baseTotalsMap = useMemo<MuscleVolumes>(() => {
     const m = new Map<string, { sets: number; estimated: boolean }>();
-    for (const row of coverage.baseTotals) m.set(row.id, { sets: row.sets, estimated: row.estimated });
+    for (const row of coverage.baseTotals)
+      m.set(row.id, { sets: row.sets, estimated: row.estimated });
     return m;
   }, [coverage.baseTotals]);
 
@@ -185,12 +182,7 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
   // Closure over the static inputs the diff needs. Passed into each TargetThread
   // so per-suggestion diffs can be computed lazily as the thread renders.
   const diffForSuggestion = useCallback(
-    (s: {
-      id: string;
-      kind: string;
-      payload: Record<string, unknown>;
-      targetId: string | null;
-    }) =>
+    (s: { id: string; kind: string; payload: Record<string, unknown>; targetId: string | null }) =>
       computeSuggestionDiff({
         routine,
         suggestion: s,
@@ -668,13 +660,15 @@ function FloatingNotes({
     const text = body.trim();
     startTransition(async () => {
       try {
-        await postShareComment({
+        // Only clear on success — an expected failure (revoked share, expired
+        // reviewer cookie) resolves { ok: false } and must not eat the text.
+        const res = await postShareComment({
           token,
           targetType: 'routine',
           targetId: routineId,
           body: text,
         });
-        setBody('');
+        if (res.ok) setBody('');
       } catch {
         /* silent — see ShareView's other action handlers */
       }
@@ -691,8 +685,8 @@ function FloatingNotes({
           <div className="flex items-baseline justify-between mb-2 gap-2">
             <h2 className="font-display text-sm text-ink-100">Notes</h2>
             <span className="text-[10px] text-ink-500 shrink-0">
-              you’re <span className="text-ink-300">{reviewer.displayName}</span> ·{' '}
-              {headerCounts.c} cmt · {headerCounts.s} sug · {headerCounts.r}{' '}
+              you’re <span className="text-ink-300">{reviewer.displayName}</span> · {headerCounts.c}{' '}
+              cmt · {headerCounts.s} sug · {headerCounts.r}{' '}
               <ThumbsUp className="inline" size={10} />
             </span>
           </div>
@@ -808,10 +802,14 @@ function ReviewerNameTag({
     }
     startTransition(async () => {
       try {
-        await registerShareReviewer({ token, displayName: trimmed });
+        const res = await registerShareReviewer({ token, displayName: trimmed });
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
         setEditing(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not save.');
+      } catch {
+        setError('Could not save. Try again?');
       }
     });
   };

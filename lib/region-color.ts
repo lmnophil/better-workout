@@ -50,9 +50,7 @@ export function regionFromMuscleId(muscleId: string): Region {
  * exercises *should* have at least one, enforced by the create schema, but
  * we don't want to throw if data is dirty).
  */
-export function regionForExercise(exercise: {
-  primaryMuscles: string[];
-}): Region {
+export function regionForExercise(exercise: { primaryMuscles: string[] }): Region {
   const first = exercise.primaryMuscles[0];
   return first ? regionFromMuscleId(first) : 'other';
 }

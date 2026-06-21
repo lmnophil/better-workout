@@ -387,6 +387,29 @@ function DraftEditor({
   muscleGroups: MuscleGroupClient[];
 }) {
   const router = useRouter();
+
+  // Shared by every picker this editor opens: create the custom exercise,
+  // refresh routine data on success, and hand the result back so the picker's
+  // custom-add form can surface a duplicate-name failure inline.
+  const handleCreateCustom = async (
+    name: string,
+    primary: string[],
+    secondary: string[],
+    prescription: string | undefined,
+    videoUrl: string | undefined,
+    restTimerSeconds: number | undefined,
+  ) => {
+    const res = await createCustomExercise({
+      name,
+      primaryMuscles: primary,
+      secondaryMuscles: secondary,
+      prescription,
+      videoUrl,
+      restTimerSeconds,
+    });
+    if (res.ok) router.refresh();
+    return res;
+  };
   const [isPending, startTransition] = useTransition();
   const { prefs } = usePrefs();
 
@@ -686,7 +709,7 @@ function DraftEditor({
     setSubmitError(null);
     startTransition(async () => {
       try {
-        await createRoutineFromDraft({
+        const res = await createRoutineFromDraft({
           scheduleStyle,
           days: days.map((d) => ({
             name: d.name.trim() || undefined,
@@ -702,14 +725,18 @@ function DraftEditor({
             weekday: scheduleStyle === 'weekday' ? d.weekday : null,
           })),
         });
+        if (!res.ok) {
+          setSubmitError(res.error);
+          return;
+        }
         // The routine now exists server-side; drop the WIP draft so the user
         // doesn't re-hydrate stale state next time they hit /routine.
         if (typeof window !== 'undefined') {
           window.localStorage.removeItem(DRAFT_STORAGE_KEY);
         }
         router.refresh();
-      } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : 'Could not save routine.');
+      } catch {
+        setSubmitError('Could not save routine. Try again?');
       }
     });
   }
@@ -983,26 +1010,7 @@ function DraftEditor({
                 });
               }}
               onClose={() => setPickerForDayClientId(null)}
-              onCreateCustom={(
-                name,
-                primary,
-                secondary,
-                prescription,
-                videoUrl,
-                restTimerSeconds,
-              ) => {
-                startTransition(async () => {
-                  await createCustomExercise({
-                    name,
-                    primaryMuscles: primary,
-                    secondaryMuscles: secondary,
-                    prescription,
-                    videoUrl,
-                    restTimerSeconds,
-                  });
-                  router.refresh();
-                });
-              }}
+              onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
                   await deleteCustomExercise({ exerciseId });
@@ -1364,6 +1372,29 @@ function LiveEditor({
   usageStatsMap: Map<string, { lastDoneDate: Date; sessionCount: number }>;
 }) {
   const router = useRouter();
+
+  // Shared by every picker this editor opens: create the custom exercise,
+  // refresh routine data on success, and hand the result back so the picker's
+  // custom-add form can surface a duplicate-name failure inline.
+  const handleCreateCustom = async (
+    name: string,
+    primary: string[],
+    secondary: string[],
+    prescription: string | undefined,
+    videoUrl: string | undefined,
+    restTimerSeconds: number | undefined,
+  ) => {
+    const res = await createCustomExercise({
+      name,
+      primaryMuscles: primary,
+      secondaryMuscles: secondary,
+      prescription,
+      videoUrl,
+      restTimerSeconds,
+    });
+    if (res.ok) router.refresh();
+    return res;
+  };
   const [isPending, startTransition] = useTransition();
   const { confirm, Dialog: ConfirmDialog } = useConfirm();
   const { prefs } = usePrefs();
@@ -1642,26 +1673,7 @@ function LiveEditor({
                     }
               }
               onClose={() => setPickerCtx(null)}
-              onCreateCustom={(
-                name,
-                primary,
-                secondary,
-                prescription,
-                videoUrl,
-                restTimerSeconds,
-              ) => {
-                startTransition(async () => {
-                  await createCustomExercise({
-                    name,
-                    primaryMuscles: primary,
-                    secondaryMuscles: secondary,
-                    prescription,
-                    videoUrl,
-                    restTimerSeconds,
-                  });
-                  router.refresh();
-                });
-              }}
+              onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
                   await deleteCustomExercise({ exerciseId });
@@ -1698,26 +1710,7 @@ function LiveEditor({
                 });
               }}
               onClose={() => setSwapForDay(null)}
-              onCreateCustom={(
-                name,
-                primary,
-                secondary,
-                prescription,
-                videoUrl,
-                restTimerSeconds,
-              ) => {
-                startTransition(async () => {
-                  await createCustomExercise({
-                    name,
-                    primaryMuscles: primary,
-                    secondaryMuscles: secondary,
-                    prescription,
-                    videoUrl,
-                    restTimerSeconds,
-                  });
-                  router.refresh();
-                });
-              }}
+              onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
                   await deleteCustomExercise({ exerciseId });
@@ -2413,11 +2406,7 @@ function DayCard({
               }`}
               aria-label={grouping ? 'Cancel pool grouping' : 'Group exercises into a pool'}
               aria-pressed={grouping}
-              title={
-                grouping
-                  ? 'Cancel grouping'
-                  : 'Group exercises into a "pick X of N" pool'
-              }
+              title={grouping ? 'Cancel grouping' : 'Group exercises into a "pick X of N" pool'}
             >
               <Layers size={13} />
             </button>
@@ -2527,9 +2516,7 @@ function DayCard({
               return (
                 <div
                   key={group.module}
-                  className={`space-y-1 ${
-                    groupIdx > 0 ? 'pt-2 border-t border-ink-800/60' : ''
-                  }`}
+                  className={`space-y-1 ${groupIdx > 0 ? 'pt-2 border-t border-ink-800/60' : ''}`}
                 >
                   <div className="flex items-baseline gap-2 px-0.5">
                     <div className="text-[11px] tracking-[0.22em] uppercase text-ink-200 font-medium inline-flex items-center gap-1">
@@ -2566,9 +2553,7 @@ function DayCard({
                     const poolMembers = pool
                       ? day.exercises.filter((e) => e.poolId === pool.id)
                       : [];
-                    const isPoolLead = pool
-                      ? poolMembers[0]?.exerciseId === ex.exerciseId
-                      : false;
+                    const isPoolLead = pool ? poolMembers[0]?.exerciseId === ex.exerciseId : false;
                     const poolControl =
                       pool && isPoolLead
                         ? {
@@ -2971,10 +2956,7 @@ function ExerciseRow({
                 </span>
               </span>
             )}
-            <MuscleChips
-              primary={exercise.primaryMuscles}
-              secondary={exercise.secondaryMuscles}
-            />
+            <MuscleChips primary={exercise.primaryMuscles} secondary={exercise.secondaryMuscles} />
             <EquipmentChips equipment={exercise.equipment} />
           </div>
         </div>
@@ -3622,8 +3604,8 @@ function CoverageLegend() {
           Weekly sets meet or exceed the target. The stretch goal — solid week.
         </LegendRow>
         <LegendRow tier="ok" label="Good">
-          Above the minimum but below the target. A solid maintenance dose for most lifters;
-          push higher only if growth is the goal.
+          Above the minimum but below the target. A solid maintenance dose for most lifters; push
+          higher only if growth is the goal.
         </LegendRow>
         <LegendRow tier="under" label="Below min">
           Some work is happening, but less than the floor. Worth adding a set or two — even a
@@ -3634,8 +3616,8 @@ function CoverageLegend() {
           either tag-fill (add an exercise) or override the target down.
         </LegendRow>
         <LegendRow tier="emphasis" label="Emphasis">
-          Well above target. Not a problem — flagged in case you wanted balanced coverage and
-          this slipped past. Often intentional (specialization, lagging part).
+          Well above target. Not a problem — flagged in case you wanted balanced coverage and this
+          slipped past. Often intentional (specialization, lagging part).
         </LegendRow>
         <LegendRow tier="untracked" label="Untracked">
           Mobility, balance, and cardio rows. Tracked by recency on the Coverage page, not weekly
@@ -3791,9 +3773,7 @@ function CoverageRow({
   const tier = tierFor(sets, muscle);
   const tok = TIER_VISUALS[tier];
 
-  const tooltip = muscle.description
-    ? `${muscle.label} — ${muscle.description}`
-    : muscle.label;
+  const tooltip = muscle.description ? `${muscle.label} — ${muscle.description}` : muscle.label;
 
   return (
     <div

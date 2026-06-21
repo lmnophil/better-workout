@@ -284,3 +284,24 @@ The friction was concrete: a real PT plan took 60–90 minutes to enter, and the
 **Why it stays.** Pools are the structural expression of "I have five accessory movements and do two a session" — a real training pattern the app previously couldn't represent without the user hand-swapping every time. Attaching to the template kept the blast radius small. Manual-pick-with-signal keeps the neutral-tool stance intact: the app shows recency and frequency, the user rotates.
 
 **Reverse if.** Reusable cross-day pools become a real need (promote `TemplatePool` to a standalone owned entity). Or the manual pick at session start feels like friction and users want an auto-rotate option (add it as an opt-in, don't make it the default).
+
+### Expected errors travel as action results, not thrown messages
+
+**Context.** The original convention threw expected user-facing failures as `Error` with stable message prefixes, matched against an `EXPECTED_MESSAGES` list in `lib/observability.ts` for log classification; clients rendered `err.message` inline or let it bubble to an `error.tsx` boundary. This worked in `next dev` and silently broke in production: Next.js redacts the `message` of any error thrown from a server action or server component in prod builds, so every carefully written message arrived as "An error occurred in the Server Components render" plus a digest. The `(app)/error.tsx` "Session expired" branch (sniffing `error.message` for `unauthorized`) was dead code in prod for the same reason. The prefix list had also drifted — roughly a dozen thrown messages weren't on it (logging as bugs) and several entries matched nothing.
+
+**Decision.** Expected failures travel in the action's _return value_, which Next serializes verbatim:
+
+- Action bodies throw `ExpectedError` (`lib/action-result.ts`) — the throw site stays a one-liner and transactions still roll back.
+- `withLogging` is the single conversion point: it catches `ExpectedError`, logs `action.rejected` at warn with a `reason` field (no stack), and returns `{ ok: false, error: message }`. Success becomes `{ ok: true, data }` (`ActionResult<T>`). `ZodError` is treated the same but surfaces a generic "Invalid input" string — a Zod failure is a malformed payload (client bug or stale tab), not a user mistake.
+- Anything else thrown is a bug: logged `action.failed` at error level with the stack and **rethrown**, so it still reaches the nearest `error.tsx` boundary. Prod redaction is fine there — there's nothing useful to tell the user about a null deref beyond the digest.
+- `requireUser()` no longer throws `'Unauthorized'`; it calls `redirect('/signin')`. A dead session mid-action has no message worth rendering — bouncing to sign-in _is_ the UX. `withLogging` rethrows Next's control-flow errors (`unstable_rethrow`) before any logging or metrics so the redirect propagates untouched.
+- `EXPECTED_MESSAGES` and `EXPECTED_ERROR_NAMES` are deleted; classification is type-based, so there is no list to drift. An ESLint `no-restricted-syntax` rule on `lib/actions.ts` rejects plain `throw new Error(...)` to keep the convention from regressing.
+
+**Alternatives considered.**
+
+- _Smuggling the message through `error.digest`_ (Next preserves pre-set digests to the client). Survives prod, but relies on undocumented pass-through behavior, abuses a field meant for log correlation, and keeps the "catch and string-match" client pattern. Rejected.
+- _Converting each throw site to an early `return { ok: false, ... }`._ Loses transaction-rollback-by-throw inside `db.$transaction` callbacks and turns one-line guards into plumbing through every helper. The throw-then-convert design keeps the bodies unchanged.
+
+**Consequences.** Client call sites check `res.ok` instead of catching — `catch` blocks around action calls now only see genuine bugs. Sites that ignore an action's result also ignore its expected failures (no boundary fallback anymore); Package 2 of the audit (client action discipline) owns making every call site surface `{ ok: false }`. When a transition should still crash to the boundary on a bug, `await` the action inside `startTransition(async () => ...)` — discarding the promise (`void action()`) swallows the rejection.
+
+**Reverse if.** Next.js ever ships a sanctioned way to mark a server-action error as safe-to-serialize (at which point the throw-based convention could return), or actions stop being the sole mutation surface.

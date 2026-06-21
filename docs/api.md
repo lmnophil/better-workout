@@ -16,24 +16,33 @@ The app has three distinct ways of being called, and they answer different quest
 
 ## How to call a server action from the React side
 
-The canonical pattern, used throughout `components/workout/`:
+Every action returns `ActionResult<T>` (`lib/action-result.ts`): `{ ok: true, data }` on success, `{ ok: false, error }` for an expected failure whose `error` string is UI copy. The canonical pattern:
 
 ```tsx
 'use client';
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import { addSet } from '@/lib/actions';
 
 function AddSetButton({ exerciseId }: { exerciseId: string }) {
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   return (
-    <button disabled={isPending} onClick={() => startTransition(() => addSet({ exerciseId }))}>
+    <button
+      disabled={isPending}
+      onClick={() =>
+        startTransition(async () => {
+          const res = await addSet({ exerciseId });
+          if (!res.ok) setError(res.error);
+        })
+      }
+    >
       Add set
     </button>
   );
 }
 ```
 
-`useTransition` gives you `isPending` to disable the button during the call (preventing double-submits) and lets the action run without blocking the UI thread. If the action throws, the error bubbles to the nearest `error.tsx` boundary — you don't need a `try/catch` for routine error handling.
+`useTransition` gives you `isPending` to disable the button during the call (preventing double-submits) and lets the action run without blocking the UI thread. Check `res.ok` and render `res.error` — that string survives production builds, which a thrown error's `message` does not. A genuine bug still _throws_; `await`ing the action inside the transition (as above) lets that rejection reach the nearest `error.tsx` boundary, so don't discard the promise (`void addSet(...)`) and don't add a `try/catch` unless you're rendering a local fallback.
 
 ## How to read a server action
 
@@ -47,7 +56,7 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
   const { exerciseId } = AddSetSchema.parse(input); // 2. validation
   await requireAvailableExercise(userId, exerciseId); // 3. ownership check
   const session = await findActiveSession(userId);
-  if (!session) throw new Error('No active session'); // 4. expected error
+  if (!session) throw new ExpectedError('No active session'); // 4. expected error
   // ... mutation logic ...
   metrics.setsLogged.inc(); // 5. domain metric
   revalidatePath('/'); // 6. invalidate
@@ -56,18 +65,18 @@ export const addSet = withLogging('addSet', async (input: z.infer<typeof AddSetS
 
 What each piece is doing:
 
-1. **`requireUser()`** — pulls userId from the Auth.js session. Throws `'Unauthorized'` if there isn't one. Never trust a userId from the client; always derive it server-side.
-2. **Zod parse** — validates inputs at the trust boundary. Throws on bad shape; the `withLogging` wrapper categorizes Zod errors as expected (warn level).
+1. **`requireUser()`** — pulls userId from the Auth.js session. Redirects to `/signin` if there isn't one (a dead session mid-action has no message worth showing). Never trust a userId from the client; always derive it server-side.
+2. **Zod parse** — validates inputs at the trust boundary. Throws on bad shape; the `withLogging` wrapper logs Zod errors at warn and returns a generic `{ ok: false }` (a malformed payload is a client bug, not a user mistake).
 3. **Ownership check** — before mutating anything that has an owner, verify the current user owns it. `requireAvailableExercise` covers the "is this exercise mine or built-in" case; for sets, it's the `setLog.session.userId !== userId` pattern.
-4. **Expected errors** — string prefixes that match `EXPECTED_MESSAGES` in `lib/observability.ts` log at warn (no stack trace). New error messages need to be added there or they'll be logged as bugs.
+4. **Expected errors** — throw `ExpectedError` from `lib/action-result.ts`. The message IS the UI copy: `withLogging` converts it to `{ ok: false, error: message }`, which is how it survives prod's error redaction. Anything thrown as a plain `Error` is treated as a bug (error-level log with stack, rethrown to the boundary) — and ESLint rejects `throw new Error` in `lib/actions.ts` to keep the two from blurring.
 5. **Domain metrics** — call out to the Prometheus counter when something user-meaningful happens (set logged, session completed, template used).
 6. **`revalidatePath`** — tells Next.js the page's cached server-component output is stale, so the next render fetches fresh data. Every mutation needs this; without it the user sees their old data after a successful action.
 
-The `withLogging('addSet', ...)` wrapper handles timing histograms, success/error counters, slow-action warnings, and expected-vs-bug categorization automatically. Don't add your own action-level logging — let the wrapper do it.
+The `withLogging('addSet', ...)` wrapper handles timing histograms, success/error counters, slow-action warnings, expected-vs-bug categorization, and the `ActionResult` envelope automatically — the body returns `T` and callers receive `ActionResult<T>`. Don't add your own action-level logging — let the wrapper do it.
 
 ## Auth model in one paragraph
 
-Every server action calls `requireUser()` first; the function throws `'Unauthorized'` if there's no session. Every server-side query takes `userId` as a parameter and is called from a server component that already authed at the top of its `async function Page()` body. The middleware redirects unauthenticated requests away from protected routes before they ever reach the action or query layer — but actions and queries don't trust that, they re-check. Belt and suspenders on purpose.
+Every server action calls `requireUser()` first; the function redirects to `/signin` if there's no session. Every server-side query takes `userId` as a parameter and is called from a server component that already authed at the top of its `async function Page()` body. The middleware redirects unauthenticated requests away from protected routes before they ever reach the action or query layer — but actions and queries don't trust that, they re-check. Belt and suspenders on purpose.
 
 ## Server actions: the categories
 
@@ -93,7 +102,7 @@ Queries in `lib/queries.ts`. All take `userId` as the first parameter; never tru
 
 **Active session and exercises.** `getActiveSession` returns the user's in-progress session or null; `getAvailableExercises` returns built-ins + non-deleted customs annotated with the user's per-exercise overrides; `getLastSetsByExercise` returns "what did I do last time" for the trailing 180 days (see [decisions.md](./decisions.md) on the window).
 
-**Coverage and volume.** A `Map<muscleId, Date>` of most-recent muscle hits (trailing 90 days) drives the color-graded coverage map; a `Map<muscleId, number>` of weighted weekly sets drives the volume bars. Primary muscles credit 1.0 per set, secondary 0.5 — coverage (recency) treats both equally. These read actual `SetLog`s from completed sessions, so they're exact even with pools (only picked members were logged). The *structural* estimate (`computeRoutineVolumes` in `lib/coverage.ts`, used by the routine editor's coverage panel + per-day strip and the share view) additionally scales pooled members by `pickCount / memberCount` so a "do X of N" pool is estimated at what it actually delivers, not all N; the same weighting drives the editor's per-day time estimate.
+**Coverage and volume.** A `Map<muscleId, Date>` of most-recent muscle hits (trailing 90 days) drives the color-graded coverage map; a `Map<muscleId, number>` of weighted weekly sets drives the volume bars. Primary muscles credit 1.0 per set, secondary 0.5 — coverage (recency) treats both equally. These read actual `SetLog`s from completed sessions, so they're exact even with pools (only picked members were logged). The _structural_ estimate (`computeRoutineVolumes` in `lib/coverage.ts`, used by the routine editor's coverage panel + per-day strip and the share view) additionally scales pooled members by `pickCount / memberCount` so a "do X of N" pool is estimated at what it actually delivers, not all N; the same weighting drives the editor's per-day time estimate.
 
 **Preferences and templates.** `getUserPreferences` returns defaults when no row exists, so first-render is cheap. `getTemplates` returns the user's templates + unhidden built-ins, **excluding templates currently used by the routine** (those surface through the routine timeline). `getHiddenBuiltinTemplates` drives the unhide UI in settings.
 
@@ -124,7 +133,7 @@ The recipe, in order:
 3. **Call `requireUser()`** as the first line. Don't accept `userId` from input.
 4. **Validate input** with `Schema.parse(input)`.
 5. **Check ownership** of any resource you're touching. For exercises, use `requireAvailableExercise`. For sets, scope by `setLog.session.userId === userId`.
-6. **Throw expected errors as `Error` with stable message prefixes.** If you add a new prefix, also add it to `EXPECTED_MESSAGES` in `lib/observability.ts` — otherwise it'll log at error level with a stack trace, polluting the log stream.
+6. **Throw expected errors as `ExpectedError`** (from `lib/action-result.ts`) **with user-readable messages** — the message is rendered verbatim in the UI. Plain `Error` is reserved for genuine invariant violations and logs as a bug; ESLint enforces the split in `lib/actions.ts`.
 7. **Wrap multi-step DB writes in `db.$transaction`.** A failure mid-sequence shouldn't leave the database half-mutated.
 8. **Bump a domain metric** if the action represents something user-meaningful (`metrics.setsLogged.inc()`, etc.). Pure infrastructure actions don't need this.
 9. **`revalidatePath('/')`** at the end (or the relevant path). Without it the user sees stale data.
@@ -148,7 +157,7 @@ When you wrap an action with `withLogging`, you get for free:
 - **Timing histogram** (`action_duration_seconds{action,status}`) — Prometheus metric.
 - **Counter** (`actions_total{action,status}`) — for rate dashboards.
 - **Slow-action warning** at log level `warn` if the action takes >1s.
-- **Error categorization** — expected errors (matched against `EXPECTED_MESSAGES` or known error names like `ZodError`) log at `warn`; everything else logs at `error` with a full stack.
+- **Error categorization** — `ExpectedError` and `ZodError` log at `warn` without a stack and come back to the caller as `{ ok: false, error }`; everything else logs at `error` with a full stack and rethrows to the error boundary.
 - **Action name in the log context** via `logger.child({ action: name })` — every log line during the action is tagged.
 
 Prisma queries are also auto-instrumented via `lib/db.ts`'s `$on('query')` hook: timing histogram for every query, plus a `warn` log for anything over 100ms with the parameterized SQL (no values — those would leak PII). Auth events (sign-in, sign-out, user-created, account-linked) are instrumented via Auth.js's `events` config in `auth.ts`.

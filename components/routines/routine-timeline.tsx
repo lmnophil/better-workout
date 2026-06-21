@@ -333,9 +333,10 @@ function DayCard({
     }
     startTransition(async () => {
       try {
-        await startFromRoutineDay({ routineDayId: day.id });
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not start workout.');
+        const res = await startFromRoutineDay({ routineDayId: day.id });
+        if (!res.ok) setError(res.error);
+      } catch {
+        setError('Could not start workout. Try again?');
       }
     });
   }
@@ -344,10 +345,14 @@ function DayCard({
     setError(null);
     startTransition(async () => {
       try {
-        await startFromRoutineDay({ routineDayId: day.id, poolPicks });
+        const res = await startFromRoutineDay({ routineDayId: day.id, poolPicks });
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
         setResolvingPools(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not start workout.');
+      } catch {
+        setError('Could not start workout. Try again?');
       }
     });
   }
@@ -396,14 +401,18 @@ function DayCard({
     setError(null);
     startTransition(async () => {
       try {
-        await setPendingSwap({
+        const res = await setPendingSwap({
           routineDayId: day.id,
           outExerciseId: pendingChoice.outExerciseId,
           inExerciseId: pendingChoice.inExerciseId,
         });
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
         setPendingChoice(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not save swap.');
+      } catch {
+        setError('Could not save swap. Try again?');
       }
     });
   }
@@ -419,14 +428,18 @@ function DayCard({
     setError(null);
     startTransition(async () => {
       try {
-        await swapInRoutineTemplate({
+        const res = await swapInRoutineTemplate({
           routineDayId: day.id,
           outExerciseId: pendingChoice.outExerciseId,
           inExerciseId: pendingChoice.inExerciseId,
         });
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
         setPendingChoice(null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not save swap.');
+      } catch {
+        setError('Could not save swap. Try again?');
       }
     });
   }
@@ -468,14 +481,10 @@ function DayCard({
               <span
                 className="text-[10px] tracking-[0.2em] uppercase font-mono accent-text bg-accent/10 border border-accent/30 rounded-full px-2 py-0.5"
                 aria-label={
-                  scheduleStyle === 'weekday' && weekdayLabel
-                    ? weekdayLabel
-                    : `Day ${day.position}`
+                  scheduleStyle === 'weekday' && weekdayLabel ? weekdayLabel : `Day ${day.position}`
                 }
               >
-                {scheduleStyle === 'weekday' && weekdayLabel
-                  ? weekdayLabel
-                  : `Day ${day.position}`}
+                {scheduleStyle === 'weekday' && weekdayLabel ? weekdayLabel : `Day ${day.position}`}
               </span>
               <span>{day.templateName}</span>
               {hasPendingSwaps && (
@@ -535,7 +544,6 @@ function DayCard({
           excludeIds={effectiveInDay}
           onPickMany={() => {}} // unused in swap mode
           onClose={() => setPickerSwap(null)}
-          onCreateCustom={() => {}}
           onDeleteCustom={() => {}}
           swap={{
             targetName: pickerSwap.outExerciseName,
