@@ -4,7 +4,9 @@ node_modules/
 .pnp.js
 
 # Testing
-coverage/
+# Root-anchored so it only ignores test-coverage reports at the repo root, not
+# the app's components/coverage/ and app/(app)/coverage/ source directories.
+/coverage/
 
 # Next.js
 .next/
