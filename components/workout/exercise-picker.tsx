@@ -18,12 +18,11 @@
 // state's area chips (when the picker is opened from there) so the user's
 // pre-filter carries through; otherwise it starts unfiltered.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Search, Trash2, Check, ChevronDown } from 'lucide-react';
 import { VideoLink } from '@/components/ui/video-link';
 import { relativeDay } from '@/lib/utils';
 import type { ActionResult } from '@/lib/action-result';
-import type { ExerciseUsageStat } from '@/lib/queries';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
 import { MuscleChips } from '@/components/ui/muscle-chips';
 import {
@@ -46,8 +45,10 @@ import {
   regionForExercise,
   regionFromMuscleId,
 } from '@/lib/region-color';
-import type { ExerciseInfo } from './workout-view';
+import type { ExerciseInfo, ExerciseUsageStat } from '@/lib/usage-stats';
 import { usePrefs } from '@/components/ui/prefs-context';
+import { ModalShell } from '@/components/ui/modal-shell';
+import { useConfirm } from '@/components/ui/use-confirm';
 import {
   TIME_ESTIMATE,
   estimatePlannedExerciseSeconds,
@@ -121,26 +122,44 @@ export function ExercisePicker({
 }: Props) {
   const [tab, setTab] = useState<'browse' | 'custom'>('browse');
   const isSwap = swap !== undefined;
+  const { confirm, Dialog } = useConfirm();
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  // The custom-exercise form reports whether it has unsaved input. Held in a
+  // ref (read only at close time) so keystrokes don't re-render the picker.
+  const customDirtyRef = useRef(false);
+  const setCustomDirty = useCallback((dirty: boolean) => {
+    customDirtyRef.current = dirty;
+  }, []);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+  // Escape, the backdrop, and the ✕ all route through here. Closing from the
+  // custom tab while its form is dirty would silently discard a typed-out
+  // exercise, so confirm first; the picker goes inert meanwhile so it and the
+  // confirm don't both own the keyboard. Every other close is immediate.
+  const requestClose = useCallback(() => {
+    if (tab === 'custom' && customDirtyRef.current) {
+      setConfirmingClose(true);
+      void confirm({
+        title: 'Discard this exercise?',
+        message: "You've started a custom exercise. Close without saving it?",
+        variant: 'danger',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep editing',
+      }).then((ok) => {
+        setConfirmingClose(false);
+        if (ok) onClose();
+      });
+      return;
+    }
+    onClose();
+  }, [tab, confirm, onClose]);
 
   return (
-    <div
-      className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="picker-title"
-    >
-      <div
-        className="bg-ink-950 border border-ink-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg sm:mx-4 max-h-[90vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
+    <>
+      <ModalShell
+        onClose={requestClose}
+        inert={confirmingClose}
+        labelledBy="picker-title"
+        panelClassName="rounded-t-2xl sm:rounded-2xl sm:max-w-lg sm:mx-4 max-h-[90vh] flex flex-col"
       >
         <div className="px-5 pt-4 pb-3 border-b border-ink-800 flex items-center justify-between">
           <h2 id="picker-title" className="font-display text-2xl">
@@ -153,7 +172,7 @@ export function ExercisePicker({
             )}
           </h2>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             className="text-ink-500 hover:text-ink-100 transition p-2 -mr-2"
             aria-label="Close picker"
           >
@@ -214,6 +233,7 @@ export function ExercisePicker({
         ) : (
           <div className="flex-1 overflow-y-auto">
             <CustomTab
+              onDirtyChange={setCustomDirty}
               onCreate={async (
                 name,
                 primary,
@@ -236,8 +256,9 @@ export function ExercisePicker({
             />
           </div>
         )}
-      </div>
-    </div>
+      </ModalShell>
+      {Dialog}
+    </>
   );
 }
 
@@ -446,6 +467,31 @@ function BrowseTab({
     () => availableExercises.filter((e) => selected.has(e.id)),
     [availableExercises, selected],
   );
+  // Ids visible after the current filters. Selections deliberately persist
+  // across chip/search changes (the user is meant to mix module-bulk and
+  // row-by-row picks freely), so some selected exercises can be off-screen.
+  const visibleIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const arr of groupedByModule.values()) for (const e of arr) ids.add(e.id);
+    return ids;
+  }, [groupedByModule]);
+  // Selected-but-hidden exercises, surfaced as removable chips in the footer so
+  // the "Add N" count is never padded by picks the user can't see.
+  const hiddenSelected = useMemo(
+    () =>
+      selectedExercises
+        .filter((e) => !visibleIds.has(e.id))
+        .map((e) => ({ id: e.id, name: e.name })),
+    [selectedExercises, visibleIds],
+  );
+  function deselect(id: string) {
+    setSelected((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
   const summary = useMemo(() => summariseTargets(selectedExercises), [selectedExercises]);
   const hint = useMemo(() => balanceHint(selectedExercises), [selectedExercises]);
 
@@ -792,6 +838,8 @@ function BrowseTab({
           totalSec={selectedTotalSec}
           onCommit={commit}
           onCommitAsPool={onPickAsPool ? commitAsPool : undefined}
+          hiddenSelected={hiddenSelected}
+          onRemoveHidden={deselect}
         />
       )}
     </>
@@ -942,6 +990,8 @@ function PickerFooter({
   totalSec,
   onCommit,
   onCommitAsPool,
+  hiddenSelected,
+  onRemoveHidden,
 }: {
   selectedCount: number;
   primaryCounts: Map<string, number>;
@@ -955,6 +1005,10 @@ function PickerFooter({
   // instead of adding them as separate slots. Only the routine editor passes
   // it; surfaced as a secondary button once 2+ exercises are selected.
   onCommitAsPool?: () => void;
+  // Selected exercises the current filters have hidden — shown as removable
+  // chips so the user can see (and drop) picks that aren't in the visible list.
+  hiddenSelected: { id: string; name: string }[];
+  onRemoveHidden: (id: string) => void;
 }) {
   // Convert the primary-count map into labelled rows. Order by descending
   // count so the dominant muscle reads first.
@@ -968,6 +1022,26 @@ function PickerFooter({
 
   return (
     <div className="border-t border-ink-800 bg-ink-950 px-5 py-3 space-y-2">
+      {hiddenSelected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-ink-500 mr-0.5">
+            {hiddenSelected.length} selected, hidden by filters:
+          </span>
+          {hiddenSelected.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              onClick={() => onRemoveHidden(e.id)}
+              className="inline-flex items-center gap-1 text-[10px] text-ink-300 bg-ink-900 border border-ink-700 rounded-full pl-2 pr-1 py-0.5 hover:border-ink-500 transition"
+              aria-label={`Remove ${e.name} from selection`}
+              title={`Remove ${e.name} from selection`}
+            >
+              <span className="truncate max-w-[140px]">{e.name}</span>
+              <X size={11} className="text-ink-500" />
+            </button>
+          ))}
+        </div>
+      )}
       {selectedCount > 0 && rows.length > 0 && (
         <div className="text-[11px] text-ink-400 leading-relaxed">
           <span className="text-ink-500 mr-1">Targets:</span>
@@ -1013,6 +1087,7 @@ function PickerFooter({
 
 function CustomTab({
   onCreate,
+  onDirtyChange,
 }: {
   onCreate: (
     name: string,
@@ -1022,6 +1097,9 @@ function CustomTab({
     videoUrl: string | undefined,
     restTimerSeconds: number | undefined,
   ) => Promise<ActionResult<unknown>>;
+  // Reports whether the form holds unsaved input, so the picker can warn before
+  // a destructive close discards it.
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [name, setName] = useState('');
   const [primary, setPrimary] = useState<string[]>([]);
@@ -1032,6 +1110,18 @@ function CustomTab({
   const [restSeconds, setRestSeconds] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+
+  const isDirty =
+    name.trim() !== '' ||
+    primary.length > 0 ||
+    secondary.length > 0 ||
+    prescription.trim() !== '' ||
+    videoUrl.trim() !== '';
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+    // Reset on unmount (tab switch / close) so a stale "dirty" can't linger.
+    return () => onDirtyChange?.(false);
+  }, [isDirty, onDirtyChange]);
 
   function togglePrimary(id: string) {
     setPrimary((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));

@@ -6,6 +6,7 @@
 
 import { useState } from 'react';
 import { usePrefs } from '@/components/ui/prefs-context';
+import { Row, Toggle, CustomNumberField } from './settings-controls';
 
 const DURATION_PRESETS = [30, 60, 90, 120, 180, 240];
 
@@ -72,30 +73,16 @@ export function RestTimerEditor() {
 
       {/* Custom duration input — only visible when "Custom" is active */}
       {customOpen && (
-        <div className="px-4 py-2.5 flex items-center gap-2 bg-ink-900/40 rounded-lg">
-          <label
-            htmlFor="custom-rest"
-            className="text-[10px] tracking-[0.2em] uppercase text-ink-400"
-          >
-            Seconds
-          </label>
-          <input
-            id="custom-rest"
-            type="number"
-            min={5}
-            max={600}
-            value={customValue}
-            onChange={(e) => setCustomValue(e.target.value)}
-            onBlur={commitCustom}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.currentTarget.blur();
-              }
-            }}
-            className="w-20 bg-ink-900 border border-ink-800 rounded px-2 py-1 text-sm font-mono text-right focus:outline-none focus:border-accent/50"
-          />
-          <span className="text-[10px] text-ink-600">5–600</span>
-        </div>
+        <CustomNumberField
+          id="custom-rest"
+          label="Seconds"
+          value={customValue}
+          onChange={setCustomValue}
+          onCommit={commitCustom}
+          min={5}
+          max={600}
+          hint="5–600"
+        />
       )}
 
       {/* Sound */}
@@ -116,57 +103,5 @@ export function RestTimerEditor() {
         />
       </Row>
     </div>
-  );
-}
-
-// ============ ROW + TOGGLE PRIMITIVES ============
-
-function Row({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2.5 px-4 bg-ink-900/30 rounded-lg">
-      <div className="min-w-0">
-        <div className="text-sm text-ink-100">{label}</div>
-        {description && (
-          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">{description}</div>
-        )}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-  label,
-}: {
-  checked: boolean;
-  onChange: (v: boolean) => void;
-  label: string;
-}) {
-  return (
-    <button
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => onChange(!checked)}
-      className={`relative w-10 h-6 rounded-full border transition ${
-        checked ? 'accent-bg border-transparent' : 'bg-ink-900 border-ink-800'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform ${
-          checked ? 'bg-ink-950 translate-x-4' : 'bg-ink-500 translate-x-0'
-        }`}
-      />
-    </button>
   );
 }

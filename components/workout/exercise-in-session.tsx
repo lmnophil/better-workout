@@ -20,7 +20,8 @@ import {
   Replace,
   RotateCcw,
 } from 'lucide-react';
-import type { ExerciseInfo, SetLogClient } from './workout-view';
+import type { SetLogClient } from './workout-view';
+import type { ExerciseInfo } from '@/lib/usage-stats';
 import { estimateActiveExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { VideoLink } from '@/components/ui/video-link';

@@ -4,29 +4,24 @@
 // Local state mirrors the input; commit happens on blur. "Reset" clears the
 // override and falls back to the default target.
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { RotateCcw, Check } from 'lucide-react';
 import { setVolumeTarget, resetVolumeTarget } from '@/lib/actions';
 import { useAction } from '@/components/ui/use-action';
+import { CATEGORY_LABELS, type MuscleCategory } from '@/lib/exercises-data';
 
 type MuscleSetting = {
   id: string;
   label: string;
-  category: string;
+  category: MuscleCategory;
   defaultTarget: number;
   currentTarget: number;
   isOverridden: boolean;
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  lower: 'Lower body',
-  upper: 'Upper body',
-  trunk: 'Core & trunk',
-};
-
 export function VolumeTargetsEditor({ muscles }: { muscles: MuscleSetting[] }) {
   // Group by category
-  const grouped = new Map<string, MuscleSetting[]>();
+  const grouped = new Map<MuscleCategory, MuscleSetting[]>();
   for (const m of muscles) {
     let bucket = grouped.get(m.category);
     if (!bucket) {
@@ -41,7 +36,7 @@ export function VolumeTargetsEditor({ muscles }: { muscles: MuscleSetting[] }) {
       {Array.from(grouped.entries()).map(([category, items]) => (
         <div key={category}>
           <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-2">
-            {CATEGORY_LABELS[category] ?? category}
+            {CATEGORY_LABELS[category]}
           </div>
           <div className="space-y-1.5">
             {items.map((m) => (
@@ -59,6 +54,24 @@ function Row({ muscle }: { muscle: MuscleSetting }) {
   const [justSaved, setJustSaved] = useState(false);
   const { run } = useAction();
 
+  // Cleared on unmount so the 1.2s "saved" flash can't fire setState after the
+  // row is gone — same ref-based cleanup SetRow uses.
+  const justSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (justSavedTimerRef.current !== null) clearTimeout(justSavedTimerRef.current);
+    };
+  }, []);
+
+  function flashSaved() {
+    setJustSaved(true);
+    if (justSavedTimerRef.current !== null) clearTimeout(justSavedTimerRef.current);
+    justSavedTimerRef.current = setTimeout(() => {
+      setJustSaved(false);
+      justSavedTimerRef.current = null;
+    }, 1200);
+  }
+
   function commit() {
     const n = Number(value);
     if (!Number.isFinite(n) || n < 0 || n > 50) {
@@ -66,13 +79,21 @@ function Row({ muscle }: { muscle: MuscleSetting }) {
       setValue(muscle.currentTarget.toString());
       return;
     }
-    if (n === muscle.currentTarget) return;
-    // Flash the saved check only when the write lands; revert the input if the
-    // server rejects it, so the number shown always matches what's stored.
-    run(() => setVolumeTarget({ muscleId: muscle.id, target: Math.round(n) }), {
+    // The server stores an integer, so round before comparing and displaying —
+    // otherwise typing "12.7" leaves "12.7" on screen while the server saves 13.
+    const rounded = Math.round(n);
+    if (rounded === muscle.currentTarget) {
+      // No change to the stored value; just normalize what's shown.
+      setValue(rounded.toString());
+      return;
+    }
+    // Flash the saved check only when the write lands, and re-sync the input to
+    // the stored (rounded) value; revert it if the server rejects the write, so
+    // the number shown always matches what's stored.
+    run(() => setVolumeTarget({ muscleId: muscle.id, target: rounded }), {
       onSuccess: () => {
-        setJustSaved(true);
-        setTimeout(() => setJustSaved(false), 1200);
+        setValue(rounded.toString());
+        flashSaved();
       },
       onError: () => setValue(muscle.currentTarget.toString()),
     });

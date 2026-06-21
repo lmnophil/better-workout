@@ -12,6 +12,7 @@
 
 import { useState } from 'react';
 import { usePrefs } from '@/components/ui/prefs-context';
+import { Row, CustomNumberField } from './settings-controls';
 
 const SETS_PRESETS = [1, 2, 3, 4, 5];
 const INCREMENT_PRESETS = [1, 2.5, 5, 10];
@@ -102,54 +103,18 @@ export function WorkoutDefaultsEditor() {
       </Row>
 
       {customIncrementOpen && (
-        <div className="px-4 py-2.5 flex items-center gap-2 bg-ink-900/40 rounded-lg">
-          <label
-            htmlFor="custom-increment"
-            className="text-[10px] tracking-[0.2em] uppercase text-ink-400"
-          >
-            Step
-          </label>
-          <input
-            id="custom-increment"
-            type="number"
-            min={0.25}
-            max={50}
-            step={0.25}
-            value={customIncrement}
-            onChange={(e) => setCustomIncrement(e.target.value)}
-            onBlur={commitCustomIncrement}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.currentTarget.blur();
-              }
-            }}
-            className="w-20 bg-ink-900 border border-ink-800 rounded px-2 py-1 text-sm font-mono text-right focus:outline-none focus:border-accent/50"
-          />
-          <span className="text-[10px] text-ink-600">0.25–50</span>
-        </div>
+        <CustomNumberField
+          id="custom-increment"
+          label="Step"
+          value={customIncrement}
+          onChange={setCustomIncrement}
+          onCommit={commitCustomIncrement}
+          min={0.25}
+          max={50}
+          step={0.25}
+          hint="0.25–50"
+        />
       )}
-    </div>
-  );
-}
-
-function Row({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2.5 px-4 bg-ink-900/30 rounded-lg">
-      <div className="min-w-0">
-        <div className="text-sm text-ink-100">{label}</div>
-        {description && (
-          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">{description}</div>
-        )}
-      </div>
-      <div className="shrink-0">{children}</div>
     </div>
   );
 }

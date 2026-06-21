@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Copy, Check, Trash2 } from 'lucide-react';
 import { mintRoutineShare, revokeRoutineShare } from '@/lib/actions';
 import { useAction, ActionError } from '@/components/ui/use-action';
+import { useConfirm } from '@/components/ui/use-confirm';
 
 type Share = {
   id: string;
@@ -22,6 +23,7 @@ type Share = {
 
 export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: string }) {
   const { run, isPending, error, setError } = useAction();
+  const { confirm, Dialog } = useConfirm();
   const [label, setLabel] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [justMintedCopied, setJustMintedCopied] = useState(false);
@@ -49,8 +51,14 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
     });
   };
 
-  const revoke = (shareId: string) => {
-    if (!confirm('Revoke this share link? Anyone with the URL will lose access.')) return;
+  const revoke = async (shareId: string) => {
+    const ok = await confirm({
+      title: 'Revoke this share link?',
+      message: 'Anyone with the URL will lose access.',
+      confirmLabel: 'Revoke',
+      variant: 'danger',
+    });
+    if (!ok) return;
     run(() => revokeRoutineShare({ shareId }));
   };
 
@@ -134,7 +142,7 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
                   </button>
                   <button
                     type="button"
-                    onClick={() => revoke(s.id)}
+                    onClick={() => void revoke(s.id)}
                     disabled={isPending}
                     aria-label="Revoke"
                     className="p-1.5 text-ink-400 hover:text-rose-300"
@@ -168,6 +176,7 @@ export function SharesIndex({ shares, baseUrl }: { shares: Share[]; baseUrl: str
           </ul>
         </details>
       )}
+      {Dialog}
     </div>
   );
 }

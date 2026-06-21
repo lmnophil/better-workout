@@ -11,6 +11,7 @@ import { useAction } from '@/components/ui/use-action';
 import { ReviewerPicker, type LibraryExercise } from './reviewer-picker';
 import type { RoutineForShare } from './share-view';
 import { X } from 'lucide-react';
+import { ModalShell as ModalShellBase } from '@/components/ui/modal-shell';
 
 type SwapState = {
   kind: 'swap';
@@ -670,30 +671,23 @@ function ModalShell({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
+    <ModalShellBase
+      onClose={onClose}
+      panelClassName="rounded-t-2xl sm:rounded-2xl sm:max-w-lg sm:mx-4 max-h-[90vh] flex flex-col"
     >
-      <div
-        className="bg-ink-950 border border-ink-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg sm:mx-4 max-h-[90vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="px-4 pt-4 pb-3 border-b border-ink-800 flex items-center justify-between">
-          <h3 className="font-display text-xl">{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1 text-ink-400 hover:text-ink-100"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto">{children}</div>
+      <div className="px-4 pt-4 pb-3 border-b border-ink-800 flex items-center justify-between">
+        <h3 className="font-display text-xl">{title}</h3>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="p-1 text-ink-400 hover:text-ink-100"
+        >
+          <X size={16} />
+        </button>
       </div>
-    </div>
+      <div className="flex-1 overflow-y-auto">{children}</div>
+    </ModalShellBase>
   );
 }
 

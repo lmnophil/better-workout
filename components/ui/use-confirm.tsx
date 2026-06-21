@@ -13,7 +13,8 @@
 //   ...
 //   return <>...{Dialog}</>;
 
-import { useState, useCallback, useEffect, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { ModalShell } from './modal-shell';
 
 type ConfirmOptions = {
   title: string;
@@ -73,54 +74,51 @@ function ConfirmDialog({
     onConfirm: () => void;
     onCancel: () => void;
   }) {
-  // ESC closes, Enter confirms — matches native confirm() expectations
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  // Enter confirms — matches native confirm() expectations. Escape-to-close,
+  // the focus trap, focus restore, and backdrop dismissal come from ModalShell.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
       if (e.key === 'Enter') onConfirm();
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [onConfirm, onCancel]);
+  }, [onConfirm]);
 
   return (
-    <div
-      className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-4"
-      onClick={onCancel}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-title"
+    <ModalShell
+      onClose={onCancel}
+      labelledBy="confirm-title"
+      overlayClassName="p-4"
+      panelClassName="rounded-2xl max-w-sm p-5"
+      initialFocus={confirmRef}
     >
-      <div
-        className="bg-ink-950 border border-ink-800 rounded-2xl w-full max-w-sm p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 id="confirm-title" className="font-display text-xl mb-2 text-ink-100">
-          {title}
-        </h3>
-        {message && <p className="text-sm text-ink-300 leading-relaxed mb-4">{message}</p>}
-        <div className="flex gap-2 mt-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="flex-1 border border-ink-800 rounded-lg py-2.5 text-sm text-ink-200 hover:border-ink-600 transition"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            autoFocus
-            className={`flex-1 rounded-lg py-2.5 text-sm font-semibold tracking-wide transition ${
-              variant === 'danger'
-                ? 'bg-bad text-ink-100 hover:brightness-110'
-                : 'accent-bg text-ink-950 hover:brightness-110'
-            }`}
-          >
-            {confirmLabel}
-          </button>
-        </div>
+      <h3 id="confirm-title" className="font-display text-xl mb-2 text-ink-100">
+        {title}
+      </h3>
+      {message && <p className="text-sm text-ink-300 leading-relaxed mb-4">{message}</p>}
+      <div className="flex gap-2 mt-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="flex-1 border border-ink-800 rounded-lg py-2.5 text-sm text-ink-200 hover:border-ink-600 transition"
+        >
+          {cancelLabel}
+        </button>
+        <button
+          type="button"
+          ref={confirmRef}
+          onClick={onConfirm}
+          className={`flex-1 rounded-lg py-2.5 text-sm font-semibold tracking-wide transition ${
+            variant === 'danger'
+              ? 'bg-bad text-ink-100 hover:brightness-110'
+              : 'accent-bg text-ink-950 hover:brightness-110'
+          }`}
+        >
+          {confirmLabel}
+        </button>
       </div>
-    </div>
+    </ModalShell>
   );
 }

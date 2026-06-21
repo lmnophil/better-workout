@@ -7,7 +7,7 @@
 // offline failure surfaces in the pinned banner instead of vanishing. useConfirm
 // supplies the on-brand confirmation dialogs.
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { Plus, Check, Calendar, Clock, Trash2, BookmarkPlus, ArrowRight } from 'lucide-react';
 import {
@@ -47,54 +47,14 @@ import type { ActionResult } from '@/lib/action-result';
 import { muscleIdsToChipIds } from '@/lib/area-filter';
 import { moduleDescription } from '@/lib/exercises-data';
 import { RoutineTimeline, type RoutineTimelineProps } from '@/components/routines/routine-timeline';
+import { ModalShell } from '@/components/ui/modal-shell';
+import type { ExerciseInfo } from '@/lib/usage-stats';
 
 // ============ TYPES ============
 
-export type ExerciseInfo = {
-  id: string;
-  name: string;
-  module: string;
-  prescription: string | null;
-  primaryMuscles: string[];
-  secondaryMuscles: string[];
-  videoUrl: string | null;
-  isCustom: boolean;
-  // 'reps' (the default) or 'time'. Determines which input the set row renders.
-  metric: string;
-  // 'weight' (the default), 'band', or 'none'. Determines whether the set row
-  // shows a numeric weight stepper, a band-strength chip selector, or hides
-  // the load column entirely. See Exercise.loadType in schema.prisma.
-  loadType: string;
-  // Equipment tokens. Used by the routine preset picker; the active session UI
-  // doesn't filter on it.
-  equipment: string[];
-  // Per-user rest timer override; null = use the global default from preferences
-  restTimerSecondsOverride: number | null;
-  // Per-user weight stepper override; null = use the global default
-  weightIncrementOverride: number | null;
-};
-
-// Per-exercise usage stat in its serialized (server→client) form: the date is
-// an ISO string. buildUsageStatsMap rehydrates a list of these into the
-// Map<exerciseId, { lastDoneDate: Date, sessionCount }> the ExercisePicker
-// wants. Lives here because the picker, the routine editor, and the routine
-// timeline all consume it.
-export type ExerciseUsageStatClient = {
-  exerciseId: string;
-  lastDoneDate: string; // ISO
-  sessionCount: number;
-};
-
-export function buildUsageStatsMap(
-  stats: ExerciseUsageStatClient[],
-): Map<string, { lastDoneDate: Date; sessionCount: number }> {
-  return new Map(
-    stats.map((s) => [
-      s.exerciseId,
-      { lastDoneDate: new Date(s.lastDoneDate), sessionCount: s.sessionCount },
-    ]),
-  );
-}
+// ExerciseInfo, ExerciseUsageStatClient, and buildUsageStatsMap now live in
+// lib/usage-stats.ts so the routine editor/timeline can use them without
+// importing from this module (which created an import cycle).
 
 export type SetLogClient = {
   id: string;
@@ -621,7 +581,8 @@ export function WorkoutView({
 
           <button
             onClick={() => openPicker()}
-            className="w-full mt-3 border border-dashed border-ink-700 rounded-lg py-3 text-sm text-ink-300 hover:border-accent/50 hover:text-ink-100 transition flex items-center justify-center gap-2"
+            disabled={isPending}
+            className="w-full mt-3 border border-dashed border-ink-700 rounded-lg py-3 text-sm text-ink-300 hover:border-accent/50 hover:text-ink-100 transition flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Plus size={16} />
             Add more exercises
@@ -917,16 +878,7 @@ function SaveTemplateDialog({
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-
-  // ESC-to-close, matching the picker's behavior. Disabled while submitting
-  // so the user doesn't accidentally lose in-flight input by hitting ESC.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !submitting) onClose();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [onClose, submitting]);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const trimmedName = name.trim();
   const collision = trimmedName.length > 0 && existingNames.has(trimmedName);
@@ -953,74 +905,69 @@ function SaveTemplateDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center"
-      onClick={() => !submitting && onClose()}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="save-template-title"
+    <ModalShell
+      onClose={onClose}
+      isSubmitting={submitting}
+      labelledBy="save-template-title"
+      panelClassName="rounded-t-2xl sm:rounded-2xl sm:max-w-md sm:mx-4 p-5"
+      initialFocus={nameRef}
     >
-      <div
-        className="bg-ink-950 border border-ink-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md sm:mx-4 p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="save-template-title" className="font-display text-2xl mb-1">
-          Save as template
-        </h2>
-        <p className="text-xs text-ink-500 italic font-display mb-4">
-          Just the exercises and order. Sets, reps, and weights stay with this session.
-        </p>
+      <h2 id="save-template-title" className="font-display text-2xl mb-1">
+        Save as template
+      </h2>
+      <p className="text-xs text-ink-500 italic font-display mb-4">
+        Just the exercises and order. Sets, reps, and weights stay with this session.
+      </p>
 
-        <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block mb-1.5">
-          Name
-        </label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            if (serverError) setServerError(null);
-          }}
+      <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block mb-1.5">
+        Name
+      </label>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => {
+          setName(e.target.value);
+          if (serverError) setServerError(null);
+        }}
+        disabled={submitting}
+        ref={nameRef}
+        placeholder="e.g. Lower body day"
+        className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-sm mb-1 focus:outline-none focus:border-accent/50 disabled:opacity-60"
+      />
+      {collision && (
+        <p className="text-[10px] text-bad mb-3">You already have a template by that name.</p>
+      )}
+      {!collision && !serverError && <div className="mb-4" />}
+      {serverError && <p className="text-[10px] text-bad mb-3">{serverError}</p>}
+
+      <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block mb-1.5">
+        Description <span className="text-ink-600">(optional)</span>
+      </label>
+      <input
+        type="text"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        disabled={submitting}
+        placeholder="What's this for?"
+        className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-sm mb-5 focus:outline-none focus:border-accent/50 disabled:opacity-60"
+      />
+
+      <div className="flex gap-2 justify-end">
+        <button
+          onClick={onClose}
           disabled={submitting}
-          placeholder="e.g. Lower body day"
-          autoFocus
-          className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-sm mb-1 focus:outline-none focus:border-accent/50 disabled:opacity-60"
-        />
-        {collision && (
-          <p className="text-[10px] text-bad mb-3">You already have a template by that name.</p>
-        )}
-        {!collision && !serverError && <div className="mb-4" />}
-        {serverError && <p className="text-[10px] text-bad mb-3">{serverError}</p>}
-
-        <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block mb-1.5">
-          Description <span className="text-ink-600">(optional)</span>
-        </label>
-        <input
-          type="text"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          disabled={submitting}
-          placeholder="What's this for?"
-          className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-sm mb-5 focus:outline-none focus:border-accent/50 disabled:opacity-60"
-        />
-
-        <div className="flex gap-2 justify-end">
-          <button
-            onClick={onClose}
-            disabled={submitting}
-            className="px-4 py-2 text-xs tracking-wider uppercase text-ink-300 hover:text-ink-100 transition disabled:opacity-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            disabled={!canSave}
-            className="accent-bg text-ink-950 px-4 py-2 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            {submitting ? 'Saving…' : 'Save'}
-          </button>
-        </div>
+          className="px-4 py-2 text-xs tracking-wider uppercase text-ink-300 hover:text-ink-100 transition disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={submit}
+          disabled={!canSave}
+          className="accent-bg text-ink-950 px-4 py-2 rounded-lg text-sm font-semibold tracking-wide hover:brightness-110 transition disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          {submitting ? 'Saving…' : 'Save'}
+        </button>
       </div>
-    </div>
+    </ModalShell>
   );
 }

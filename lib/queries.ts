@@ -5,6 +5,7 @@ import { cache } from 'react';
 import { db } from '@/lib/db';
 import { PREFS_DEFAULTS, type UserPrefs } from '@/lib/prefs';
 import { DEFAULT_VOLUME_TIER, isVolumeTier } from '@/lib/coverage';
+import type { ExerciseUsageStat } from '@/lib/usage-stats';
 
 export type ActiveSession = Awaited<ReturnType<typeof getActiveSession>>;
 export type AvailableExercise = Awaited<ReturnType<typeof getAvailableExercises>>[number];
@@ -299,8 +300,6 @@ export async function getCoverageData(userId: string) {
   }
   return lastWorkedByMuscle;
 }
-
-export type ExerciseUsageStat = { lastDoneDate: Date; sessionCount: number };
 
 /**
  * Per-exercise usage over the trailing 365 days: when it was last done and how

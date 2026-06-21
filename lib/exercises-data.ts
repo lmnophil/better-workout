@@ -1525,6 +1525,18 @@ export const SEED_EXERCISES: SeedExercise[] = [
 
 export type MuscleCategory = 'lower' | 'upper' | 'trunk' | 'mobility' | 'other';
 
+// Display labels for the muscle categories. One definition shared by every
+// surface that groups muscles by category (coverage view, routine-editor
+// coverage panel, share coverage, volume-target settings) so the headings
+// can't drift apart.
+export const CATEGORY_LABELS: Record<MuscleCategory, string> = {
+  lower: 'Lower body',
+  upper: 'Upper body',
+  trunk: 'Core & trunk',
+  mobility: 'Mobility',
+  other: 'Other',
+};
+
 export type MuscleGroup = {
   id: string;
   label: string;

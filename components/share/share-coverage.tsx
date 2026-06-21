@@ -22,6 +22,8 @@ import {
   type MuscleVolumes,
   type VolumeTier,
 } from '@/lib/coverage';
+import { CATEGORY_LABELS } from '@/lib/exercises-data';
+import { CoverageRow, CoverageSummaryStrip } from '@/components/coverage/coverage-ui';
 import type { RoutineForShare } from './share-view';
 
 export type ShareMuscleGroup = {
@@ -32,14 +34,6 @@ export type ShareMuscleGroup = {
   target: number | null;
   isOverridden: boolean;
   description: string | null;
-};
-
-const CATEGORY_LABEL: Record<ShareMuscleGroup['category'], string> = {
-  lower: 'Lower body',
-  upper: 'Upper body',
-  trunk: 'Core & trunk',
-  mobility: 'Mobility',
-  other: 'Other',
 };
 
 function boundsOf(m: ShareMuscleGroup): { min: number; target: number } | null {
@@ -103,16 +97,6 @@ export function ShareCoveragePanel({
     return { target, ok, under, gap, emphasis };
   }, [muscleGroups, totals]);
 
-  const summaryItems = (
-    [
-      { tier: 'target', label: 'on target', count: summary.target },
-      { tier: 'ok', label: 'good', count: summary.ok },
-      { tier: 'under', label: 'below min', count: summary.under },
-      { tier: 'gap', label: 'gap', count: summary.gap },
-      { tier: 'emphasis', label: 'emphasis', count: summary.emphasis },
-    ] satisfies { tier: CoverageTier; label: string; count: number }[]
-  ).filter((i) => i.count > 0);
-
   return (
     <section className="px-5 py-5 border-b border-ink-800">
       <div className="flex items-baseline justify-between mb-2 gap-2">
@@ -134,92 +118,30 @@ export function ShareCoveragePanel({
         )}
       </p>
 
-      {summaryItems.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          {summaryItems.map((i) => {
-            const tok = TIER_VISUALS[i.tier];
-            return (
-              <span
-                key={i.tier}
-                className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded-full border"
-                style={{ background: tok.bg, borderColor: tok.border }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: tok.dot }} />
-                <span className="text-ink-200">{i.count}</span>
-                <span className="text-ink-400">{i.label}</span>
-              </span>
-            );
-          })}
-        </div>
-      )}
+      <CoverageSummaryStrip summary={summary} className="mb-3" />
 
       <div className="space-y-3">
         {Array.from(byCategory.entries()).map(([cat, items]) => (
           <div key={cat}>
             <div className="text-[10px] tracking-[0.25em] uppercase text-ink-500 mb-1.5">
-              {CATEGORY_LABEL[cat]}
+              {CATEGORY_LABELS[cat]}
             </div>
             <div className="space-y-1">
               {items.map((m) => (
-                <ShareCoverageRow key={m.id} muscle={m} sets={totals.get(m.id)?.sets ?? 0} />
+                <CoverageRow
+                  key={m.id}
+                  label={m.label}
+                  sets={totals.get(m.id)?.sets ?? 0}
+                  target={m.target}
+                  min={m.min}
+                  description={m.description}
+                />
               ))}
             </div>
           </div>
         ))}
       </div>
     </section>
-  );
-}
-
-function ShareCoverageRow({ muscle, sets }: { muscle: ShareMuscleGroup; sets: number }) {
-  const target = muscle.target;
-  const min = muscle.min;
-  const hasTarget = target !== null && target > 0;
-  const ratio = hasTarget ? Math.min(sets / target, 1) : 0;
-  const minRatio = hasTarget && min !== null && min > 0 ? Math.min(min / target, 1) : 0;
-  const tier = tierOf(sets, muscle);
-  const tok = TIER_VISUALS[tier];
-
-  return (
-    <div
-      className="border rounded px-2.5 py-1.5 flex items-center gap-3"
-      style={{ background: tok.bg, borderColor: tok.border }}
-      title={muscle.description ? `${muscle.label} — ${muscle.description}` : muscle.label}
-    >
-      <span
-        className="w-1.5 h-1.5 rounded-full shrink-0"
-        style={{ background: tok.dot }}
-        aria-hidden="true"
-      />
-      <span className="text-[12px] text-ink-100 truncate flex-1 min-w-0">{muscle.label}</span>
-      {hasTarget ? (
-        <>
-          <div className="relative flex-1 max-w-[120px] h-1.5 bg-ink-900 rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{
-                width: `${Math.max(ratio * 100, sets > 0 ? 4 : 0)}%`,
-                background: tok.bar,
-              }}
-            />
-            {minRatio > 0 && minRatio < 1 && (
-              <div
-                className="absolute top-[-2px] bottom-[-2px] w-px bg-ink-500/60"
-                style={{ left: `${minRatio * 100}%` }}
-                aria-hidden="true"
-              />
-            )}
-          </div>
-          <span className="font-mono text-[10px] text-ink-400 shrink-0 w-16 text-right">
-            {formatSets(sets)}/{muscle.target}
-          </span>
-        </>
-      ) : (
-        <span className="font-mono text-[10px] text-ink-500 shrink-0">
-          {sets > 0 ? `${formatSets(sets)} sets` : '—'}
-        </span>
-      )}
-    </div>
   );
 }
 

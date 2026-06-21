@@ -288,17 +288,20 @@ function SuggestionCard({
           <ActionRow>
             <ApplyButton
               disabled={pending}
-              onClick={() =>
+              onClick={() => {
+                // No explicit picks means "apply all" — the server treats an
+                // absent list that way. Send undefined rather than the empty
+                // array so the intent is visible at the call site.
+                const ids = Object.entries(pickedInserts)
+                  .filter(([, v]) => v)
+                  .map(([k]) => k);
                 run(() =>
                   applyShareInsert({
                     suggestionId: s.id,
-                    exerciseIds:
-                      Object.entries(pickedInserts)
-                        .filter(([, v]) => v)
-                        .map(([k]) => k) || undefined,
+                    exerciseIds: ids.length > 0 ? ids : undefined,
                   }),
-                )
-              }
+                );
+              }}
               label={Object.values(pickedInserts).some((v) => v) ? `Apply selected` : `Apply all`}
             />
             <RejectButton disabled={pending} onClick={reject} />

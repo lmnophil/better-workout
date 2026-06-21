@@ -65,7 +65,7 @@ import {
   WEEKDAY_LABELS,
   type ScheduleStyle,
 } from '@/lib/routine';
-import { EXERCISE_MODULES } from '@/lib/exercises-data';
+import { CATEGORY_LABELS, EXERCISE_MODULES } from '@/lib/exercises-data';
 import { InfoTooltip } from '@/components/ui/info-tooltip';
 import { ModuleInfoTooltip } from '@/components/ui/module-info-tooltip';
 import {
@@ -81,7 +81,6 @@ import {
   formatSets,
   tierFor as coverageTierFor,
   type CoverageTier,
-  type MuscleVolume,
   type MuscleVolumes,
 } from '@/lib/coverage';
 import {
@@ -102,11 +101,12 @@ import {
   buildUsageStatsMap,
   type ExerciseInfo,
   type ExerciseUsageStatClient,
-} from '@/components/workout/workout-view';
+} from '@/lib/usage-stats';
 import { useConfirm } from '@/components/ui/use-confirm';
 import { useAction, ActionError, type UseAction } from '@/components/ui/use-action';
 import type { ActionResult } from '@/lib/action-result';
 import { usePrefs } from '@/components/ui/prefs-context';
+import { CoverageRow, CoverageSummaryStrip } from '@/components/coverage/coverage-ui';
 import { estimatePlannedExerciseSeconds, formatEstimateCompact } from '@/lib/time-estimate';
 import { VideoLink } from '@/components/ui/video-link';
 import { EquipmentChips } from '@/components/ui/equipment-chips';
@@ -1576,7 +1576,9 @@ function LiveEditor({
           const ids = tpl.exerciseNames
             .map((n) => nameToId.get(n))
             .filter((eid): eid is string => eid !== undefined);
-          runSeq(ids.map((eid) => () => addExerciseToRoutineDay({ routineDayId: id, exerciseId: eid })));
+          runSeq(
+            ids.map((eid) => () => addExerciseToRoutineDay({ routineDayId: id, exerciseId: eid })),
+          );
         }}
         onRemoveExercise={(id, exerciseId) => {
           run(() => removeExerciseFromRoutineDay({ routineDayId: id, exerciseId }));
@@ -1600,7 +1602,9 @@ function LiveEditor({
           });
         }}
         onUpdatePool={(poolId, patch) => {
-          run(() => updateTemplatePool({ poolId, ...patch }), { onSuccess: () => router.refresh() });
+          run(() => updateTemplatePool({ poolId, ...patch }), {
+            onSuccess: () => router.refresh(),
+          });
         }}
         onDeletePool={(poolId) => {
           run(() => deleteTemplatePool({ poolId }), { onSuccess: () => router.refresh() });
@@ -3381,7 +3385,6 @@ function PlannedInputs({
 // "meets target" and "below minimum" mean. We adapt the editor's day shape
 // to the shared PlannedDay shape here.
 
-type MuscleTotal = MuscleVolume;
 type MuscleTotals = MuscleVolumes;
 
 function computeMuscleTotals(
@@ -3588,7 +3591,7 @@ function CoveragePanel({
 
       {hasAnything && (
         <>
-          <SummaryStrip summary={summary} />
+          <CoverageSummaryStrip summary={summary} />
           <CoverageLegend />
           <div className="space-y-4 mt-3">
             {Array.from(byCategory.entries()).map(([category, items]) => (
@@ -3672,53 +3675,6 @@ function LegendRow({
   );
 }
 
-function SummaryStrip({
-  summary,
-}: {
-  summary: { target: number; ok: number; under: number; gap: number; emphasis: number };
-}) {
-  // Small chips. Hidden when nothing falls into a tier, so the strip
-  // collapses cleanly when the routine is fully built or fully empty.
-  const items = (
-    [
-      { tier: 'target', label: 'on target', count: summary.target },
-      { tier: 'ok', label: 'good', count: summary.ok },
-      { tier: 'under', label: 'below min', count: summary.under },
-      { tier: 'gap', label: 'gap', count: summary.gap },
-      { tier: 'emphasis', label: 'emphasis', count: summary.emphasis },
-    ] satisfies { tier: CoverageTier; label: string; count: number }[]
-  ).filter((i) => i.count > 0);
-
-  if (items.length === 0) return null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {items.map((i) => {
-        const tok = TIER_VISUALS[i.tier];
-        return (
-          <span
-            key={i.tier}
-            className="inline-flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded-full border"
-            style={{ background: tok.bg, borderColor: tok.border }}
-          >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: tok.dot }} />
-            <span className="text-ink-200">{i.count}</span>
-            <span className="text-ink-400">{i.label}</span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-const CATEGORY_LABEL: Record<MuscleGroupClient['category'], string> = {
-  lower: 'Lower body',
-  upper: 'Upper body',
-  trunk: 'Core & trunk',
-  mobility: 'Mobility',
-  other: 'Other',
-};
-
 function CoverageCategory({
   category,
   items,
@@ -3757,82 +3713,25 @@ function CoverageCategory({
           style={{ background: TIER_VISUALS[heading].dot }}
           aria-hidden="true"
         />
-        {CATEGORY_LABEL[category]}
+        {CATEGORY_LABELS[category]}
       </div>
       <div className="space-y-1">
         {items.map((m) => {
           const total = totals.get(m.id);
-          return <CoverageRow key={m.id} muscle={m} total={total} />;
+          return (
+            <CoverageRow
+              key={m.id}
+              label={m.label}
+              sets={total?.sets ?? 0}
+              target={m.target}
+              min={m.min}
+              description={m.description}
+              estimated={total?.estimated ?? false}
+              interactive
+            />
+          );
         })}
       </div>
-    </div>
-  );
-}
-
-function CoverageRow({
-  muscle,
-  total,
-}: {
-  muscle: MuscleGroupClient;
-  total: MuscleTotal | undefined;
-}) {
-  const sets = total?.sets ?? 0;
-  const target = muscle.target;
-  const min = muscle.min;
-  const hasTarget = target !== null && target > 0;
-  // Cap at target — "100% bar" means "hit target". Emphasis lifts the bar to
-  // 100% tinted blue so the user sees a saturated bar in that case too.
-  const ratio = hasTarget ? Math.min(sets / target, 1) : 0;
-  const minRatio = hasTarget && min !== null && min > 0 ? Math.min(min / target, 1) : 0;
-  const tier = tierFor(sets, muscle);
-  const tok = TIER_VISUALS[tier];
-
-  const tooltip = muscle.description ? `${muscle.label} — ${muscle.description}` : muscle.label;
-
-  return (
-    <div
-      className="border rounded px-2.5 py-1.5 flex items-center gap-3"
-      style={{ background: tok.bg, borderColor: tok.border }}
-      title={tooltip}
-    >
-      <span
-        className="w-1.5 h-1.5 rounded-full shrink-0"
-        style={{ background: tok.dot }}
-        aria-hidden="true"
-      />
-      <span className="text-[12px] text-ink-100 truncate flex-1 min-w-0 decoration-dotted decoration-ink-700 underline-offset-[3px] hover:underline">
-        {muscle.label}
-      </span>
-
-      {hasTarget ? (
-        <>
-          <div className="relative flex-1 max-w-[120px] h-1.5 bg-ink-900 rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all"
-              style={{
-                width: `${Math.max(ratio * 100, sets > 0 ? 4 : 0)}%`,
-                background: tok.bar,
-              }}
-            />
-            {minRatio > 0 && minRatio < 1 && (
-              <div
-                className="absolute top-[-2px] bottom-[-2px] w-px bg-ink-500/60"
-                style={{ left: `${minRatio * 100}%` }}
-                aria-hidden="true"
-                title={`Minimum: ${min} sets`}
-              />
-            )}
-          </div>
-          <span className="font-mono text-[10px] text-ink-400 shrink-0 w-16 text-right">
-            {formatSets(sets)}/{muscle.target}
-            {total?.estimated && <span className="text-ink-600 ml-0.5">?</span>}
-          </span>
-        </>
-      ) : (
-        <span className="font-mono text-[10px] text-ink-500 shrink-0">
-          {sets > 0 ? `${formatSets(sets)} sets` : '—'}
-        </span>
-      )}
     </div>
   );
 }

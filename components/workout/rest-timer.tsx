@@ -59,8 +59,15 @@ export function useRestTimer(prefs: RestTimerPrefs): RestTimerControls {
     (durationSec?: number) => {
       const total = durationSec ?? prefs.restTimerSeconds;
       if (total <= 0) return;
+      const startedAt = Date.now();
       setTotalSec(total);
-      setEndsAt(Date.now() + total * 1000);
+      // Re-sync `now` to the moment of starting. While the timer is idle the
+      // 250ms tick is stopped, so `now` is stale (last value before the prior
+      // timer ended, or mount time). Without this, the first render computes
+      // remaining against a stale `now` and can flash a wildly wrong time —
+      // e.g. a 90s timer briefly showing "31:30".
+      setNow(startedAt);
+      setEndsAt(startedAt + total * 1000);
     },
     [prefs.restTimerSeconds],
   );

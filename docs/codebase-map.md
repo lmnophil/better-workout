@@ -174,6 +174,11 @@ Has its own [CLAUDE.md](../components/workout/CLAUDE.md). Key shape:
 - **`routines/pool-pick-dialog.tsx`** — shown when starting a routine day that has pools; the user picks `pickCount` members per pool, recency-assisted.
 - **`rest-timer.tsx`** — `useRestTimer()` hook + `RestTimerBar` UI. **Absolute-deadline pattern** (`endsAt: ms`) so backgrounded tabs don't drift. Singleton AudioContext for chime — don't create per call.
 
+Shared primitives (don't re-implement these per dialog/surface):
+
+- **`components/ui/modal-shell.tsx`** (`ModalShell`) — the one modal shell. Owns the backdrop, `role="dialog"`/`aria-modal`, Escape-to-close, click-away, and the real focus trap (focus in on open, Tab trapped inside, focus restored to the opener on close). Callers pass `panelClassName` (width/layout), optional `initialFocus` (focus an input instead of the panel), `isSubmitting` (don't close mid-submit), `inert` (a nested dialog is open above). Used by the picker, save-template, pool-pick, swap-choice, suggestion-builder, reviewer-picker, and `useConfirm`.
+- **`lib/usage-stats.ts`** — `ExerciseInfo`, `ExerciseUsageStat`/`ExerciseUsageStatClient`, `buildUsageStatsMap`. Here (not workout-view) so the routine editor/timeline use them without dragging in the session UI or re-creating the old workout-view ↔ routine-timeline import cycle.
+
 Patterns to know:
 
 - Prefs come from `usePrefs()` context, not props. Prop-drilling them caused a bug — see workout/CLAUDE.md.
@@ -197,6 +202,8 @@ Renders a color-graded grid of muscle groups, sectioned by category (Lower / Upp
 
 **Volume bar** is `getWeeklyVolume` vs. effective target (`UserVolumeTarget` if set, else `MUSCLE_GROUPS` default). Override indicator shows when user-customized.
 
+The per-muscle row and tier-summary chips are the shared `coverage-ui.tsx` (`CoverageRow`, `CoverageSummaryStrip`), reused by the routine editor's CoveragePanel and the share view's read-only panel so the three can't drift. Category labels come from `CATEGORY_LABELS` in `lib/exercises-data.ts` (one copy, next to `MUSCLE_GROUPS`).
+
 ---
 
 ## 8. Settings (`components/settings/`)
@@ -204,6 +211,8 @@ Renders a color-graded grid of muscle groups, sectioned by category (Lower / Upp
 Editors for: rest timer (enabled, seconds, sound, vibrate); set seeding (`defaultSetsPerExercise`); weight stepper (`defaultWeightIncrement`); per-muscle volume targets; resistance bands (add/rename/reorder/delete the chip-picker entries that show on `loadType='band'` exercises); unhide hidden built-in templates; routine create/edit/delete.
 
 All writes go through `updateUserPreferences` / `setVolumeTarget` / `resetVolumeTarget`. Reads go through `getUserPreferences` (cached).
+
+The labelled `Row`, the on/off `Toggle`, and the "Custom" numeric-entry strip are shared from `settings-controls.tsx` (the rest-timer and workout-defaults editors had byte-identical copies).
 
 ---
 

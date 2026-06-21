@@ -18,12 +18,13 @@ import {
 } from '@/lib/actions';
 import { ExercisePicker } from '@/components/workout/exercise-picker';
 import { PoolPickDialog, type PoolForPick } from '@/components/routines/pool-pick-dialog';
+import { ModalShell } from '@/components/ui/modal-shell';
 import { WEEKDAY_FULL_LABELS, type ScheduleStyle } from '@/lib/routine';
 import {
   buildUsageStatsMap,
   type ExerciseInfo,
   type ExerciseUsageStatClient,
-} from '@/components/workout/workout-view';
+} from '@/lib/usage-stats';
 import { moduleDescription } from '@/lib/exercises-data';
 import { usePrefs } from '@/components/ui/prefs-context';
 import { estimatePlannedExerciseSeconds, formatEstimate } from '@/lib/time-estimate';
@@ -746,61 +747,57 @@ function SwapChoiceDialog({
   isPending: boolean;
 }) {
   return (
-    <div
-      className="fixed inset-0 bg-black/70 z-[60] flex items-end sm:items-center justify-center"
-      onClick={() => !isPending && onCancel()}
-      role="dialog"
-      aria-modal="true"
+    <ModalShell
+      onClose={onCancel}
+      isSubmitting={isPending}
+      zClassName="z-[60]"
+      ariaLabel="How long should this swap last?"
+      panelClassName="rounded-t-2xl sm:rounded-2xl sm:max-w-md sm:mx-4 p-5 space-y-4"
     >
-      <div
-        className="bg-ink-950 border border-ink-800 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md sm:mx-4 p-5 space-y-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div>
-          <h3 className="font-display text-xl">How long should this swap last?</h3>
-          <p className="text-xs text-ink-500 italic font-display mt-1">
-            <span className="text-ink-300">{choice.outExerciseName}</span>
-            {' → '}
-            <span className="text-ink-100">{choice.inExerciseName}</span>
-          </p>
-        </div>
-
-        <button
-          onClick={onOneTime}
-          disabled={isPending}
-          className="w-full text-left border border-ink-800 hover:border-accent/40 rounded-lg p-3 transition disabled:opacity-50"
-        >
-          <div className="text-sm text-ink-100">Just next time</div>
-          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">
-            The swap applies the next time you start this day, then clears. Doesn&apos;t change the
-            underlying template.
-          </div>
-        </button>
-
-        <button
-          onClick={onPermanent}
-          disabled={isPending || permanentDisabled}
-          className="w-full text-left border border-ink-800 hover:border-accent/40 rounded-lg p-3 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <div className="text-sm text-ink-100">Going forward</div>
-          <div className="text-[11px] text-ink-500 italic font-display mt-0.5">
-            {permanentDisabled
-              ? 'This day uses a default template, so going-forward edits aren’t available here. Use one-time, or build your own template.'
-              : 'Edit the template so this swap applies every time, including future routine days that use it.'}
-          </div>
-        </button>
-
-        <div className="flex justify-end">
-          <button
-            onClick={onCancel}
-            disabled={isPending}
-            className="px-3 py-1.5 text-xs tracking-wider uppercase text-ink-300 hover:text-ink-100 transition disabled:opacity-50"
-          >
-            Cancel
-          </button>
-        </div>
+      <div>
+        <h3 className="font-display text-xl">How long should this swap last?</h3>
+        <p className="text-xs text-ink-500 italic font-display mt-1">
+          <span className="text-ink-300">{choice.outExerciseName}</span>
+          {' → '}
+          <span className="text-ink-100">{choice.inExerciseName}</span>
+        </p>
       </div>
-    </div>
+
+      <button
+        onClick={onOneTime}
+        disabled={isPending}
+        className="w-full text-left border border-ink-800 hover:border-accent/40 rounded-lg p-3 transition disabled:opacity-50"
+      >
+        <div className="text-sm text-ink-100">Just next time</div>
+        <div className="text-[11px] text-ink-500 italic font-display mt-0.5">
+          The swap applies the next time you start this day, then clears. Doesn&apos;t change the
+          underlying template.
+        </div>
+      </button>
+
+      <button
+        onClick={onPermanent}
+        disabled={isPending || permanentDisabled}
+        className="w-full text-left border border-ink-800 hover:border-accent/40 rounded-lg p-3 transition disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <div className="text-sm text-ink-100">Going forward</div>
+        <div className="text-[11px] text-ink-500 italic font-display mt-0.5">
+          {permanentDisabled
+            ? 'This day uses a default template, so going-forward edits aren’t available here. Use one-time, or build your own template.'
+            : 'Edit the template so this swap applies every time, including future routine days that use it.'}
+        </div>
+      </button>
+
+      <div className="flex justify-end">
+        <button
+          onClick={onCancel}
+          disabled={isPending}
+          className="px-3 py-1.5 text-xs tracking-wider uppercase text-ink-300 hover:text-ink-100 transition disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
