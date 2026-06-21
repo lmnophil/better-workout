@@ -37,7 +37,7 @@ surfaces in the UI) and loosely for 1 → 3. Packages 4–9 are independent of e
 | --- | -------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------- |
 | 1   | [01-error-transport.md](01-error-transport.md)                       | Expected errors survive prod; EXPECTED_MESSAGES sync         | done (2026-06-09) |
 | 2   | [02-client-action-discipline.md](02-client-action-discipline.md)     | Await actions, real isPending, surface errors                | done (2026-06-21) |
-| 3   | [03-share-apply-paths.md](03-share-apply-paths.md)                   | Share suggestion apply-path correctness                      | pending           |
+| 3   | [03-share-apply-paths.md](03-share-apply-paths.md)                   | Share suggestion apply-path correctness                      | done (2026-06-21) |
 | 4   | [04-domain-logic-and-presets.md](04-domain-logic-and-presets.md)     | Starter presets, day/recency math, timezone, volume counting | pending           |
 | 5   | [05-schema-races-and-integrity.md](05-schema-races-and-integrity.md) | Schema-backed race fixes, soft-delete vs unique              | pending           |
 | 6   | [06-pwa-offline-auth-recovery.md](06-pwa-offline-auth-recovery.md)   | Offline fallback, HTTPS cookie-recovery loop                 | pending           |

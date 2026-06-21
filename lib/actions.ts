@@ -1437,6 +1437,36 @@ async function uniqueTemplateName(tx: Tx, userId: string, base: string): Promise
 }
 
 /**
+ * Pick a name for an owner-applied custom-exercise suggestion that won't trip
+ * the @@unique([ownerId, name]) constraint. Soft-deleted rows still hold their
+ * name (the unique index ignores deletedAt), so we check against *all* of the
+ * owner's exercises, not just live ones. Tries the bare name first, then
+ * "<name> (suggested)", then numbered variants — mirrors uniqueTemplateName.
+ * Unlike createCustomExercise (which rejects a duplicate outright), the apply
+ * path auto-resolves: the owner is accepting someone else's suggestion and
+ * shouldn't have to rename it by hand before it lands.
+ */
+async function uniqueOwnedExerciseName(tx: Tx, userId: string, base: string): Promise<string> {
+  const trimmed = base.trim();
+  const taken = new Set(
+    (
+      await tx.exercise.findMany({
+        where: { ownerId: userId, name: { startsWith: trimmed } },
+        select: { name: true },
+      })
+    ).map((e) => e.name),
+  );
+  if (!taken.has(trimmed)) return trimmed;
+  const suggested = `${trimmed} (suggested)`;
+  if (!taken.has(suggested)) return suggested;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${trimmed} (suggested ${i})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  throw new ExpectedError('Too many similarly-named exercises — rename before applying.');
+}
+
+/**
  * Snapshot a source template's exercises into a fresh user-owned template.
  * The source must be reachable to the user (own or built-in); soft-deleted
  * exercises in the source are skipped silently. Returns the new template id.
@@ -1480,6 +1510,7 @@ async function cloneTemplateForUser(
           plannedSets: te.plannedSets,
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
+          plannedWeight: te.plannedWeight,
           note: te.note,
         })),
       },
@@ -2106,33 +2137,10 @@ export const removeExerciseFromRoutineDay = withLogging(
 
       await tx.templateExercise.delete({ where: { id: target.id } });
 
-      // If the removed exercise was in a pool, keep the pool coherent: a pool
-      // with fewer than two members can't be a "pick X of N" anymore, so it's
-      // dissolved (the survivor, if any, falls back to a fixed slot). Otherwise
-      // pickCount is clamped down so it never exceeds the member count.
-      if (target.poolId) {
-        const remainingMembers = await tx.templateExercise.count({
-          where: { poolId: target.poolId },
-        });
-        if (remainingMembers < 2) {
-          await tx.templateExercise.updateMany({
-            where: { poolId: target.poolId },
-            data: { poolId: null },
-          });
-          await tx.templatePool.delete({ where: { id: target.poolId } });
-        } else {
-          const pool = await tx.templatePool.findUnique({
-            where: { id: target.poolId },
-            select: { pickCount: true },
-          });
-          if (pool && pool.pickCount > remainingMembers) {
-            await tx.templatePool.update({
-              where: { id: target.poolId },
-              data: { pickCount: remainingMembers },
-            });
-          }
-        }
-      }
+      // If the removed exercise was in a pool, keep the pool coherent: dissolve
+      // a pool that drops below two members (the survivor falls back to a fixed
+      // slot), otherwise clamp pickCount to the member count.
+      await reconcilePoolAfterMemberLoss(tx, target.poolId);
 
       // Renumber to keep positions contiguous and pools blocked together.
       await normalizeTemplatePositions(tx, day.templateId);
@@ -2374,6 +2382,34 @@ async function normalizeTemplatePositions(tx: Tx, templateId: string): Promise<v
 }
 
 /**
+ * Keep a pool coherent after one of its members leaves the template (removed
+ * outright or ungrouped). A pool with fewer than two members can't be a
+ * "pick X of N" anymore, so it's dissolved — any lone survivor falls back to a
+ * fixed slot. Otherwise pickCount is clamped so it never exceeds the remaining
+ * member count. No-op when the departed row wasn't pooled (poolId null). Caller
+ * supplies the transaction client and runs normalizeTemplatePositions after.
+ */
+async function reconcilePoolAfterMemberLoss(tx: Tx, poolId: string | null): Promise<void> {
+  if (!poolId) return;
+  const remainingMembers = await tx.templateExercise.count({ where: { poolId } });
+  if (remainingMembers < 2) {
+    await tx.templateExercise.updateMany({ where: { poolId }, data: { poolId: null } });
+    await tx.templatePool.delete({ where: { id: poolId } });
+    return;
+  }
+  const pool = await tx.templatePool.findUnique({
+    where: { id: poolId },
+    select: { pickCount: true },
+  });
+  if (pool && pool.pickCount > remainingMembers) {
+    await tx.templatePool.update({
+      where: { id: poolId },
+      data: { pickCount: remainingMembers },
+    });
+  }
+}
+
+/**
  * Copy a source template's pools onto a freshly-created template. Members are
  * matched by exerciseId; only members that survived into the new template
  * (passed in `survivingExerciseIds`) are re-linked. A pool that ends up with
@@ -2559,7 +2595,7 @@ export const removeExerciseFromPool = withLogging(
 
     const pool = await db.templatePool.findFirst({
       where: { id: poolId, template: { userId } },
-      select: { id: true, templateId: true, pickCount: true },
+      select: { id: true, templateId: true },
     });
     if (!pool) throw new ExpectedError('Pool not found');
 
@@ -2571,23 +2607,10 @@ export const removeExerciseFromPool = withLogging(
         data: { poolId: null },
       });
 
-      const remainingMembers = await tx.templateExercise.count({
-        where: { poolId: pool.id },
-      });
-      if (remainingMembers < 2) {
-        await tx.templateExercise.updateMany({
-          where: { poolId: pool.id },
-          data: { poolId: null },
-        });
-        await tx.templatePool.delete({ where: { id: pool.id } });
-      } else if (pool.pickCount > remainingMembers) {
-        // Keep pickCount in 1..members.length — same clamp as
-        // removeExerciseFromRoutineDay.
-        await tx.templatePool.update({
-          where: { id: pool.id },
-          data: { pickCount: remainingMembers },
-        });
-      }
+      // After ungrouping a member, keep the pool coherent: dissolve below two
+      // members, otherwise clamp pickCount. Same logic as
+      // removeExerciseFromRoutineDay.
+      await reconcilePoolAfterMemberLoss(tx, pool.id);
 
       await normalizeTemplatePositions(tx, pool.templateId);
     });
@@ -2870,6 +2893,42 @@ export const clearPendingSwap = withLogging(
   },
 );
 
+/**
+ * Core of a permanent in-place exercise swap, shared by the live editor
+ * (`swapInRoutineTemplate`) and the share-apply path (`applyShareSwap`) so the
+ * two can't drift. Replaces `outExerciseId` with `inExerciseId` on the single
+ * template row — same position, same pool membership, so no renumber or pool
+ * reconcile is needed — and drops any one-time pending swap staged against the
+ * outgoing exercise (the permanent change supersedes it). Caller has already
+ * verified ownership and that `inExerciseId` is usable. Throws if the outgoing
+ * exercise isn't in the template, or the incoming one already is (which would
+ * violate the (templateId, exerciseId) unique constraint).
+ */
+async function swapTemplateExerciseInTx(
+  tx: Tx,
+  args: { templateId: string; routineDayId: string; outExerciseId: string; inExerciseId: string },
+): Promise<void> {
+  const { templateId, routineDayId, outExerciseId, inExerciseId } = args;
+
+  const targetEntry = await tx.templateExercise.findFirst({
+    where: { templateId, exerciseId: outExerciseId },
+    select: { id: true },
+  });
+  if (!targetEntry) throw new ExpectedError("That exercise isn't in the template anymore.");
+
+  const collision = await tx.templateExercise.findFirst({
+    where: { templateId, exerciseId: inExerciseId },
+    select: { id: true },
+  });
+  if (collision) throw new ExpectedError('That exercise is already in the template.');
+
+  await tx.templateExercise.update({
+    where: { id: targetEntry.id },
+    data: { exerciseId: inExerciseId },
+  });
+  await tx.routineDayPendingSwap.deleteMany({ where: { routineDayId, outExerciseId } });
+}
+
 const SwapInRoutineTemplateSchema = z.object({
   routineDayId: z.string().min(1),
   outExerciseId: z.string().min(1),
@@ -2898,34 +2957,14 @@ export const swapInRoutineTemplate = withLogging(
 
     await requireAvailableExercise(userId, inExerciseId);
 
-    const targetEntry = await db.templateExercise.findFirst({
-      where: { templateId: day.template.id, exerciseId: outExerciseId },
-    });
-    if (!targetEntry) {
-      throw new ExpectedError("That exercise isn't in the template anymore.");
-    }
-
-    // Refuse if the new exercise is already in the template — would violate
-    // the (templateId, exerciseId) unique constraint and is probably user error.
-    const collision = await db.templateExercise.findFirst({
-      where: { templateId: day.template.id, exerciseId: inExerciseId },
-      select: { id: true },
-    });
-    if (collision) {
-      throw new ExpectedError('That exercise is already in the template.');
-    }
-
-    await db.$transaction([
-      db.templateExercise.update({
-        where: { id: targetEntry.id },
-        data: { exerciseId: inExerciseId },
+    await db.$transaction((tx) =>
+      swapTemplateExerciseInTx(tx, {
+        templateId: day.template.id,
+        routineDayId,
+        outExerciseId,
+        inExerciseId,
       }),
-      // If a one-time pending swap was staged for the outgoing exercise, drop
-      // it — the permanent change supersedes any pending one-shot.
-      db.routineDayPendingSwap.deleteMany({
-        where: { routineDayId, outExerciseId },
-      }),
-    ]);
+    );
 
     revalidatePath('/');
     revalidatePath('/routine');
@@ -3425,6 +3464,32 @@ export const markNotificationsRead = withLogging(
 
 // ---------------- Owner actions: comment / suggestion resolution ----------------
 
+/**
+ * Load an owner-scoped share suggestion that's still open, or throw an expected
+ * error. Centralizes the findFirst + ownership scope + open-state check that
+ * every owner-side resolve/apply action repeated verbatim, so the
+ * "already resolved" guard can't be forgotten on one of them.
+ */
+async function requireOpenSuggestion(userId: string, suggestionId: string) {
+  const s = await db.shareSuggestion.findFirst({
+    where: { id: suggestionId, share: { routine: { userId } } },
+  });
+  if (!s) throw new ExpectedError('Suggestion not found');
+  if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+  return s;
+}
+
+/**
+ * Revalidate the owner's share surfaces after a comment or suggestion changes
+ * state: the share detail page *and* the shares index, whose roll-up counts
+ * open comments and suggestions (see getRoutineSharesForUser). Apply paths that
+ * also mutate the routine revalidate '/' and '/routine' on top of this.
+ */
+function revalidateShareViews(shareId: string) {
+  revalidatePath('/routine/shares');
+  revalidatePath(`/routine/shares/${shareId}`);
+}
+
 const ResolveCommentSchema = z.object({ commentId: z.string().min(1) });
 
 export const resolveShareComment = withLogging(
@@ -3444,7 +3509,7 @@ export const resolveShareComment = withLogging(
       data: { resolvedAt: new Date() },
     });
 
-    revalidatePath(`/routine/shares/${comment.shareId}`);
+    revalidateShareViews(comment.shareId);
   },
 );
 
@@ -3456,19 +3521,14 @@ export const rejectShareSuggestion = withLogging(
     const userId = await requireUser();
     const { suggestionId } = RejectSuggestionSchema.parse(input);
 
-    const s = await db.shareSuggestion.findFirst({
-      where: { id: suggestionId, share: { routine: { userId } } },
-      select: { id: true, state: true, shareId: true },
-    });
-    if (!s) throw new ExpectedError('Suggestion not found');
-    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    const s = await requireOpenSuggestion(userId, suggestionId);
 
     await db.shareSuggestion.update({
       where: { id: s.id },
       data: { state: 'rejected', resolvedAt: new Date() },
     });
 
-    revalidatePath(`/routine/shares/${s.shareId}`);
+    revalidateShareViews(s.shareId);
   },
 );
 
@@ -3480,19 +3540,14 @@ export const resolveShareSuggestion = withLogging(
     const userId = await requireUser();
     const { suggestionId } = ResolveSuggestionSchema.parse(input);
 
-    const s = await db.shareSuggestion.findFirst({
-      where: { id: suggestionId, share: { routine: { userId } } },
-      select: { id: true, state: true, shareId: true },
-    });
-    if (!s) throw new ExpectedError('Suggestion not found');
-    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    const s = await requireOpenSuggestion(userId, suggestionId);
 
     await db.shareSuggestion.update({
       where: { id: s.id },
       data: { state: 'resolved', resolvedAt: new Date() },
     });
 
-    revalidatePath(`/routine/shares/${s.shareId}`);
+    revalidateShareViews(s.shareId);
   },
 );
 
@@ -3515,11 +3570,7 @@ export const applyShareSwap = withLogging(
     const userId = await requireUser();
     const { suggestionId, inExerciseId: pickedInId } = ApplySwapSchema.parse(input);
 
-    const s = await db.shareSuggestion.findFirst({
-      where: { id: suggestionId, share: { routine: { userId } } },
-    });
-    if (!s) throw new ExpectedError('Suggestion not found');
-    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    const s = await requireOpenSuggestion(userId, suggestionId);
     if (!s.kind.startsWith('swap_')) throw new ExpectedError('Not a swap suggestion');
     if (s.targetType !== 'routine_day' || !s.targetId) {
       throw new ExpectedError('Cannot apply: target missing');
@@ -3547,10 +3598,13 @@ export const applyShareSwap = withLogging(
     }
 
     if (outExerciseId === inExerciseId) {
+      // Nothing to change on the template, but the suggestion still resolves —
+      // revalidate so it stops showing as open on the shares pages.
       await db.shareSuggestion.update({
         where: { id: s.id },
         data: { state: 'applied', resolvedAt: new Date() },
       });
+      revalidateShareViews(s.shareId);
       return;
     }
 
@@ -3562,34 +3616,26 @@ export const applyShareSwap = withLogging(
 
     await requireAvailableExercise(userId, inExerciseId);
 
-    const targetEntry = await db.templateExercise.findFirst({
-      where: { templateId: day.template.id, exerciseId: outExerciseId },
-    });
-    if (!targetEntry) throw new ExpectedError("That exercise isn't in the template anymore.");
-
-    const collision = await db.templateExercise.findFirst({
-      where: { templateId: day.template.id, exerciseId: inExerciseId },
-      select: { id: true },
-    });
-    if (collision) throw new ExpectedError('That exercise is already in the template.');
-
-    await db.$transaction([
-      db.templateExercise.update({
-        where: { id: targetEntry.id },
-        data: { exerciseId: inExerciseId },
-      }),
-      db.routineDayPendingSwap.deleteMany({
-        where: { routineDayId: day.id, outExerciseId },
-      }),
-      db.shareSuggestion.update({
+    // `inExerciseId` is provably a string past the guards above, but TS widens
+    // it back to string | undefined inside the closure (it's a `let`). Capture
+    // the narrowed value in a const so the transaction body stays typed.
+    const swapInId = inExerciseId;
+    await db.$transaction(async (tx) => {
+      await swapTemplateExerciseInTx(tx, {
+        templateId: day.template.id,
+        routineDayId: day.id,
+        outExerciseId,
+        inExerciseId: swapInId,
+      });
+      await tx.shareSuggestion.update({
         where: { id: s.id },
         data: { state: 'applied', resolvedAt: new Date() },
-      }),
-    ]);
+      });
+    });
 
     revalidatePath('/');
     revalidatePath('/routine');
-    revalidatePath(`/routine/shares/${s.shareId}`);
+    revalidateShareViews(s.shareId);
   },
 );
 
@@ -3601,36 +3647,44 @@ export const applyShareRemove = withLogging(
     const userId = await requireUser();
     const { suggestionId } = ApplyRemoveSchema.parse(input);
 
-    const s = await db.shareSuggestion.findFirst({
-      where: { id: suggestionId, share: { routine: { userId } } },
-    });
-    if (!s) throw new ExpectedError('Suggestion not found');
-    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    const s = await requireOpenSuggestion(userId, suggestionId);
     if (s.kind !== 'remove') throw new ExpectedError('Cannot apply: not a remove suggestion');
 
     const payload = s.payload as { templateExerciseId?: string };
     if (!payload.templateExerciseId) throw new ExpectedError('Cannot apply: target missing');
 
+    // Pull the pool membership and owning routine day alongside the row so we
+    // can reconcile the pool and drop pending swaps, exactly as the live editor
+    // does. A routine day owns its template 1:1, so routineDays[0] is the day.
     const te = await db.templateExercise.findFirst({
       where: {
         id: payload.templateExerciseId,
         template: { routineDays: { some: { routine: { userId } } } },
       },
-      select: { id: true, templateId: true, position: true },
+      select: {
+        id: true,
+        templateId: true,
+        exerciseId: true,
+        poolId: true,
+        template: { select: { routineDays: { select: { id: true }, take: 1 } } },
+      },
     });
     if (!te) throw new ExpectedError("That exercise isn't in the template anymore.");
+    const routineDayId = te.template.routineDays[0]?.id;
 
     await db.$transaction(async (tx) => {
       await tx.templateExercise.delete({ where: { id: te.id } });
-      const remaining = await tx.templateExercise.findMany({
-        where: { templateId: te.templateId },
-        orderBy: { position: 'asc' },
-        select: { id: true },
-      });
-      for (let i = 0; i < remaining.length; i++) {
-        await tx.templateExercise.update({
-          where: { id: remaining[i].id },
-          data: { position: i },
+      // Mirror removeExerciseFromRoutineDay: keep the pool coherent, re-gather
+      // positions into canonical pool order, and drop pending swaps that
+      // referenced the removed exercise (as outgoing or incoming).
+      await reconcilePoolAfterMemberLoss(tx, te.poolId);
+      await normalizeTemplatePositions(tx, te.templateId);
+      if (routineDayId) {
+        await tx.routineDayPendingSwap.deleteMany({
+          where: {
+            routineDayId,
+            OR: [{ outExerciseId: te.exerciseId }, { inExerciseId: te.exerciseId }],
+          },
         });
       }
       await tx.shareSuggestion.update({
@@ -3641,7 +3695,7 @@ export const applyShareRemove = withLogging(
 
     revalidatePath('/');
     revalidatePath('/routine');
-    revalidatePath(`/routine/shares/${s.shareId}`);
+    revalidateShareViews(s.shareId);
   },
 );
 
@@ -3653,11 +3707,7 @@ export const applyShareReorder = withLogging(
     const userId = await requireUser();
     const { suggestionId } = ApplyReorderSchema.parse(input);
 
-    const s = await db.shareSuggestion.findFirst({
-      where: { id: suggestionId, share: { routine: { userId } } },
-    });
-    if (!s) throw new ExpectedError('Suggestion not found');
-    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    const s = await requireOpenSuggestion(userId, suggestionId);
     if (s.kind !== 'reorder') throw new ExpectedError('Cannot apply: not a reorder suggestion');
     if (s.targetType !== 'routine_day' || !s.targetId) {
       throw new ExpectedError('Cannot apply: target missing');
@@ -3680,6 +3730,7 @@ export const applyShareReorder = withLogging(
       throw new ExpectedError('Cannot apply: lineup has changed since the suggestion');
     }
 
+    const templateId = day.template.id;
     await db.$transaction(async (tx) => {
       for (let i = 0; i < orderIds.length; i++) {
         await tx.templateExercise.update({
@@ -3687,6 +3738,10 @@ export const applyShareReorder = withLogging(
           data: { position: i },
         });
       }
+      // The suggested order may interleave a pool's members; re-gather each
+      // pool into a contiguous block so the template invariant holds, exactly
+      // as setRoutineDayExerciseOrder does after a full reorder.
+      await normalizeTemplatePositions(tx, templateId);
       await tx.shareSuggestion.update({
         where: { id: s.id },
         data: { state: 'applied', resolvedAt: new Date() },
@@ -3695,7 +3750,7 @@ export const applyShareReorder = withLogging(
 
     revalidatePath('/');
     revalidatePath('/routine');
-    revalidatePath(`/routine/shares/${s.shareId}`);
+    revalidateShareViews(s.shareId);
   },
 );
 
@@ -3710,11 +3765,7 @@ export const applyShareInsert = withLogging(
     const userId = await requireUser();
     const { suggestionId, exerciseIds: picked } = ApplyInsertSchema.parse(input);
 
-    const s = await db.shareSuggestion.findFirst({
-      where: { id: suggestionId, share: { routine: { userId } } },
-    });
-    if (!s) throw new ExpectedError('Suggestion not found');
-    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    const s = await requireOpenSuggestion(userId, suggestionId);
     if (s.kind !== 'insert') throw new ExpectedError('Not an insert suggestion');
     if (s.targetType !== 'routine_day' || !s.targetId) {
       throw new ExpectedError('Cannot apply: target missing');
@@ -3739,15 +3790,30 @@ export const applyShareInsert = withLogging(
 
     const existingIds = new Set(day.template.exercises.map((e) => e.exerciseId));
     const fresh = toInsert.filter((id) => !existingIds.has(id));
-    for (const id of fresh) {
-      await requireAvailableExercise(userId, id);
-    }
     if (fresh.length === 0) {
+      // Everything suggested is already in the day — resolve the suggestion and
+      // revalidate so it stops showing as open on the shares pages.
       await db.shareSuggestion.update({
         where: { id: s.id },
         data: { state: 'applied', resolvedAt: new Date() },
       });
+      revalidateShareViews(s.shareId);
       return;
+    }
+
+    // Verify access for every fresh exercise in one query rather than N
+    // round-trips (mirrors addExercisesToActiveSession). All-or-nothing.
+    const accessible = await db.exercise.findMany({
+      where: {
+        id: { in: fresh },
+        OR: [{ ownerId: null }, { ownerId: userId }],
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    const accessibleIds = new Set(accessible.map((e) => e.id));
+    for (const id of fresh) {
+      if (!accessibleIds.has(id)) throw new ExpectedError('Exercise not available');
     }
 
     const rawPos = payload.atPosition;
@@ -3756,6 +3822,7 @@ export const applyShareInsert = withLogging(
         ? Math.min(rawPos, day.template.exercises.length)
         : day.template.exercises.length;
 
+    const templateId = day.template.id;
     await db.$transaction(async (tx) => {
       const shift = fresh.length;
       const toShift = day.template.exercises
@@ -3770,12 +3837,14 @@ export const applyShareInsert = withLogging(
       for (let i = 0; i < fresh.length; i++) {
         await tx.templateExercise.create({
           data: {
-            templateId: day.template.id,
+            templateId,
             exerciseId: fresh[i],
             position: insertAt + i,
           },
         });
       }
+      // Inserting mid-list can split a pool's contiguous run; re-gather pools.
+      await normalizeTemplatePositions(tx, templateId);
       await tx.shareSuggestion.update({
         where: { id: s.id },
         data: { state: 'applied', resolvedAt: new Date() },
@@ -3784,7 +3853,7 @@ export const applyShareInsert = withLogging(
 
     revalidatePath('/');
     revalidatePath('/routine');
-    revalidatePath(`/routine/shares/${s.shareId}`);
+    revalidateShareViews(s.shareId);
   },
 );
 
@@ -3799,11 +3868,7 @@ export const applyShareCustomExercise = withLogging(
     const userId = await requireUser();
     const { suggestionId, insertIntoRoutineDayId } = ApplyCustomExerciseSchema.parse(input);
 
-    const s = await db.shareSuggestion.findFirst({
-      where: { id: suggestionId, share: { routine: { userId } } },
-    });
-    if (!s) throw new ExpectedError('Suggestion not found');
-    if (s.state !== 'open') throw new ExpectedError('Suggestion already resolved');
+    const s = await requireOpenSuggestion(userId, suggestionId);
     if (s.kind !== 'custom_exercise')
       throw new ExpectedError('Cannot apply: not a custom-exercise suggestion');
 
@@ -3817,51 +3882,54 @@ export const applyShareCustomExercise = withLogging(
     const name = payload.name?.trim();
     if (!name) throw new ExpectedError('Cannot apply: custom exercise has no name');
 
-    let resolvedName = name;
-    const collision = await db.exercise.findFirst({
-      where: { ownerId: userId, name: resolvedName },
-      select: { id: true },
-    });
-    if (collision) resolvedName = `${name} (suggested)`;
-
-    const created = await db.exercise.create({
-      data: {
-        name: resolvedName,
-        module: payload.module || 'Custom',
-        primaryMuscles: payload.primaryMuscles ?? [],
-        secondaryMuscles: payload.secondaryMuscles ?? [],
-        metric: payload.metric === 'time' ? 'time' : 'reps',
-        isCustom: true,
-        ownerId: userId,
-      },
-    });
-
-    if (insertIntoRoutineDayId) {
-      const day = await db.routineDay.findFirst({
-        where: { id: insertIntoRoutineDayId, routine: { userId } },
-        include: {
-          template: { include: { exercises: { select: { id: true, exerciseId: true } } } },
+    // One transaction: create the exercise, optionally slot it into the chosen
+    // day, and mark the suggestion applied — atomically. A non-transactional
+    // version could fail after the create and leave the suggestion open, so a
+    // re-apply would duplicate the exercise; here a mid-way failure rolls the
+    // whole thing back and the suggestion stays cleanly open. uniqueOwnedExerciseName
+    // resolves any name collision (including against soft-deleted rows) so the
+    // create can't throw a raw P2002.
+    await db.$transaction(async (tx) => {
+      const created = await tx.exercise.create({
+        data: {
+          name: await uniqueOwnedExerciseName(tx, userId, name),
+          module: payload.module || 'Custom',
+          primaryMuscles: payload.primaryMuscles ?? [],
+          secondaryMuscles: payload.secondaryMuscles ?? [],
+          metric: payload.metric === 'time' ? 'time' : 'reps',
+          isCustom: true,
+          ownerId: userId,
         },
       });
-      if (day && !day.template.exercises.some((e) => e.exerciseId === created.id)) {
-        await db.templateExercise.create({
-          data: {
-            templateId: day.template.id,
-            exerciseId: created.id,
-            position: day.template.exercises.length,
-          },
-        });
-      }
-    }
 
-    await db.shareSuggestion.update({
-      where: { id: s.id },
-      data: { state: 'applied', resolvedAt: new Date() },
+      if (insertIntoRoutineDayId) {
+        const day = await tx.routineDay.findFirst({
+          where: { id: insertIntoRoutineDayId, routine: { userId } },
+          include: { template: { include: { exercises: { select: { id: true } } } } },
+        });
+        if (day) {
+          // Append after every existing slot (positions are 0..n-1), so the new
+          // fixed slot lands past any pool block — no renumber needed. The
+          // exercise was just created, so it can't already be in the template.
+          await tx.templateExercise.create({
+            data: {
+              templateId: day.template.id,
+              exerciseId: created.id,
+              position: day.template.exercises.length,
+            },
+          });
+        }
+      }
+
+      await tx.shareSuggestion.update({
+        where: { id: s.id },
+        data: { state: 'applied', resolvedAt: new Date() },
+      });
     });
 
     revalidatePath('/');
     revalidatePath('/routine');
-    revalidatePath(`/routine/shares/${s.shareId}`);
+    revalidateShareViews(s.shareId);
   },
 );
 
