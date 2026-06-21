@@ -303,9 +303,10 @@ Read these when working in the matching directory.
 
 ## 13. Notable utilities
 
-- **`lib/utils.ts`** — `daysBetween`, `relativeDay` ("today", "1d ago"…), `groupBy`.
+- **`lib/utils.ts`** — `daysBetween`/`relativeDay` (calendar-day deltas, optional `timeZone`; "today", "1d ago"…), `localWeekday`, `groupBy`, the `TIMEZONE_COOKIE` name.
+- **`lib/timezone.ts`** — server-side `getRequestTimeZone()` (reads the `tz` cookie set by `components/ui/timezone-sync.tsx`, falls back to UTC). The single zone source for the routine weekday picker and coverage recency. See the timezone ADR in [decisions.md](decisions.md).
 - **`lib/prefs.ts`** — `UserPrefs` type and `PREFS_DEFAULTS` (single source of truth, referenced by schema/queries/actions/context).
-- **`lib/routine.ts`**, **`lib/routine-coverage.ts`** — `pickTodaysRoutineDay`, `pickUpcomingRoutineDays`, `isScheduleStyle`; coverage helpers for routine view.
+- **`lib/routine.ts`** — `pickTodaysRoutineDay`, `pickUpcomingRoutineDays`, `isScheduleStyle` (today/upcoming resolved against the user's zone in weekday mode).
 - **`lib/prescription.ts`** — parses "3×12" out of an exercise's prescription string to extract default set count.
 - **`lib/starter-routines.ts`** — Strength / Build / Mobility / Longevity preset families used in the routine empty state.
 - **`lib/area-filter.ts`** — region (Upper/Lower/Full/Mobility) and muscle chip taxonomy + `balanceHint()`. Used by picker filters and empty-state suggestions.

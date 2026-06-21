@@ -460,9 +460,9 @@ export type UserPreferencesShape = UserPrefs;
  * List the templates a user sees in the picker: their own user templates plus
  * any built-in (isBuiltin = true, userId = null) templates they haven't hidden.
  *
- * Built-ins are sorted before user templates within the same recency band so
- * the empty state has a stable, recognizable lead. User templates win recency
- * ordering against each other as before.
+ * Built-ins are listed before user templates (a stable, recognizable lead for
+ * the empty state); within each of those two groups, most-recently-updated
+ * first.
  */
 export async function getTemplates(userId: string) {
   return db.workoutTemplate.findMany({
@@ -717,13 +717,19 @@ export async function getRoutineSharesForUser(userId: string) {
 }
 
 /**
- * The owner-facing inbox feed. Unread first (`readAt: null` desc), then read
- * by recency. Bounded so the dropdown stays small.
+ * The owner-facing inbox feed. Unread first, then read by read-recency. Bounded
+ * so the dropdown stays small.
+ *
+ * `readAt` ascends NULLs-last in Postgres, so a plain `readAt: 'asc'` buried the
+ * unread items at the bottom — with `take: 30` a backlog of read notifications
+ * could push every unread one off the end. Sorting `readAt` descending with
+ * NULLs first puts unread on top, then the most-recently-read; `createdAt`
+ * breaks ties.
  */
 export async function getNotificationsForUser(userId: string, take: number = 30) {
   return db.notification.findMany({
     where: { userId },
-    orderBy: [{ readAt: 'asc' }, { createdAt: 'desc' }],
+    orderBy: [{ readAt: { sort: 'desc', nulls: 'first' } }, { createdAt: 'desc' }],
     take,
   });
 }

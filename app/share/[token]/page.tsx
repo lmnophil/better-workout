@@ -153,6 +153,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       pools: d.pools,
     })),
     exerciseLookup,
+    // Estimate unplanned slots at the owner's own seeding default, so the
+    // reviewer sees the same number the owner would.
+    ownerPrefs.defaultSetsPerExercise,
   );
 
   const muscleGroupsForClient = MUSCLE_GROUPS.map((g) => {
@@ -217,6 +220,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         baseTotals: baseTotalsForClient,
         anyEstimated,
         ownerTier: ownerPrefs.volumeTier,
+        estimatedSetsFallback: ownerPrefs.defaultSetsPerExercise,
       }}
     />
   );

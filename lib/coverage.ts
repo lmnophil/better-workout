@@ -172,8 +172,11 @@ export const TIER_VISUALS: Record<
 // STRUCTURAL VOLUME COMPUTATION
 // ============================================================
 
-// Number of sets to assume when an exercise is on a routine day without a
-// planned-sets value. Matches the seeder so time and coverage readouts agree.
+// Sets to assume for an exercise on a routine day with no planned-sets value.
+// The seeder actually uses the user's `defaultSetsPerExercise` pref, so callers
+// that know whose routine they're showing should pass that in (see the
+// `estimatedSetsFallback` param below). This constant is the last-resort default
+// for surfaces with no user in scope; it tracks PREFS_DEFAULTS.defaultSetsPerExercise.
 export const ESTIMATED_SETS_FALLBACK = 3;
 
 export type ExerciseMuscleShape = {
@@ -237,6 +240,7 @@ export function poolPickWeights(day: PlannedDay): Map<string, number> {
 export function computeRoutineVolumes(
   days: PlannedDay[],
   exerciseById: Map<string, ExerciseMuscleShape>,
+  estimatedSetsFallback: number = ESTIMATED_SETS_FALLBACK,
 ): { totals: MuscleVolumes; anyEstimated: boolean } {
   const totals: MuscleVolumes = new Map();
   let anyEstimated = false;
@@ -247,7 +251,7 @@ export function computeRoutineVolumes(
       if (!ex) continue;
       const estimated = dx.plannedSets === null;
       if (estimated) anyEstimated = true;
-      const sets = (dx.plannedSets ?? ESTIMATED_SETS_FALLBACK) * (weights.get(dx.exerciseId) ?? 1);
+      const sets = (dx.plannedSets ?? estimatedSetsFallback) * (weights.get(dx.exerciseId) ?? 1);
       for (const m of ex.primaryMuscles) {
         const cur = totals.get(m) ?? { sets: 0, estimated: false };
         totals.set(m, { sets: cur.sets + sets, estimated: cur.estimated || estimated });
@@ -269,8 +273,9 @@ export function computeRoutineVolumes(
 export function computeDayVolumes(
   day: PlannedDay,
   exerciseById: Map<string, ExerciseMuscleShape>,
+  estimatedSetsFallback: number = ESTIMATED_SETS_FALLBACK,
 ): { totals: MuscleVolumes; anyEstimated: boolean } {
-  return computeRoutineVolumes([day], exerciseById);
+  return computeRoutineVolumes([day], exerciseById, estimatedSetsFallback);
 }
 
 export function formatSets(n: number): string {

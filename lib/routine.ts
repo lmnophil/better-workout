@@ -11,6 +11,8 @@
 // Capped at MAX_ROUTINE_DAYS days. The cap matches both modes (weekday is
 // naturally bounded by 7) and keeps the timeline UI simple.
 
+import { localWeekday } from './utils';
+
 export const MAX_ROUTINE_DAYS = 7;
 
 export type ScheduleStyle = 'sequence' | 'weekday';
@@ -43,8 +45,9 @@ type RoutineShape<D extends DayShape> = {
  * Pick "today's day" from a routine according to its scheduling style.
  *
  * - Weekday mode: returns the day pinned to today's weekday, or null if
- *   today is a rest day (no day pinned). Today's weekday comes from the
- *   provided Date so server-rendered components can pass a stable reference.
+ *   today is a rest day (no day pinned). Today's weekday is resolved against
+ *   `timeZone` (the user's IANA zone) so "today" is the user's calendar day,
+ *   not the server's — omit it and it falls back to the runtime's local zone.
  * - Sequence mode: returns the day at position
  *   ((lastCompletedPosition ?? -1) + 1) mod days.length. The cursor advances
  *   on session completion, so this answers "what's next in your cycle."
@@ -52,10 +55,11 @@ type RoutineShape<D extends DayShape> = {
 export function pickTodaysRoutineDay<D extends DayShape>(
   routine: RoutineShape<D>,
   now: Date = new Date(),
+  timeZone?: string,
 ): D | null {
   if (routine.days.length === 0) return null;
   if (routine.scheduleStyle === 'weekday') {
-    const today = now.getDay();
+    const today = localWeekday(now, timeZone);
     return routine.days.find((d) => d.weekday === today) ?? null;
   }
   // Sequence: walk in position order.
@@ -68,9 +72,11 @@ export function pickTodaysRoutineDay<D extends DayShape>(
  * The "upcoming" days after today, capped at MAX_ROUTINE_DAYS - 1 entries
  * (so today + upcoming never exceeds the routine length plus one wrap).
  *
- * - Weekday mode: walks forward from tomorrow through the next 7 days,
- *   emitting any day pinned to that weekday. Rest days are skipped (the UI
- *   composes a full week strip separately if it wants rest days visible).
+ * - Weekday mode: walks forward from tomorrow through the next 6 days,
+ *   emitting any day pinned to that weekday. Today is deliberately excluded —
+ *   it already shows in the "Today" slot, and a 7-day walk would wrap right
+ *   back onto it. Rest days are skipped (the UI composes a full week strip
+ *   separately if it wants rest days visible).
  * - Sequence mode: lists the days after today's position in cycle order,
  *   wrapping back to position 0. Stops just before reaching today again.
  */
@@ -78,12 +84,14 @@ export function pickUpcomingRoutineDays<D extends DayShape>(
   routine: RoutineShape<D>,
   todaysDay: D | null,
   now: Date = new Date(),
+  timeZone?: string,
 ): D[] {
   if (routine.days.length === 0) return [];
   if (routine.scheduleStyle === 'weekday') {
     const result: D[] = [];
-    const today = now.getDay();
-    for (let offset = 1; offset <= 7; offset++) {
+    const today = localWeekday(now, timeZone);
+    // tomorrow .. +6 days. Stop before +7, which wraps back onto today.
+    for (let offset = 1; offset <= 6; offset++) {
       const wd = (today + offset) % 7;
       const match = routine.days.find((d) => d.weekday === wd);
       if (match) result.push(match);

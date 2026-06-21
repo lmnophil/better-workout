@@ -1611,6 +1611,13 @@ export type BuiltExercise = {
 export type BuiltDay = {
   name: string;
   exercises: BuiltExercise[];
+  // Why this day ended up with no exercises, when it did. 'equipment' = no
+  // variant in any slot fit the selected gear (or every fit collided with an
+  // exercise already used that day); 'duration' = everything was trimmed by the
+  // time budget. null when the day has exercises. Lets the preview show an
+  // accurate per-day notice and lets the apply path keep the day instead of
+  // silently shrinking the routine.
+  emptyReason: 'equipment' | 'duration' | null;
 };
 
 export type BuildStarterRoutineResult = {
@@ -1624,9 +1631,23 @@ export type BuildStarterRoutineResult = {
   needsMat: boolean;
 };
 
-function pickVariant(slot: Slot, available: ReadonlySet<string>): SlotChoice | null {
+// Resolve a slot to a concrete variant. Walks the slot's preference chain and
+// returns the first variant that (a) isn't already used elsewhere in this day
+// and (b) has all its *gating* equipment available. `'mat'` is deliberately not
+// gating — it's informational (see the TIER_EQUIPMENT note), so a mat-dependent
+// variant stays selectable even when the user unticks mat; the missing-mat
+// consequence surfaces as the `needsMat` hint instead of a silently dropped
+// exercise. The dedupe guard is what keeps two slots in the same day from both
+// cascading to the same fallback (e.g. Bodyweight glute bridge), which used to
+// produce a duplicate the save path rejects outright.
+function pickVariant(
+  slot: Slot,
+  available: ReadonlySet<string>,
+  used: ReadonlySet<string>,
+): SlotChoice | null {
   for (const v of slot.variants) {
-    if (v.equipment.every((e) => available.has(e))) return v;
+    if (used.has(v.exerciseName)) continue;
+    if (v.equipment.every((e) => e === 'mat' || available.has(e))) return v;
   }
   return null;
 }
@@ -1662,17 +1683,27 @@ export function buildStarterRoutine(input: {
 
   for (const day of base.days) {
     const exercises: BuiltExercise[] = [];
+    const used = new Set<string>();
+    let droppedInDay = false;
     for (const slot of day.slots) {
-      const variant = pickVariant(slot, available);
-      if (!variant) {
-        droppedAny = true;
-        continue;
-      }
+      // Check the duration cutoff *before* equipment so a slot the time budget
+      // would have trimmed anyway doesn't also count as an equipment drop — that
+      // ordering used to inflate the "we dropped slots" tradeoff message.
       if (slot.priority > cutoff) {
         trimmedAny = true;
         continue;
       }
-      if (variant.equipment.includes('mat')) needsMat = true;
+      const variant = pickVariant(slot, available, used);
+      if (!variant) {
+        droppedAny = true;
+        droppedInDay = true;
+        continue;
+      }
+      used.add(variant.exerciseName);
+      // Only flag "you'll want a mat" when a chosen exercise needs one and the
+      // user hasn't got mat selected — mat is non-gating, so the hint is the
+      // visible consequence of leaving it off.
+      if (variant.equipment.includes('mat') && !available.has('mat')) needsMat = true;
       exercises.push({
         exerciseName: variant.exerciseName,
         plannedSets: variant.plannedSets,
@@ -1680,7 +1711,11 @@ export function buildStarterRoutine(input: {
         plannedSeconds: variant.plannedSeconds ?? null,
       });
     }
-    builtDays.push({ name: day.name, exercises });
+    // A day never silently vanishes: it's always pushed. When it's empty we
+    // record why so the preview can explain it and the apply path can keep it.
+    const emptyReason: BuiltDay['emptyReason'] =
+      exercises.length > 0 ? null : droppedInDay ? 'equipment' : 'duration';
+    builtDays.push({ name: day.name, exercises, emptyReason });
   }
 
   if (trimmedAny) {
@@ -1699,6 +1734,19 @@ export function buildStarterRoutine(input: {
   if (droppedAny) {
     tradeoffs.add(
       `Some movement slots were dropped — your available equipment doesn't cover them. Toggle more gear on, or edit the day after to fill the gap.`,
+    );
+  }
+  // Call out whole days the equipment couldn't fill by name, so picking a
+  // 3-day split and getting a thin one is never a silent surprise. (Duration-
+  // emptied days are covered by the trim messages above and the per-day notice
+  // in the preview.)
+  const emptyByEquipment = builtDays.filter((d) => d.emptyReason === 'equipment');
+  if (emptyByEquipment.length > 0) {
+    const names = emptyByEquipment.map((d) => d.name).join(', ');
+    tradeoffs.add(
+      `Your equipment couldn't fill ${names} — ${
+        emptyByEquipment.length === 1 ? 'that day stays' : 'those days stay'
+      } empty for you to fill by hand, or add more gear.`,
     );
   }
 

@@ -74,7 +74,6 @@ import {
   ExplainDayDescription,
 } from '@/lib/explanations';
 import {
-  ESTIMATED_SETS_FALLBACK,
   TIER_VISUALS,
   computeDayVolumes,
   computeRoutineVolumes,
@@ -623,8 +622,8 @@ function DraftEditor({
   // them. Keeping the computation at the editor level (not inside the panel)
   // means the picker doesn't need to re-walk the day structure.
   const { totals, anyEstimated } = useMemo(
-    () => computeMuscleTotals(editorDays, exerciseById),
-    [editorDays, exerciseById],
+    () => computeMuscleTotals(editorDays, exerciseById, prefs.defaultSetsPerExercise),
+    [editorDays, exerciseById, prefs.defaultSetsPerExercise],
   );
   const gapMuscles = useMemo(
     () => gapMusclesFromTotals(totals, muscleGroups),
@@ -806,8 +805,8 @@ function DraftEditor({
   }, [presetResult, availableExercises, exerciseById]);
 
   const { totals: presetTotals, anyEstimated: presetAnyEstimated } = useMemo(
-    () => computeMuscleTotals(presetEditorDays, exerciseById),
-    [presetEditorDays, exerciseById],
+    () => computeMuscleTotals(presetEditorDays, exerciseById, prefs.defaultSetsPerExercise),
+    [presetEditorDays, exerciseById, prefs.defaultSetsPerExercise],
   );
 
   // Apply the current preset to the Custom draft and switch tabs. Per the UX
@@ -817,33 +816,35 @@ function DraftEditor({
   function applyPreset() {
     if (!presetResult) return;
     const nameToId = new Map(availableExercises.map((e) => [e.name, e.id]));
-    const newDays: DraftDay[] = presetResult.days
-      .map((d) => {
-        const exercises: DraftExercise[] = [];
-        for (const e of d.exercises) {
-          const id = nameToId.get(e.exerciseName);
-          if (!id) continue;
-          exercises.push({
-            exerciseId: id,
-            plannedSets: e.plannedSets,
-            plannedReps: e.plannedReps,
-            plannedSeconds: e.plannedSeconds,
-            note: null,
-          });
-        }
-        return {
-          clientId:
-            typeof crypto !== 'undefined' && 'randomUUID' in crypto
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random()}`,
-          name: d.name,
-          label: null as string | null,
-          description: null as string | null,
-          weekday: null as number | null,
-          exercises,
-        };
-      })
-      .filter((d) => d.exercises.length > 0);
+    // Keep every day, including any the equipment couldn't fill. Dropping empty
+    // days here is the silent-shrink bug — a 3-day pick must stay a 3-day
+    // routine; the preview already flags which days came up empty, and the user
+    // fills them in Custom (or removes them deliberately).
+    const newDays: DraftDay[] = presetResult.days.map((d) => {
+      const exercises: DraftExercise[] = [];
+      for (const e of d.exercises) {
+        const id = nameToId.get(e.exerciseName);
+        if (!id) continue;
+        exercises.push({
+          exerciseId: id,
+          plannedSets: e.plannedSets,
+          plannedReps: e.plannedReps,
+          plannedSeconds: e.plannedSeconds,
+          note: null,
+        });
+      }
+      return {
+        clientId:
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()}`,
+        name: d.name,
+        label: null as string | null,
+        description: null as string | null,
+        weekday: null as number | null,
+        exercises,
+      };
+    });
     setDays(newDays);
     setPresetTab('custom');
     setSubmitError(null);
@@ -1187,7 +1188,9 @@ function PresetView({
               </div>
               {d.exercises.length === 0 ? (
                 <div className="text-[11px] text-ink-500 italic font-display">
-                  Empty after trim — pick a longer duration.
+                  {d.emptyReason === 'equipment'
+                    ? "Your equipment can't fill this day — add gear, or keep it and fill it by hand."
+                    : 'Empty after trim — pick a longer duration.'}
                 </div>
               ) : (
                 <ul className="space-y-0.5">
@@ -1494,8 +1497,8 @@ function LiveEditor({
     [routine.days, exerciseById],
   );
   const { totals, anyEstimated } = useMemo(
-    () => computeMuscleTotals(editorDays, exerciseById),
-    [editorDays, exerciseById],
+    () => computeMuscleTotals(editorDays, exerciseById, prefs.defaultSetsPerExercise),
+    [editorDays, exerciseById, prefs.defaultSetsPerExercise],
   );
   const gapMuscles = useMemo(
     () => gapMusclesFromTotals(totals, muscleGroups),
@@ -3384,6 +3387,7 @@ type MuscleTotals = MuscleVolumes;
 function computeMuscleTotals(
   days: EditorDay[],
   exerciseById: Map<string, ExerciseInfo>,
+  estimatedSetsFallback: number,
 ): { totals: MuscleTotals; anyEstimated: boolean } {
   return computeRoutineVolumes(
     days.map((d) => ({
@@ -3395,6 +3399,7 @@ function computeMuscleTotals(
       pools: d.pools.map((p) => ({ id: p.id, pickCount: p.pickCount })),
     })),
     exerciseById,
+    estimatedSetsFallback,
   );
 }
 
@@ -3447,6 +3452,7 @@ function PerDayCoverageStrip({
   exerciseById: Map<string, ExerciseInfo>;
   routineTotals: MuscleTotals;
 }) {
+  const { prefs } = usePrefs();
   const top = useMemo(() => {
     const { totals } = computeDayVolumes(
       {
@@ -3458,6 +3464,7 @@ function PerDayCoverageStrip({
         pools: day.pools.map((p) => ({ id: p.id, pickCount: p.pickCount })),
       },
       exerciseById,
+      prefs.defaultSetsPerExercise,
     );
     const byId = new Map(muscleGroups.map((m) => [m.id, m]));
     const rows: { id: string; label: string; sets: number; tier: CoverageTier }[] = [];
@@ -3471,7 +3478,7 @@ function PerDayCoverageStrip({
     // Sort by sets desc so the muscles this day actually emphasizes lead.
     rows.sort((a, b) => b.sets - a.sets);
     return rows.slice(0, 6);
-  }, [day, muscleGroups, exerciseById, routineTotals]);
+  }, [day, muscleGroups, exerciseById, routineTotals, prefs.defaultSetsPerExercise]);
 
   if (top.length === 0) return null;
 
@@ -3517,6 +3524,7 @@ function CoveragePanel({
   anyEstimated: boolean;
   muscleGroups: MuscleGroupClient[];
 }) {
+  const { prefs } = usePrefs();
   // Group muscles into the same buckets the /coverage view uses, in display
   // order, so the visual mapping is consistent.
   const byCategory = useMemo(() => {
@@ -3566,7 +3574,7 @@ function CoveragePanel({
           <p className="text-[11px] text-ink-500 italic font-display mt-0.5 leading-relaxed">
             What this routine hits across one full cycle.
             {anyEstimated && (
-              <> Exercises without planned sets are estimated at {ESTIMATED_SETS_FALLBACK}.</>
+              <> Exercises without planned sets are estimated at {prefs.defaultSetsPerExercise}.</>
             )}
           </p>
         </div>

@@ -75,7 +75,17 @@ export const MUSCLE_CHIPS: MuscleChip[] = [
 const MUSCLES_BY_REGION: Record<RegionChip['id'], Set<string>> = {
   upper: new Set(MUSCLE_GROUPS.filter((m) => m.category === 'upper').map((m) => m.id)),
   lower: new Set(MUSCLE_GROUPS.filter((m) => m.category === 'lower').map((m) => m.id)),
-  mobility: new Set(MUSCLE_GROUPS.filter((m) => m.category === 'mobility').map((m) => m.id)),
+  // "Mobility" is the non-strength bucket: mobility/flexibility work plus the
+  // 'other' category (balance, conditioning/cardio). Without 'other' here,
+  // exercises whose only muscles are balance or cardio — single-leg holds, jump
+  // rope, jumping jacks — fell out of reach the moment any chip was selected;
+  // the only way to see them was clearing every chip. Folding them under
+  // Mobility keeps that "feel-good / move-well" work browsable.
+  mobility: new Set(
+    MUSCLE_GROUPS.filter((m) => m.category === 'mobility' || m.category === 'other').map(
+      (m) => m.id,
+    ),
+  ),
   // "Full body" doesn't enumerate — it's a special case in matchesArea that
   // means "no filter". Keeping the set empty so a stray lookup doesn't pretend
   // otherwise.

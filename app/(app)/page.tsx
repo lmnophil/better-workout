@@ -19,6 +19,7 @@ import {
   getUserBands,
 } from '@/lib/queries';
 import { pickTodaysRoutineDay, pickUpcomingRoutineDays, isScheduleStyle } from '@/lib/routine';
+import { getRequestTimeZone } from '@/lib/timezone';
 import { WorkoutView } from '@/components/workout/workout-view';
 import type {
   RoutineDayClient,
@@ -109,8 +110,18 @@ export default async function WorkoutPage() {
       ? routine.scheduleStyle
       : ('sequence' as const);
 
-  const todaysDay = routine ? pickTodaysRoutineDay(routine) : null;
-  const upcomingRaw = routine ? pickUpcomingRoutineDays(routine, todaysDay) : [];
+  // Resolve "today" in the user's timezone (cookie-fed; see lib/timezone.ts) so
+  // the weekday picker and the day label don't flip in the server's UTC evening.
+  const timeZone = await getRequestTimeZone();
+  const now = new Date();
+  const todaysDay = routine ? pickTodaysRoutineDay(routine, now, timeZone) : null;
+  const upcomingRaw = routine ? pickUpcomingRoutineDays(routine, todaysDay, now, timeZone) : [];
+  const todayLabel = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  }).format(now);
 
   const routineForView = routine
     ? {
@@ -118,6 +129,7 @@ export default async function WorkoutPage() {
           name: routine.name,
           description: routine.description,
           scheduleStyle,
+          todayLabel,
         },
         todaysDay: todaysDay ? shapeDay(todaysDay) : null,
         upcomingDays: upcomingRaw.map(shapeDay),

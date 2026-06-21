@@ -528,7 +528,39 @@ export const completeActiveSession = withLogging('completeActiveSession', async 
   const session = await findActiveSession(userId);
   if (!session) return;
 
-  // Don't allow completing an empty session
+  // Prune seeded-but-never-performed sets — rows the user never put a value in
+  // (reps AND seconds both null). Volume, coverage, and usage stats all count
+  // SetLog rows, so leaving these in credits work that never happened. Rows that
+  // carry a number (pre-filled from history or the day's plan, even if untouched)
+  // survive: a populated row reads as "did the planned set." Renumber the
+  // survivors per exercise so setNumber stays contiguous from 1
+  // (components/workout/CLAUDE.md).
+  await db.$transaction(async (tx) => {
+    const removed = await tx.setLog.findMany({
+      where: { sessionId: session.id, reps: null, seconds: null },
+      select: { exerciseId: true },
+    });
+    if (removed.length === 0) return;
+    await tx.setLog.deleteMany({
+      where: { sessionId: session.id, reps: null, seconds: null },
+    });
+    for (const exerciseId of new Set(removed.map((r) => r.exerciseId))) {
+      const remaining = await tx.setLog.findMany({
+        where: { sessionId: session.id, exerciseId },
+        orderBy: { setNumber: 'asc' },
+        select: { id: true, setNumber: true },
+      });
+      for (let i = 0; i < remaining.length; i++) {
+        if (remaining[i].setNumber !== i + 1) {
+          await tx.setLog.update({ where: { id: remaining[i].id }, data: { setNumber: i + 1 } });
+        }
+      }
+    }
+  });
+
+  // After the prune, a session with nothing actually logged is an empty workout
+  // — clean it up instead of recording it (and don't advance the routine cursor
+  // for a day the user didn't really do).
   const setCount = await db.setLog.count({ where: { sessionId: session.id } });
   if (setCount === 0) {
     await db.workoutSession.delete({ where: { id: session.id } });

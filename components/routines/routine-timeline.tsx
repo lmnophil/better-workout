@@ -88,6 +88,11 @@ export type RoutineTimelineProps = {
     name: string;
     description: string | null;
     scheduleStyle: ScheduleStyle;
+    // The user's current calendar day, formatted server-side in their timezone
+    // (e.g. "Saturday, Jun 21"). Labels the "Today" slot so it's unambiguous
+    // which day "today's workout" means — and computing it server-side (not from
+    // a client `new Date()`) keeps SSR and hydration in agreement.
+    todayLabel: string;
   };
   todaysDay: RoutineDayClient | null;
   upcomingDays: RoutineDayClient[];
@@ -124,6 +129,7 @@ export function RoutineTimeline({
       <TodaySection
         scheduleStyle={routine.scheduleStyle}
         todaysDay={todaysDay}
+        todayLabel={routine.todayLabel}
         availableExercises={availableExercises}
         usageStatsMap={usageStatsMap}
       />
@@ -184,17 +190,24 @@ function RecentSection({ sessions }: { sessions: RoutineRecentSessionClient[] })
 function TodaySection({
   scheduleStyle,
   todaysDay,
+  todayLabel,
   availableExercises,
   usageStatsMap,
 }: {
   scheduleStyle: ScheduleStyle;
   todaysDay: RoutineDayClient | null;
+  todayLabel: string;
   availableExercises: ExerciseInfo[];
   usageStatsMap: Map<string, { lastDoneDate: Date; sessionCount: number }>;
 }) {
   return (
     <div>
-      <SectionHeader>{scheduleStyle === 'weekday' ? 'Today' : 'Up next'}</SectionHeader>
+      <SectionHeader>
+        {scheduleStyle === 'weekday' ? 'Today' : 'Up next'}
+        <span className="ml-2 normal-case tracking-normal text-ink-500 font-display italic">
+          {todayLabel}
+        </span>
+      </SectionHeader>
       {todaysDay ? (
         <DayCard
           day={todaysDay}

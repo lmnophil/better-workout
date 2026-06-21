@@ -12,7 +12,6 @@
 
 import { useMemo } from 'react';
 import {
-  ESTIMATED_SETS_FALLBACK,
   TIER_VISUALS,
   VOLUME_TIER_LABELS,
   computeRoutineVolumes,
@@ -62,12 +61,14 @@ export function ShareCoveragePanel({
   anyEstimated,
   ownerTier,
   ownerName,
+  estimatedSetsFallback,
 }: {
   muscleGroups: ShareMuscleGroup[];
   totals: MuscleVolumes;
   anyEstimated: boolean;
   ownerTier: VolumeTier;
   ownerName: string;
+  estimatedSetsFallback: number;
 }) {
   const byCategory = useMemo(() => {
     const groups = new Map<ShareMuscleGroup['category'], ShareMuscleGroup[]>();
@@ -129,7 +130,7 @@ export function ShareCoveragePanel({
       <p className="text-[11px] text-ink-400 italic font-display mb-3 leading-relaxed">
         Weighted sets per muscle across one full cycle — primary 1.0, secondary 0.5.
         {anyEstimated && (
-          <> Exercises without planned sets are estimated at {ESTIMATED_SETS_FALLBACK}.</>
+          <> Exercises without planned sets are estimated at {estimatedSetsFallback}.</>
         )}
       </p>
 
@@ -253,8 +254,10 @@ export function computeSuggestionDiff(args: {
   exerciseLookup: Map<string, ExerciseMuscleShape>;
   muscleGroups: ShareMuscleGroup[];
   baseTotals: MuscleVolumes;
+  estimatedSetsFallback: number;
 }): SuggestionDiffResult {
-  const { routine, suggestion, exerciseLookup, muscleGroups, baseTotals } = args;
+  const { routine, suggestion, exerciseLookup, muscleGroups, baseTotals, estimatedSetsFallback } =
+    args;
   const payload = suggestion.payload;
   const kind = suggestion.kind;
 
@@ -341,7 +344,7 @@ export function computeSuggestionDiff(args: {
       if (!ex) return { kind: 'unsupported' };
       // Delta is conventional — "more sets" suggests +1, "fewer" -1. The owner
       // picks the final number; this is the smallest unambiguous read.
-      const cur = ex.plannedSets ?? ESTIMATED_SETS_FALLBACK;
+      const cur = ex.plannedSets ?? estimatedSetsFallback;
       const next = sticker === 'more_sets' ? cur + 1 : Math.max(0, cur - 1);
       if (next === cur) return { kind: 'no-change' };
       ex.plannedSets = next;
@@ -364,7 +367,7 @@ export function computeSuggestionDiff(args: {
       const lookupWithCustom = new Map(exerciseLookup);
       lookupWithCustom.set(syntheticId, { primaryMuscles: primary, secondaryMuscles: secondary });
       day.exercises.push({ exerciseId: syntheticId, plannedSets: null });
-      return finalize(nextDays, lookupWithCustom, muscleGroups, baseTotals);
+      return finalize(nextDays, lookupWithCustom, muscleGroups, baseTotals, estimatedSetsFallback);
     }
     case 'holistic_add':
     case 'holistic_remove':
@@ -373,7 +376,7 @@ export function computeSuggestionDiff(args: {
       return { kind: 'unsupported' };
   }
 
-  return finalize(nextDays, exerciseLookup, muscleGroups, baseTotals);
+  return finalize(nextDays, exerciseLookup, muscleGroups, baseTotals, estimatedSetsFallback);
 }
 
 type PlannedDay = {
@@ -387,8 +390,13 @@ function finalize(
   exerciseLookup: Map<string, ExerciseMuscleShape>,
   muscleGroups: ShareMuscleGroup[],
   baseTotals: MuscleVolumes,
+  estimatedSetsFallback: number,
 ): SuggestionDiffResult {
-  const { totals: nextTotals } = computeRoutineVolumes(nextDays, exerciseLookup);
+  const { totals: nextTotals } = computeRoutineVolumes(
+    nextDays,
+    exerciseLookup,
+    estimatedSetsFallback,
+  );
   const byId = new Map(muscleGroups.map((m) => [m.id, m]));
   const deltas: SuggestionDelta[] = [];
 

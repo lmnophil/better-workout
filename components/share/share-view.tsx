@@ -108,6 +108,9 @@ export type ShareCoverageData = {
   baseTotals: { id: string; sets: number; estimated: boolean }[];
   anyEstimated: boolean;
   ownerTier: VolumeTier;
+  // The owner's defaultSetsPerExercise, so unplanned-slot estimates here match
+  // what the owner sees in their own editor.
+  estimatedSetsFallback: number;
 };
 
 type Props = {
@@ -190,8 +193,9 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
         exerciseLookup,
         muscleGroups: coverage.muscleGroups,
         baseTotals: baseTotalsMap,
+        estimatedSetsFallback: coverage.estimatedSetsFallback,
       }),
-    [routine, exerciseLookup, coverage.muscleGroups, baseTotalsMap],
+    [routine, exerciseLookup, coverage.muscleGroups, baseTotalsMap, coverage.estimatedSetsFallback],
   );
 
   // Build O(1) lookups so per-target panels don't filter the whole list each
@@ -312,6 +316,7 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
         anyEstimated={coverage.anyEstimated}
         ownerTier={coverage.ownerTier}
         ownerName={routine.ownerName}
+        estimatedSetsFallback={coverage.estimatedSetsFallback}
       />
 
       {/* Days */}

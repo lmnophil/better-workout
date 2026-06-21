@@ -17,6 +17,7 @@ import { CueToggle } from '@/components/ui/cue-toggle';
 import { PrefsProvider } from '@/components/ui/prefs-context';
 import { getUserPreferences } from '@/lib/queries';
 import { NotificationBell } from '@/components/layout/notification-bell';
+import { TimeZoneSync } from '@/components/ui/timezone-sync';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -37,6 +38,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <PrefsProvider initial={preferences}>
+      <TimeZoneSync />
       <div className="min-h-screen flex flex-col">
         <PWAInstallBanner />
         <header className="px-5 py-4 border-b border-ink-800 flex items-center justify-between">
