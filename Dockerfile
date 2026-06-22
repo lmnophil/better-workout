@@ -56,6 +56,14 @@ RUN npx esbuild prisma/seed.ts \
     --packages=external \
     --outfile=prisma/seed.js
 
+# `next build` collects page data by importing every route module. The auth
+# route (/api/auth/[...nextauth]) pulls in lib/db.ts, which constructs the
+# Prisma client at import time and throws if DATABASE_URL is unset. The build
+# never opens a connection — it only reads route config — so a throwaway file:
+# URL is enough to satisfy the check. The real database URL is injected at
+# runtime by docker-compose; this placeholder never reaches the runner stage.
+ENV DATABASE_URL="file:/tmp/build.db"
+
 # Build Next.js — produces the standalone server in .next/standalone
 RUN npm run build
 
