@@ -459,10 +459,19 @@ function DraftEditor({
   const [scheduleStyle, setScheduleStyle] = useState<ScheduleStyle>('sequence');
   const [days, setDays] = useState<DraftDay[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Routine name + description, edited inline while building. Local-only (like
+  // scheduleStyle) — not persisted to the draft localStorage; the action
+  // defaults the name to "My routine" if left blank.
+  const [routineName, setRoutineName] = useState('');
+  const [routineDescription, setRoutineDescription] = useState('');
   // Picker context — `poolId` set means picked exercises join that pool instead
   // of becoming fixed slots (opened from a pool's "add" button). Mirrors the
   // live editor's pickerCtx.
   const [pickerCtx, setPickerCtx] = useState<{ dayClientId: string; poolId?: string } | null>(null);
+  // Swap context — single-select "replace this exercise in place" picker.
+  const [swapCtx, setSwapCtx] = useState<{ dayClientId: string; outExerciseId: string } | null>(
+    null,
+  );
 
   // Effective rest per exercise (override → global default), built once per
   // render. Surfaced to DayCard so per-day and per-module time estimates use
@@ -779,6 +788,8 @@ function DraftEditor({
       try {
         const res = await createRoutineFromDraft({
           scheduleStyle,
+          name: routineName.trim() || undefined,
+          description: routineDescription.trim() || undefined,
           days: days.map((d) => ({
             name: d.name.trim() || undefined,
             exercises: d.exercises.map((e) => ({
@@ -945,6 +956,14 @@ function DraftEditor({
         />
       ) : (
         <>
+          <DraftMetaFields
+            name={routineName}
+            description={routineDescription}
+            onNameChange={setRoutineName}
+            onDescriptionChange={setRoutineDescription}
+            disabled={isPending}
+          />
+
           <ScheduleToggle
             value={scheduleStyle}
             onChange={(s) => setScheduleStyle(s)}
@@ -1040,7 +1059,9 @@ function DraftEditor({
                   ),
                 }))
               }
-              onSwapExercise={null}
+              onSwapExercise={(id, exerciseId) =>
+                setSwapCtx({ dayClientId: id, outExerciseId: exerciseId })
+              }
               onCreatePool={(dayClientId, exerciseIds, pickCount) =>
                 updateDay(dayClientId, (d) => {
                   const poolId = newClientId();
@@ -1205,7 +1226,108 @@ function DraftEditor({
             />
           );
         })()}
+
+      {swapCtx &&
+        (() => {
+          const draftDay = days.find((d) => d.clientId === swapCtx.dayClientId);
+          if (!draftDay) return null;
+          const excludeIds = new Set(draftDay.exercises.map((e) => e.exerciseId));
+          const outName = exerciseById.get(swapCtx.outExerciseId)?.name ?? 'exercise';
+          return (
+            <ExercisePicker
+              availableExercises={availableExercises}
+              excludeIds={excludeIds}
+              gapMuscles={gapMuscles}
+              usageStats={usageStatsMap}
+              // Single-select swap mode — replace the exercise in place, keeping
+              // its position, planned values, and pool membership (only the
+              // identity changes), mirroring the live swapInRoutineTemplate.
+              swap={{
+                targetName: outName,
+                onPick: (inExerciseId) => {
+                  const target = swapCtx;
+                  setSwapCtx(null);
+                  updateDay(target.dayClientId, (d) => ({
+                    ...d,
+                    exercises: d.exercises.map((e) =>
+                      e.exerciseId === target.outExerciseId
+                        ? { ...e, exerciseId: inExerciseId }
+                        : e,
+                    ),
+                  }));
+                },
+              }}
+              onPickMany={() => setSwapCtx(null)}
+              onClose={() => setSwapCtx(null)}
+              onDeleteCustom={(exerciseId) => {
+                startTransition(async () => {
+                  try {
+                    const res = await deleteCustomExercise({ exerciseId });
+                    if (!res.ok) {
+                      setSubmitError(res.error);
+                      return;
+                    }
+                    router.refresh();
+                  } catch {
+                    setSubmitError('Could not remove that exercise. Try again?');
+                  }
+                });
+              }}
+            />
+          );
+        })()}
     </>
+  );
+}
+
+// Name + description editor for the from-scratch builder — the draft-local
+// counterpart of the live MetaPanel. Plain controlled inputs (no blur-commit;
+// the whole draft commits on Save). Both optional: the action defaults a blank
+// name to "My routine".
+function DraftMetaFields({
+  name,
+  description,
+  onNameChange,
+  onDescriptionChange,
+  disabled,
+}: {
+  name: string;
+  description: string;
+  onNameChange: (v: string) => void;
+  onDescriptionChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="border border-ink-800 rounded-lg p-4 space-y-4 mb-5">
+      <div>
+        <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block mb-1.5">
+          Name <span className="text-ink-600">(optional)</span>
+        </label>
+        <input
+          type="text"
+          value={name}
+          maxLength={80}
+          onChange={(e) => onNameChange(e.target.value)}
+          disabled={disabled}
+          placeholder="My routine"
+          className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50 disabled:opacity-60"
+        />
+      </div>
+      <div>
+        <label className="text-[10px] tracking-[0.25em] uppercase text-ink-400 block mb-1.5">
+          What&apos;s it for? <span className="text-ink-600">(optional)</span>
+        </label>
+        <input
+          type="text"
+          value={description}
+          maxLength={300}
+          onChange={(e) => onDescriptionChange(e.target.value)}
+          disabled={disabled}
+          placeholder="A note to your future self"
+          className="w-full bg-ink-900 border border-ink-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50 disabled:opacity-60"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -1852,29 +1974,36 @@ function LiveEditor({
           const day = editorDays.find((d) => d.id === swapForDay.dayId);
           if (!day) return null;
           const excludeIds = new Set(day.exercises.map((e) => e.exerciseId));
+          const outName =
+            day.exercises.find((e) => e.exerciseId === swapForDay.outExerciseId)?.name ??
+            'exercise';
           return (
             <ExercisePicker
               availableExercises={availableExercises}
               excludeIds={excludeIds}
               gapMuscles={gapMuscles}
               usageStats={usageStatsMap}
-              onPickMany={(exerciseIds) => {
-                const inExerciseId = exerciseIds[0];
-                const target = swapForDay;
-                setSwapForDay(null);
-                if (!inExerciseId) return;
-                run(
-                  () =>
-                    swapInRoutineTemplate({
-                      routineDayId: target.dayId,
-                      outExerciseId: target.outExerciseId,
-                      inExerciseId,
-                    }),
-                  { onSuccess: () => router.refresh() },
-                );
+              // Single-select swap mode — same as the workout and timeline
+              // swaps: tap a row to replace in place. (Custom-add is hidden in
+              // swap mode by design; add the custom first, then swap.)
+              swap={{
+                targetName: outName,
+                onPick: (inExerciseId) => {
+                  const target = swapForDay;
+                  setSwapForDay(null);
+                  run(
+                    () =>
+                      swapInRoutineTemplate({
+                        routineDayId: target.dayId,
+                        outExerciseId: target.outExerciseId,
+                        inExerciseId,
+                      }),
+                    { onSuccess: () => router.refresh() },
+                  );
+                },
               }}
+              onPickMany={() => setSwapForDay(null)}
               onClose={() => setSwapForDay(null)}
-              onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 run(() => deleteCustomExercise({ exerciseId }), {
                   onSuccess: () => router.refresh(),

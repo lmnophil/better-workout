@@ -48,7 +48,11 @@ import { muscleIdsToChipIds } from '@/lib/area-filter';
 import { moduleDescription } from '@/lib/exercises-data';
 import { RoutineTimeline, type RoutineTimelineProps } from '@/components/routines/routine-timeline';
 import { ModalShell } from '@/components/ui/modal-shell';
-import type { ExerciseInfo } from '@/lib/usage-stats';
+import {
+  buildUsageStatsMap,
+  type ExerciseInfo,
+  type ExerciseUsageStatClient,
+} from '@/lib/usage-stats';
 
 // ============ TYPES ============
 
@@ -129,6 +133,9 @@ type Props = {
   // Null when the user hasn't created a routine. Otherwise drives the
   // timeline panel above the empty state.
   routine: Omit<RoutineTimelineProps, 'availableExercises'> | null;
+  // Trailing-year per-exercise usage stats (serialized). Feeds the recency +
+  // count hints in the add/swap picker — same signal the routine editor shows.
+  usageStats: ExerciseUsageStatClient[];
 };
 
 // ============ COMPONENT ============
@@ -141,7 +148,9 @@ export function WorkoutView({
   routineExerciseNotes,
   templates,
   routine,
+  usageStats,
 }: Props) {
+  const usageStatsMap = useMemo(() => buildUsageStatsMap(usageStats), [usageStats]);
   const [pickerOpen, setPickerOpen] = useState(false);
   // Chip selection from the empty state. Carries through into the picker so a
   // user who tapped [Chest] on the home screen sees the picker pre-filtered.
@@ -609,6 +618,7 @@ export function WorkoutView({
           excludeIds={swapTarget ? new Set([swapTarget.exerciseId]) : exerciseIdsAlreadyInSession}
           initialRegionIds={pendingRegionIds}
           initialMuscleChipIds={pendingMuscleChipIds}
+          usageStats={usageStatsMap}
           onPickMany={handleAddExercises}
           swap={
             swapTarget

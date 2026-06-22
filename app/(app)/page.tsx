@@ -124,6 +124,14 @@ export default async function WorkoutPage() {
     day: 'numeric',
   }).format(now);
 
+  // Serialized once: feeds both the routine timeline and the add/swap picker's
+  // recency hints (the latter needs it even when there's no routine).
+  const usageStatsForClient = Array.from(usageStats.entries()).map(([exerciseId, stat]) => ({
+    exerciseId,
+    lastDoneDate: stat.lastDoneDate.toISOString(),
+    sessionCount: stat.sessionCount,
+  }));
+
   const routineForView = routine
     ? {
         routine: {
@@ -142,11 +150,7 @@ export default async function WorkoutPage() {
           templateName: s.startedFromRoutineDay?.template.name ?? null,
           setCount: s._count.setLogs,
         })),
-        usageStats: Array.from(usageStats.entries()).map(([exerciseId, stat]) => ({
-          exerciseId,
-          lastDoneDate: stat.lastDoneDate.toISOString(),
-          sessionCount: stat.sessionCount,
-        })),
+        usageStats: usageStatsForClient,
       }
     : null;
 
@@ -226,6 +230,7 @@ export default async function WorkoutPage() {
       }))}
       routine={routineForView}
       bands={bands}
+      usageStats={usageStatsForClient}
     />
   );
 }

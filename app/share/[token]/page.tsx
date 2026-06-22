@@ -96,6 +96,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       position: d.position,
       weekday: d.weekday,
       label: d.label,
+      description: d.description,
       name: d.template.name,
       exercises: d.template.exercises
         .filter((te) => te.exercise.deletedAt === null)
@@ -111,11 +112,16 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           plannedReps: te.plannedReps,
           plannedSeconds: te.plannedSeconds,
           plannedWeight: te.plannedWeight,
+          note: te.note,
           videoUrl: te.exercise.videoUrl,
           equipment: parseStringList(te.exercise.equipment),
           poolId: te.poolId,
         })),
-      pools: d.template.pools.map((p) => ({ id: p.id, pickCount: p.pickCount })),
+      pools: d.template.pools.map((p) => ({
+        id: p.id,
+        pickCount: p.pickCount,
+        label: p.label,
+      })),
     })),
   };
 

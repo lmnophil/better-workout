@@ -72,7 +72,7 @@ When the workout-view empty state opens the picker after the user has tapped chi
 
 The browse tab's search matches name OR primary muscle OR secondary muscle, case-insensitive. If you add another searchable field to `Exercise`, update the filter.
 
-The optional `usageStats` prop (`Map<exerciseId, { lastDoneDate, sessionCount }>`, from `getExerciseUsageStats`) makes each row show a "12d ago · 8×" recency/count hint. It's optional because not every surface that opens the picker loads it; the routine editor and timeline do. Server pages serialize the stats as an array of `ExerciseUsageStatClient`; `buildUsageStatsMap` (exported from `workout-view.tsx`) rehydrates it into the Map the picker wants.
+The optional `usageStats` prop (`Map<exerciseId, { lastDoneDate, sessionCount }>`, from `getExerciseUsageStats`) makes each row show a "12d ago · 8×" recency/count hint. It's optional because not every surface that opens the picker loads it; the routine editor, the timeline, and the workout view's add/swap picker all do. Server pages serialize the stats as an array of `ExerciseUsageStatClient`; `buildUsageStatsMap` (exported from `workout-view.tsx`) rehydrates it into the Map the picker wants.
 
 The custom-add tab enforces `primary muscles >= 1`. The Zod schema in `createCustomExercise` enforces the same. These need to match.
 

@@ -8,7 +8,16 @@
 // or derived from the share payload.
 
 import { useCallback, useMemo, useState, useTransition } from 'react';
-import { ChevronDown, ChevronUp, ThumbsUp, Wand2, Plus, Pencil } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronUp,
+  ThumbsUp,
+  Wand2,
+  Plus,
+  Pencil,
+  Layers,
+  StickyNote,
+} from 'lucide-react';
 import { TargetThread } from './target-thread';
 import { SuggestionBuilder } from './suggestion-builder';
 import { type LibraryExercise } from './reviewer-picker';
@@ -46,10 +55,12 @@ export type RoutineExercise = {
   plannedReps: number | null;
   plannedSeconds: number | null;
   plannedWeight: number | null;
+  // The owner's per-exercise note (form cue, modification). Read-only here.
+  note: string | null;
   videoUrl: string | null;
   equipment: string[];
-  // Pool membership — drives the expected-pick weighting in coverage. Null = a
-  // fixed slot.
+  // Pool membership — drives the expected-pick weighting in coverage and the
+  // read-only "do X of N" badge on the row. Null = a fixed slot.
   poolId: string | null;
 };
 
@@ -64,10 +75,13 @@ export type RoutineForShare = {
     position: number;
     weekday: number | null;
     label: string | null;
+    // The owner's free-text "frame the day" note. Read-only here.
+    description: string | null;
     name: string;
     exercises: RoutineExercise[];
-    // The day's pools (id + how many members to do), for coverage weighting.
-    pools: Array<{ id: string; pickCount: number }>;
+    // The day's pools (id, how many members to do, optional label) — for
+    // coverage weighting and the read-only pool badges on member rows.
+    pools: Array<{ id: string; pickCount: number; label: string | null }>;
   }>;
 };
 
@@ -324,6 +338,7 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
         const dayKey = targetKey('routine_day', day.id);
         const totals = totalsByDay.get(day.id);
         const dayEstimateSec = dayEstimateById.get(day.id) ?? 0;
+        const poolById = new Map(day.pools.map((p) => [p.id, p]));
         return (
           <section key={day.id} className="border-b border-ink-800 px-5 py-5" id={`day-${day.id}`}>
             <div className="flex items-baseline justify-between gap-2 mb-3">
@@ -352,6 +367,13 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                 </div>
               ) : null}
             </div>
+
+            {/* Owner's "frame the day" note, read-only. */}
+            {day.description && (
+              <p className="text-[12px] text-ink-400 italic font-display whitespace-pre-wrap break-words leading-snug mb-3">
+                {day.description}
+              </p>
+            )}
 
             {/* Day-level controls */}
             <div className="flex flex-wrap items-center gap-1.5 mb-3">
@@ -398,6 +420,14 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                 const reactionCount = reactionsByTarget.totals.get(exKey) ?? 0;
                 const region = regionForExercise(ex);
                 const regionStyles = REGION_STYLES[region];
+                // Pool membership, mirroring the owner's read-only treatment:
+                // members are a contiguous run, so the first one (by position)
+                // is the "lead" and carries the "do X of N" badge; the rest get
+                // a plain pool tag. Both fall back to the pool's label.
+                const pool = ex.poolId ? poolById.get(ex.poolId) : undefined;
+                const poolMembers = pool ? day.exercises.filter((e) => e.poolId === pool.id) : [];
+                const isPoolLead =
+                  pool && poolMembers[0]?.templateExerciseId === ex.templateExerciseId;
                 return (
                   <li
                     key={ex.templateExerciseId}
@@ -415,6 +445,31 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                           <VideoLink url={ex.videoUrl} exerciseName={ex.name} size={13} />
                         </div>
                         <div className="text-xs text-ink-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                          {isPoolLead && pool && (
+                            <span
+                              className="inline-flex items-center gap-1.5 shrink-0"
+                              title="A pool — at the workout the owner picks which members to do."
+                            >
+                              {pool.label?.trim() && (
+                                <span className="text-[9px] tracking-wide uppercase accent-text inline-flex items-center gap-1">
+                                  <Layers size={8} />
+                                  {pool.label.trim()}
+                                </span>
+                              )}
+                              <span className="text-[10px] accent-text font-mono">
+                                do {pool.pickCount} of {poolMembers.length}
+                              </span>
+                            </span>
+                          )}
+                          {pool && !isPoolLead && (
+                            <span
+                              className="text-[9px] tracking-wide uppercase accent-text border accent-border rounded-full px-1.5 py-0.5 inline-flex items-center gap-1 shrink-0"
+                              title="Part of a pool — the owner picks which members to do."
+                            >
+                              <Layers size={8} />
+                              {pool.label?.trim() || 'pool'}
+                            </span>
+                          )}
                           <MuscleChips
                             primary={ex.primaryMuscles}
                             secondary={ex.secondaryMuscles}
@@ -433,6 +488,14 @@ export function ShareView({ token, reviewer, routine, activity, library, coverag
                         count={reactionCount}
                       />
                     </div>
+
+                    {/* Owner's per-exercise note (form cue, modification), read-only. */}
+                    {ex.note && (
+                      <p className="mt-2 text-[12px] text-ink-300 italic font-display whitespace-pre-wrap break-words leading-snug flex items-start gap-1.5">
+                        <StickyNote size={12} className="shrink-0 mt-0.5 text-ink-500" />
+                        <span>{ex.note}</span>
+                      </p>
+                    )}
 
                     {/* Sticker chips (advisory quick-suggestions) */}
                     <StickerStrip
