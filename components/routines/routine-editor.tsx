@@ -138,7 +138,8 @@ type DayExercise = {
 };
 
 // A "pick X of N" group on a day. Members are the DayExercises whose poolId
-// matches `id`. Live mode only — draft days carry an empty pools array.
+// matches `id`. Both editors populate this — live from the server, draft from
+// local state.
 type PoolClient = {
   id: string;
   pickCount: number;
@@ -327,6 +328,17 @@ type DraftExercise = {
   plannedReps: number | null;
   plannedSeconds: number | null;
   note: string | null;
+  // Client-side pool membership — null for a fixed slot, otherwise the owning
+  // DraftPool's clientId. Mapped to a real TemplatePool member on save.
+  poolId: string | null;
+};
+
+// A draft "pick X of N" pool. Mirrors the live PoolClient but with a
+// client-generated id; its members are the DraftExercises whose poolId matches.
+type DraftPool = {
+  id: string;
+  pickCount: number;
+  label: string | null;
 };
 
 type DraftDay = {
@@ -338,28 +350,58 @@ type DraftDay = {
   description: string | null;
   weekday: number | null;
   exercises: DraftExercise[];
+  pools: DraftPool[];
 };
+
+// Client-only id for draft days and pools — swapped for server ids on save.
+function newClientId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random()}`;
+}
 
 function makeDraftDay(initial: Partial<DraftDay> = {}): DraftDay {
   return {
-    clientId:
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`,
+    clientId: newClientId(),
     name: '',
     label: null,
     description: null,
     weekday: null,
     exercises: [],
+    pools: [],
     ...initial,
   };
+}
+
+// Keep a draft day's pools coherent after a structural edit: dissolve any pool
+// that's dropped below two members (its survivors revert to fixed slots) and
+// clamp each surviving pool's pickCount to its member count. Mirrors the
+// server's reconcilePoolAfterMemberLoss so draft and live behave the same.
+function normalizeDraftDayPools(d: DraftDay): DraftDay {
+  const memberCount = new Map<string, number>();
+  for (const e of d.exercises) {
+    if (e.poolId) memberCount.set(e.poolId, (memberCount.get(e.poolId) ?? 0) + 1);
+  }
+  const surviving = new Set(
+    d.pools.filter((p) => (memberCount.get(p.id) ?? 0) >= 2).map((p) => p.id),
+  );
+  const exercises = d.exercises.map((e) =>
+    e.poolId && !surviving.has(e.poolId) ? { ...e, poolId: null } : e,
+  );
+  const pools = d.pools
+    .filter((p) => surviving.has(p.id))
+    .map((p) => {
+      const clamped = Math.min(Math.max(p.pickCount, 1), memberCount.get(p.id) ?? 1);
+      return clamped === p.pickCount ? p : { ...p, pickCount: clamped };
+    });
+  return { ...d, exercises, pools };
 }
 
 // Local-storage key for the work-in-progress Custom draft. Single-user app,
 // single browser per user — no userId namespace needed. Versioned so a future
 // change to DraftDay shape can invalidate stale localStorage cleanly without
 // trying to migrate.
-const DRAFT_STORAGE_KEY = 'starter-routine-draft.v1';
+const DRAFT_STORAGE_KEY = 'starter-routine-draft.v2';
 
 // Separate key for the preset picker's filter state (focus tab, days,
 // duration, equipment Set). Kept separate from the draft so the user's
@@ -417,7 +459,10 @@ function DraftEditor({
   const [scheduleStyle, setScheduleStyle] = useState<ScheduleStyle>('sequence');
   const [days, setDays] = useState<DraftDay[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [pickerForDayClientId, setPickerForDayClientId] = useState<string | null>(null);
+  // Picker context — `poolId` set means picked exercises join that pool instead
+  // of becoming fixed slots (opened from a pool's "add" button). Mirrors the
+  // live editor's pickerCtx.
+  const [pickerCtx, setPickerCtx] = useState<{ dayClientId: string; poolId?: string } | null>(null);
 
   // Effective rest per exercise (override → global default), built once per
   // render. Surfaced to DayCard so per-day and per-module time estimates use
@@ -475,10 +520,15 @@ function DraftEditor({
         if (Array.isArray(parsed)) {
           const validIds = new Set(availableExercisesRef.current.map((e) => e.id));
           const cleaned = parsed
-            .map((d) => ({
-              ...d,
-              exercises: (d.exercises ?? []).filter((e) => validIds.has(e.exerciseId)),
-            }))
+            .map((d) =>
+              // Drop exercises whose id no longer resolves, then re-normalize
+              // pools so any pool that lost members below two dissolves cleanly.
+              normalizeDraftDayPools({
+                ...d,
+                exercises: (d.exercises ?? []).filter((e) => validIds.has(e.exerciseId)),
+                pools: Array.isArray(d.pools) ? d.pools : [],
+              }),
+            )
             .filter((d) => d.exercises.length > 0);
           setDays(cleaned);
         }
@@ -604,13 +654,11 @@ function DraftEditor({
                 equipment: e.equipment,
                 primaryMuscles: e.primaryMuscles,
                 secondaryMuscles: e.secondaryMuscles,
-                // Draft days don't support pools — they're created on a live
-                // routine day. Everything here is a fixed slot.
-                poolId: null,
+                poolId: dx.poolId,
               };
             })
             .filter((x): x is DayExercise => x !== null),
-          pools: [],
+          pools: d.pools,
         };
       }),
     [days, exerciseById],
@@ -632,6 +680,13 @@ function DraftEditor({
 
   function updateDay(clientId: string, patch: (d: DraftDay) => DraftDay) {
     setDays((prev) => prev.map((d) => (d.clientId === clientId ? patch(d) : d)));
+  }
+
+  // Pool callbacks identify the pool by id but not its day (live mode looks the
+  // pool up server-side). Draft pool ids are unique across days, so find the
+  // owning day and patch it.
+  function updateDayByPool(poolId: string, patch: (d: DraftDay) => DraftDay) {
+    setDays((prev) => prev.map((d) => (d.pools.some((p) => p.id === poolId) ? patch(d) : d)));
   }
 
   function addDay(weekday: number | null = null) {
@@ -686,6 +741,7 @@ function DraftEditor({
         plannedReps: null,
         plannedSeconds: null,
         note: null,
+        poolId: null,
       }));
     updateDay(clientId, (d) => ({
       ...d,
@@ -693,6 +749,9 @@ function DraftEditor({
       // typed something already.
       name: d.name.trim() ? d.name : tpl.name,
       exercises: seeded,
+      // Seeding replaces the exercise list, so any existing pools (which point
+      // at the now-gone exercises) go with it.
+      pools: [],
     }));
   }
 
@@ -729,6 +788,19 @@ function DraftEditor({
               plannedSeconds: e.plannedSeconds,
               note: e.note,
             })),
+            // Each pool becomes a TemplatePool over its members (named by
+            // exerciseId, resolved server-side). Omit entirely when the day
+            // has none so the payload stays clean.
+            pools:
+              d.pools.length > 0
+                ? d.pools.map((p) => ({
+                    pickCount: p.pickCount,
+                    label: p.label ?? undefined,
+                    exerciseIds: d.exercises
+                      .filter((e) => e.poolId === p.id)
+                      .map((e) => e.exerciseId),
+                  }))
+                : undefined,
             label: d.label?.trim() || undefined,
             description: d.description ?? undefined,
             weekday: scheduleStyle === 'weekday' ? d.weekday : null,
@@ -831,18 +903,17 @@ function DraftEditor({
           plannedReps: e.plannedReps,
           plannedSeconds: e.plannedSeconds,
           note: null,
+          poolId: null,
         });
       }
       return {
-        clientId:
-          typeof crypto !== 'undefined' && 'randomUUID' in crypto
-            ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random()}`,
+        clientId: newClientId(),
         name: d.name,
         label: null as string | null,
         description: null as string | null,
         weekday: null as number | null,
         exercises,
+        pools: [] as DraftPool[],
       };
     });
     setDays(newDays);
@@ -916,7 +987,10 @@ function DraftEditor({
                 if (!source) return;
                 // Same semantics as the server-side duplicate: clone everything
                 // except the weekday pin so the user can place the duplicate
-                // explicitly. Fresh clientId keeps React keys unique.
+                // explicitly. Fresh clientId keeps React keys unique; fresh pool
+                // ids (remapped onto the cloned members) keep the copy's pools
+                // independent of the source's.
+                const poolIdMap = new Map(source.pools.map((p) => [p.id, newClientId()] as const));
                 setDays((prev) => [
                   ...prev,
                   makeDraftDay({
@@ -924,20 +998,28 @@ function DraftEditor({
                     label: source.label,
                     description: source.description,
                     weekday: null,
-                    exercises: source.exercises.map((e) => ({ ...e })),
+                    exercises: source.exercises.map((e) => ({
+                      ...e,
+                      poolId: e.poolId ? (poolIdMap.get(e.poolId) ?? null) : null,
+                    })),
+                    pools: source.pools.map((p) => ({ ...p, id: poolIdMap.get(p.id) ?? p.id })),
                   }),
                 ]);
               }}
               onRemoveDay={removeDay}
               onMoveDay={moveDay}
               onSwapDayPositions={swapDayPositions}
-              onOpenExercisePicker={setPickerForDayClientId}
+              onOpenExercisePicker={(id, poolId) => setPickerCtx({ dayClientId: id, poolId })}
               onSeedFromTemplate={seedFromTemplate}
               onRemoveExercise={(id, exerciseId) =>
-                updateDay(id, (d) => ({
-                  ...d,
-                  exercises: d.exercises.filter((e) => e.exerciseId !== exerciseId),
-                }))
+                updateDay(id, (d) =>
+                  // Removing a pooled member can drop its pool below two, so
+                  // re-normalize rather than just filtering the list.
+                  normalizeDraftDayPools({
+                    ...d,
+                    exercises: d.exercises.filter((e) => e.exerciseId !== exerciseId),
+                  }),
+                )
               }
               onReorderExercise={(id, exerciseId, direction) =>
                 updateDay(id, (d) => {
@@ -959,10 +1041,56 @@ function DraftEditor({
                 }))
               }
               onSwapExercise={null}
-              onCreatePool={null}
-              onUpdatePool={null}
-              onDeletePool={null}
-              onRemoveFromPool={null}
+              onCreatePool={(dayClientId, exerciseIds, pickCount) =>
+                updateDay(dayClientId, (d) => {
+                  const poolId = newClientId();
+                  const members = new Set(exerciseIds);
+                  return normalizeDraftDayPools({
+                    ...d,
+                    exercises: d.exercises.map((e) =>
+                      members.has(e.exerciseId) && e.poolId === null ? { ...e, poolId } : e,
+                    ),
+                    pools: [...d.pools, { id: poolId, pickCount, label: null }],
+                  });
+                })
+              }
+              onUpdatePool={(poolId, patch) =>
+                updateDayByPool(poolId, (d) =>
+                  normalizeDraftDayPools({
+                    ...d,
+                    pools: d.pools.map((p) =>
+                      p.id === poolId
+                        ? {
+                            ...p,
+                            ...(patch.pickCount !== undefined
+                              ? { pickCount: patch.pickCount }
+                              : {}),
+                            ...(patch.label !== undefined ? { label: patch.label } : {}),
+                          }
+                        : p,
+                    ),
+                  }),
+                )
+              }
+              onDeletePool={(poolId) =>
+                updateDayByPool(poolId, (d) =>
+                  // Drop the pool; normalize then ungroups its orphaned members
+                  // back to fixed slots.
+                  normalizeDraftDayPools({ ...d, pools: d.pools.filter((p) => p.id !== poolId) }),
+                )
+              }
+              onRemoveFromPool={(poolId, exerciseId) =>
+                updateDayByPool(poolId, (d) =>
+                  normalizeDraftDayPools({
+                    ...d,
+                    exercises: d.exercises.map((e) =>
+                      e.exerciseId === exerciseId && e.poolId === poolId
+                        ? { ...e, poolId: null }
+                        : e,
+                    ),
+                  }),
+                )
+              }
             />
           </div>
 
@@ -993,11 +1121,12 @@ function DraftEditor({
         </>
       )}
 
-      {pickerForDayClientId &&
+      {pickerCtx &&
         (() => {
-          const draftDay = days.find((d) => d.clientId === pickerForDayClientId);
+          const draftDay = days.find((d) => d.clientId === pickerCtx.dayClientId);
           if (!draftDay) return null;
           const excludeIds = new Set(draftDay.exercises.map((e) => e.exerciseId));
+          const targetPoolId = pickerCtx.poolId;
           return (
             <ExercisePicker
               availableExercises={availableExercises}
@@ -1005,7 +1134,7 @@ function DraftEditor({
               gapMuscles={gapMuscles}
               usageStats={usageStatsMap}
               onPickMany={(exerciseIds) => {
-                setPickerForDayClientId(null);
+                setPickerCtx(null);
                 updateDay(draftDay.clientId, (d) => {
                   const have = new Set(d.exercises.map((e) => e.exerciseId));
                   const additions: DraftExercise[] = exerciseIds
@@ -1016,11 +1145,48 @@ function DraftEditor({
                       plannedReps: null,
                       plannedSeconds: null,
                       note: null,
+                      // Opened from a pool's "add" button → join that pool;
+                      // otherwise a plain fixed slot.
+                      poolId: targetPoolId ?? null,
                     }));
-                  return { ...d, exercises: [...d.exercises, ...additions] };
+                  return normalizeDraftDayPools({
+                    ...d,
+                    exercises: [...d.exercises, ...additions],
+                  });
                 });
               }}
-              onClose={() => setPickerForDayClientId(null)}
+              onPickAsPool={
+                // Mirror live: only offer "add as a new pool" when adding fresh
+                // slots, not when the picker was opened to extend an existing
+                // pool (those go through onPickMany with the pool id).
+                targetPoolId
+                  ? undefined
+                  : (exerciseIds) => {
+                      setPickerCtx(null);
+                      updateDay(draftDay.clientId, (d) => {
+                        const have = new Set(d.exercises.map((e) => e.exerciseId));
+                        const poolId = newClientId();
+                        const additions: DraftExercise[] = exerciseIds
+                          .filter((id) => !have.has(id))
+                          .map((exerciseId) => ({
+                            exerciseId,
+                            plannedSets: null,
+                            plannedReps: null,
+                            plannedSeconds: null,
+                            note: null,
+                            poolId,
+                          }));
+                        // New pools default to "do 1"; the user adjusts from the
+                        // pool's stepper afterward.
+                        return normalizeDraftDayPools({
+                          ...d,
+                          exercises: [...d.exercises, ...additions],
+                          pools: [...d.pools, { id: poolId, pickCount: 1, label: null }],
+                        });
+                      });
+                    }
+              }
+              onClose={() => setPickerCtx(null)}
               onCreateCustom={handleCreateCustom}
               onDeleteCustom={(exerciseId) => {
                 startTransition(async () => {
@@ -1956,8 +2122,8 @@ type DaysSectionProps = {
   onUpdateExercisePlanned: (id: string, exerciseId: string, patch: PlannedPatch) => void;
   // Null disables the swap button (e.g. in draft mode).
   onSwapExercise: ((id: string, exerciseId: string) => void) | null;
-  // Pool editing — live mode only. Draft mode passes null (pools are created
-  // on a saved routine day); DayCard hides all pool UI when these are null.
+  // Pool editing. Non-null in both editors (live → server actions, draft →
+  // local-state updates); DayCard hides all pool UI when these are null.
   onCreatePool: ((dayId: string, exerciseIds: string[], pickCount: number) => void) | null;
   onUpdatePool:
     | ((poolId: string, patch: { pickCount?: number; label?: string | null }) => void)
@@ -2169,7 +2335,7 @@ type DayCardProps = {
   onReorderExercise: (id: string, exerciseId: string, direction: 'up' | 'down') => void;
   onUpdateExercisePlanned: (id: string, exerciseId: string, patch: PlannedPatch) => void;
   onSwapExercise: ((id: string, exerciseId: string) => void) | null;
-  // Pool editing — null in draft mode (DayCard hides the pool UI then).
+  // Pool editing. Non-null in both editors; DayCard hides the pool UI when null.
   onCreatePool: ((dayId: string, exerciseIds: string[], pickCount: number) => void) | null;
   onUpdatePool:
     | ((poolId: string, patch: { pickCount?: number; label?: string | null }) => void)
@@ -2217,8 +2383,8 @@ function DayCard({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(day.name);
   // Pool grouping mode: when active, the exercise rows show checkboxes and a
-  // footer bar commits the selection into a new pool. Live mode only — gated
-  // on onCreatePool being non-null. selection holds exerciseIds.
+  // footer bar commits the selection into a new pool. Gated on onCreatePool
+  // being non-null (both editors wire it). selection holds exerciseIds.
   const poolsEnabled = onCreatePool !== null;
   const [grouping, setGrouping] = useState(false);
   const [poolSelection, setPoolSelection] = useState<Set<string>>(new Set());
@@ -2399,8 +2565,8 @@ function DayCard({
             </button>
           )}
           {/* Group-into-pool toggle: enters a selection mode on the exercise
-              rows. Live mode only, and only when there are 2+ fixed slots to
-              group. */}
+              rows. Shown only when pools are enabled and there are 2+ fixed
+              slots to group. */}
           {poolsEnabled && day.exercises.some((e) => e.poolId === null) && (
             <button
               onClick={() => (grouping ? resetGrouping() : setGrouping(true))}
@@ -3085,7 +3251,7 @@ function PoolPickCountStepper({
   );
 }
 
-// Pool management panel for a day — one PoolRow per pool. Live mode only.
+// Pool management panel for a day — one PoolRow per pool.
 function DayPools({
   day,
   isPending,

@@ -1686,15 +1686,44 @@ type FreshTemplateExerciseInput = {
   note?: string | null;
 };
 
+// A "pick X of N" pool to create alongside a fresh template. Members are named
+// by exerciseId and must be a disjoint subset of the template's exercise list.
+type FreshTemplatePoolInput = {
+  pickCount: number;
+  label: string | null;
+  exerciseIds: string[];
+};
+
 async function freshTemplateForUser(
   tx: Tx,
   userId: string,
   desiredName: string,
   exercises: FreshTemplateExerciseInput[],
+  pools: FreshTemplatePoolInput[] = [],
 ): Promise<string> {
   const exerciseIds = exercises.map((e) => e.exerciseId);
   if (new Set(exerciseIds).size !== exerciseIds.length) {
     throw new ExpectedError("A day can't list the same exercise twice.");
+  }
+  // Pool members must be exercises on this day, and each can sit in at most one
+  // pool. Mirrors createTemplatePool's invariants for the from-scratch path.
+  if (pools.length > 0) {
+    const onDay = new Set(exerciseIds);
+    const pooled = new Set<string>();
+    for (const pool of pools) {
+      if (pool.exerciseIds.length < 2) {
+        throw new ExpectedError('A pool needs at least two exercises.');
+      }
+      for (const id of pool.exerciseIds) {
+        if (!onDay.has(id)) {
+          throw new ExpectedError('A pool can only group exercises on the same day.');
+        }
+        if (pooled.has(id)) {
+          throw new ExpectedError("An exercise can't be in two pools.");
+        }
+        pooled.add(id);
+      }
+    }
   }
   if (exerciseIds.length > 0) {
     const accessible = await tx.exercise.findMany({
@@ -1728,6 +1757,36 @@ async function freshTemplateForUser(
       },
     },
   });
+
+  // Group the requested members into pools. The nested create above doesn't
+  // hand back child ids, so re-read the rows and tag members by exerciseId.
+  // Same shape as createTemplatePool, then normalize so each pool's members
+  // form a contiguous position run.
+  if (pools.length > 0) {
+    const rows = await tx.templateExercise.findMany({
+      where: { templateId: created.id },
+      select: { id: true, exerciseId: true },
+    });
+    const rowIdByExerciseId = new Map(rows.map((r) => [r.exerciseId, r.id]));
+    for (const pool of pools) {
+      const poolRow = await tx.templatePool.create({
+        data: {
+          templateId: created.id,
+          pickCount: Math.min(Math.max(pool.pickCount, 1), pool.exerciseIds.length),
+          label: pool.label,
+        },
+      });
+      const memberRowIds = pool.exerciseIds
+        .map((id) => rowIdByExerciseId.get(id))
+        .filter((id): id is string => id !== undefined);
+      await tx.templateExercise.updateMany({
+        where: { id: { in: memberRowIds } },
+        data: { poolId: poolRow.id },
+      });
+    }
+    await normalizeTemplatePositions(tx, created.id);
+  }
+
   return created.id;
 }
 
@@ -3146,6 +3205,20 @@ const DraftDaySchema = z
     // sets/reps per exercise). Both empty = blank day.
     seedTemplateId: z.string().min(1).optional(),
     exercises: z.array(DraftExerciseSchema).max(50).optional(),
+    // "Pick X of N" pools over this day's exercises. Members are named by
+    // exerciseId and must be a disjoint subset of `exercises`; freshTemplateForUser
+    // enforces that. Only meaningful with the exercises path — a seeded day
+    // carries no pools.
+    pools: z
+      .array(
+        z.object({
+          pickCount: z.number().int().min(1).max(50),
+          label: TemplatePoolLabelSchema,
+          exerciseIds: z.array(z.string().min(1)).min(2).max(50),
+        }),
+      )
+      .max(20)
+      .optional(),
     label: z.string().trim().max(60).optional(),
     description: z
       .string()
@@ -3158,9 +3231,16 @@ const DraftDaySchema = z
       .optional(),
     weekday: z.number().int().min(0).max(6).nullable().optional(),
   })
-  .refine((d) => !(d.seedTemplateId && d.exercises && d.exercises.length > 0), {
-    message: 'Pass either seedTemplateId or exercises, not both.',
-  });
+  .refine(
+    (d) =>
+      !(
+        d.seedTemplateId &&
+        ((d.exercises && d.exercises.length > 0) || (d.pools && d.pools.length > 0))
+      ),
+    {
+      message: 'Pass either seedTemplateId or exercises, not both.',
+    },
+  );
 
 const CreateRoutineFromDraftSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -3240,6 +3320,11 @@ export const createRoutineFromDraft = withLogging(
                 plannedReps: e.plannedReps ?? null,
                 plannedSeconds: e.plannedSeconds ?? null,
                 note: e.note ?? null,
+              })),
+              (day.pools ?? []).map((p) => ({
+                pickCount: p.pickCount,
+                label: p.label ?? null,
+                exerciseIds: p.exerciseIds,
               })),
             );
 
